@@ -85,9 +85,24 @@ This SDK targets a released version of the Exchange API spec, pinned in
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest          # tests (HMAC scheme, parsing, error mapping) — mocked, no network
+pytest          # tests — unit (mocked httpx) + an integration smoke over a
+                # real loopback socket; both run offline, no network
 ruff check .    # lint
 mypy src        # types
+```
+
+`tests/test_integration_smoke.py` stands up a real local HTTP server and drives
+a real `Client` against it (`fetch_markets` / `fetch_ticker` / `health_check`),
+mirroring the Rust SDK's wiremock tests — so the transport, URL building, and
+JSON decoding are exercised end to end, not just the mock layer.
+
+For an opt-in round-trip against a **live** gateway (read-only, unauthenticated;
+not run in CI), use the smoke script:
+
+```bash
+python scripts/smoke.py                  # stable public gateway
+python scripts/smoke.py --network beta
+python scripts/smoke.py --base-url http://localhost:9090
 ```
 
 ## License
