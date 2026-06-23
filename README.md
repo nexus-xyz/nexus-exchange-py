@@ -1,5 +1,7 @@
 # nexus-exchange (Python)
 
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](#license)
+
 Official Python SDK for the [Nexus Exchange](https://exchange.nexus.xyz) API — a
 thin, typed wrapper over the public REST API.
 
