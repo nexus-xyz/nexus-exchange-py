@@ -43,8 +43,9 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | Health — `GET /health` | ✅ implemented |
 | HMAC request signing (the plumbing for authed calls) | ✅ implemented |
 | Error taxonomy (terminal vs transient) | ✅ implemented |
-| Typed account / positions / balances reads | ❌ not yet |
-| Trading — place / cancel orders | ❌ not yet |
+| Account / positions / fills reads (signed) — `GET /account`, `/positions`, `/fills` | ✅ implemented |
+| Trading — place / cancel orders (signed) — `POST /orders`, `DELETE /orders/{id}`, `DELETE /orders` | ✅ implemented |
+| Open orders (signed) — `GET /orders` | ✅ implemented |
 | Deposits / withdrawals | ❌ not yet |
 | WebSocket streaming | ❌ not yet |
 | Pagination helpers | ❌ not yet |
@@ -67,8 +68,24 @@ signed with the hex-decoded secret, sent as `x-signature` with `x-api-key` and
 `x-timestamp`. Pass `api_key` / `api_secret` to `Client`. Note the default public
 gateway proxies signed calls to the *site* account; to act as a specific account,
 point `base_url` (or `Network.LOCAL`) at a direct gateway that verifies client
-HMAC. Typed authed methods are not built yet — `Client._request(..., signed=True)`
-is the low-level escape hatch in the meantime.
+HMAC.
+
+```python
+from nexus_exchange import Client, Network
+
+with Client(Network.LOCAL, api_key="nx_...", api_secret="<hex secret>") as client:
+    account = client.fetch_account()
+    positions = client.fetch_positions()
+
+    resp = client.place_order(
+        "BTC-USDX-PERP", side="Buy", quantity="0.1", price="65000"
+    )
+    order_id = resp["order"]["id"]
+    client.cancel_order(order_id)
+```
+
+Anything not yet wrapped is still reachable through the low-level escape hatch
+`Client._request(method, path, ..., signed=True)`.
 
 ## API version
 

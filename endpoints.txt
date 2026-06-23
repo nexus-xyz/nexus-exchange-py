@@ -5,3 +5,10 @@
 GET /markets/summary
 GET /markets/{market_id}/ticker
 GET /health
+GET /account
+GET /positions
+GET /orders
+GET /fills
+POST /orders
+DELETE /orders/{order_id}
+DELETE /orders

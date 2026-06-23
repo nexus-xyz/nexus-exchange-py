@@ -48,3 +48,11 @@ class TransportError(NexusExchangeError):
 
 class MissingCredentialsError(NexusExchangeError):
     """A signed request was attempted without ``api_key`` / ``api_secret``."""
+
+
+class InvalidRequestError(NexusExchangeError):
+    """A request was rejected client-side before being sent (terminal).
+
+    Mirrors the Rust SDK's ``Error::InvalidRequest`` — e.g. a limit order with
+    no price, or an empty order id.
+    """

@@ -1,10 +1,10 @@
 """Synchronous HTTP client for the Nexus Exchange API.
 
 A thin wrapper mirroring the Rust SDK: typed methods over the REST routes, HMAC
-request signing, one error hierarchy. **Experimental** — only the public
-market-data endpoints are implemented today (see the README's support table).
-The request/signing plumbing already supports authenticated calls, but typed
-account/trading methods are not built yet.
+request signing, one error hierarchy. **Experimental** — coverage trails the
+Rust SDK and grows incrementally (see the README's support table). Public
+market-data reads need no credentials; the authenticated account and trading
+methods sign every request via the shared plumbing.
 """
 
 from __future__ import annotations
@@ -19,8 +19,8 @@ from urllib.parse import quote
 
 import httpx
 
-from .errors import ApiError, MissingCredentialsError, TransportError
-from .types import Market, Ticker
+from .errors import ApiError, InvalidRequestError, MissingCredentialsError, TransportError
+from .types import Account, Fill, Market, Order, Position, Ticker
 
 __all__ = ["Client", "Network", "DEFAULT_USER_AGENT"]
 
@@ -108,6 +108,98 @@ class Client:
         """``GET /health`` — gateway health."""
         data = self._request("GET", "/health")
         return data if isinstance(data, dict) else {"status": data}
+
+    # -- account & positions (signed) ------------------------------------
+    def fetch_account(self) -> Account:
+        """``GET /account`` (signed) — balance and collateral summary."""
+        data = self._request("GET", "/account", signed=True)
+        return Account.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_positions(self) -> list[Position]:
+        """``GET /positions`` (signed) — open positions for the account."""
+        data = self._request("GET", "/positions", signed=True)
+        rows = data if isinstance(data, list) else data.get("positions", [])
+        return [Position.from_dict(p) for p in rows]
+
+    def fetch_fills(self) -> list[Fill]:
+        """``GET /fills`` (signed) — recent private trade executions."""
+        data = self._request("GET", "/fills", signed=True)
+        rows = data if isinstance(data, list) else data.get("fills", [])
+        return [Fill.from_dict(f) for f in rows]
+
+    # -- trading (signed) -------------------------------------------------
+    def fetch_open_orders(self) -> list[Order]:
+        """``GET /orders`` (signed) — open orders for the account."""
+        data = self._request("GET", "/orders", signed=True)
+        rows = data if isinstance(data, list) else data.get("orders", [])
+        return [Order.from_dict(o) for o in rows]
+
+    def place_order(
+        self,
+        market_id: str,
+        side: str,
+        quantity: str,
+        *,
+        order_type: str = "Limit",
+        price: str | None = None,
+        time_in_force: str | None = None,
+        reduce_only: bool | None = None,
+        client_order_id: str | None = None,
+    ) -> dict[str, Any]:
+        """``POST /orders`` (signed) — place a single order.
+
+        Mirrors the Rust SDK's request shape: ``side`` is ``Buy``/``Sell``,
+        ``order_type`` is ``Limit``/``Market``, ``time_in_force`` is
+        ``GTC``/``IOC``/``FOK``. Monetary fields (``price``, ``quantity``) are
+        decimal strings, matching the Rust SDK's wire encoding. A limit order
+        without a ``price`` is rejected before sending.
+
+        Defaults follow the Rust constructors: a market order uses ``IOC``, a
+        limit order ``GTC``, when ``time_in_force`` is not given.
+        """
+        if not market_id:
+            raise InvalidRequestError("market_id must not be empty")
+        is_limit = order_type.lower() == "limit"
+        if is_limit and price is None:
+            raise InvalidRequestError("a limit order requires a price")
+        if time_in_force is None:
+            time_in_force = "GTC" if is_limit else "IOC"
+
+        body: dict[str, Any] = {
+            "market_id": market_id,
+            "side": side,
+            "order_type": order_type,
+            "quantity": quantity,
+            "time_in_force": time_in_force,
+        }
+        if price is not None:
+            body["price"] = price
+        if reduce_only is not None:
+            body["reduce_only"] = reduce_only
+        if client_order_id is not None:
+            body["client_order_id"] = client_order_id
+
+        data = self._request("POST", "/orders", body=body, signed=True)
+        return data if isinstance(data, dict) else {"result": data}
+
+    def cancel_order(self, order_id: str, market_id: str | None = None) -> dict[str, Any]:
+        """``DELETE /orders/{order_id}`` (signed) — cancel one order.
+
+        ``market_id``, when given, is sent as a query parameter (some gateways
+        require it to route the cancel). It is included in the signed canonical
+        string so ``signed === sent``.
+        """
+        if not order_id:
+            raise InvalidRequestError("order_id must not be empty")
+        query = f"market_id={quote(market_id, safe='')}" if market_id else ""
+        path = f"/orders/{quote(order_id, safe='')}"
+        data = self._request("DELETE", path, query=query, signed=True)
+        return data if isinstance(data, dict) else {"result": data}
+
+    def cancel_all(self) -> dict[str, Any]:
+        """``DELETE /orders`` (signed) — cancel all open orders."""
+        data = self._request("DELETE", "/orders", signed=True)
+        return data if isinstance(data, dict) else {"result": data}
 
     # -- request plumbing -------------------------------------------------
     def _sign(self, method: str, path: str, query: str, body: bytes) -> dict[str, str]:
