@@ -23,27 +23,31 @@ import pytest
 
 from nexus_exchange import ApiError, Client
 
-# Canned, spec-shaped (v0.3.5) response bodies, keyed by request path.
-_MARKETS_SUMMARY = [
+# Canned, spec-shaped (v0.4.0) response bodies, keyed by request path.
+_MARKETS = [
     {
         "market_id": "BTC-USDX-PERP",
-        "mark_price": 50011.6,
-        "volume_24h": 1350000.0,
-        "trade_count": 982,
-        "status": "active",
-        "halt_reason": None,
-        "halted_at": None,
-        "adl_event_count": 0,
+        "base_asset": "BTC",
+        "quote_asset": "USDX",
+        "tick_size": "0.1",
+        "lot_size": "0.001",
+        "min_order_size": "0.001",
+        "max_order_size": "100",
+        "initial_margin_rate": "0.05",
+        "maintenance_margin_rate": "0.03",
+        "max_leverage": 20,
     },
     {
         "market_id": "ETH-USDX-PERP",
-        "mark_price": 3120.0,
-        "volume_24h": 42000.0,
-        "trade_count": 51,
-        "status": "active",
-        "halt_reason": None,
-        "halted_at": None,
-        "adl_event_count": 0,
+        "base_asset": "ETH",
+        "quote_asset": "USDX",
+        "tick_size": "0.01",
+        "lot_size": "0.01",
+        "min_order_size": "0.01",
+        "max_order_size": "1000",
+        "initial_margin_rate": "0.05",
+        "maintenance_margin_rate": "0.03",
+        "max_leverage": 20,
     },
 ]
 
@@ -82,8 +86,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802 (http.server dispatch name)
-        if self.path == "/markets/summary":
-            self._send(200, _MARKETS_SUMMARY)
+        if self.path == "/markets":
+            self._send(200, _MARKETS)
         elif self.path == "/markets/BTC-USDX-PERP/ticker":
             self._send(200, _TICKER)
         elif self.path == "/health":
@@ -111,20 +115,21 @@ def live_client() -> Iterator[Client]:
 def test_fetch_markets_round_trip(live_client: Client) -> None:
     markets = live_client.fetch_markets()
     assert [m.market_id for m in markets] == ["BTC-USDX-PERP", "ETH-USDX-PERP"]
-    # The full payload survives the round trip onto .raw.
-    assert markets[0].raw["status"] == "active"
+    # Trading-rule decimals decode exactly off the real socket round trip.
+    assert str(markets[0].tick_size) == "0.1"
+    assert markets[0].max_leverage == 20
 
 
 def test_fetch_ticker_round_trip(live_client: Client) -> None:
     ticker = live_client.fetch_ticker("BTC-USDX-PERP")
     assert ticker.market_id == "BTC-USDX-PERP"
-    assert ticker.raw["last"] == 50011.6
+    assert ticker.last is not None and str(ticker.last) == "50011.6"
 
 
 def test_health_check_round_trip(live_client: Client) -> None:
     health = live_client.health_check()
-    assert health["connected"] is True
-    assert health["events_received"] == 12345
+    assert health.connected is True
+    assert health.events_received == 12345
 
 
 def test_unknown_route_raises_api_error(live_client: Client) -> None:
