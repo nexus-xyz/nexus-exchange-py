@@ -1,0 +1,7 @@
+# Exchange API endpoints this SDK implements with a typed method, against the
+# spec version pinned in .api-version. Hand-maintained source of truth for
+# coverage. The Python SDK deliberately trails the Rust SDK — add a line when
+# you add a typed method. Format: METHOD /path  ({market_id} = placeholder)
+GET /markets/summary
+GET /markets/{market_id}/ticker
+GET /health
