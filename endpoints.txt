@@ -5,3 +5,5 @@
 GET /markets/summary
 GET /markets/{market_id}/ticker
 GET /health
+POST /auth/login
+POST /agents/register

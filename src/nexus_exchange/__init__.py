@@ -11,9 +11,18 @@ See the README for the current support table. Quick start::
 
 from __future__ import annotations
 
+from .auth import (
+    SIGN_IN_MESSAGE,
+    AgentRegistered,
+    AgentRegistration,
+    EthSigner,
+    LoginRequest,
+    LoginResponse,
+)
 from .client import DEFAULT_USER_AGENT, Client, Network
 from .errors import (
     ApiError,
+    AuthError,
     MissingCredentialsError,
     NexusExchangeError,
     TransportError,
@@ -27,8 +36,15 @@ __all__ = [
     "Network",
     "Market",
     "Ticker",
+    "EthSigner",
+    "LoginRequest",
+    "AgentRegistration",
+    "LoginResponse",
+    "AgentRegistered",
+    "SIGN_IN_MESSAGE",
     "NexusExchangeError",
     "ApiError",
+    "AuthError",
     "TransportError",
     "MissingCredentialsError",
     "DEFAULT_USER_AGENT",

@@ -19,6 +19,7 @@ from urllib.parse import quote
 
 import httpx
 
+from .auth import AgentRegistered, AgentRegistration, EthSigner, LoginResponse
 from .errors import ApiError, MissingCredentialsError, TransportError
 from .types import Market, Ticker
 
@@ -108,6 +109,28 @@ class Client:
         """``GET /health`` — gateway health."""
         data = self._request("GET", "/health")
         return data if isinstance(data, dict) else {"status": data}
+
+    # -- wallet-signed auth ----------------------------------------------
+    def sign_in(self, signer: EthSigner) -> LoginResponse:
+        """``POST /auth/login`` — EIP-191 session login.
+
+        Signs the fixed login message with ``signer`` and posts the result.
+        Unauthenticated: the EIP-191 signature in the body is the credential.
+        Returns the session token (treat as secret) and the recovered address.
+        """
+        body = signer.sign_in().to_dict()
+        data = self._request("POST", "/auth/login", body=body)
+        return LoginResponse.from_dict(data if isinstance(data, dict) else {})
+
+    def register_agent(self, registration: AgentRegistration) -> AgentRegistered:
+        """``POST /agents/register`` — EIP-712 agent-key registration.
+
+        Takes a pre-signed body from
+        :meth:`EthSigner.register_agent <nexus_exchange.EthSigner.register_agent>`.
+        Unauthenticated: the EIP-712 signature in the body is the credential.
+        """
+        data = self._request("POST", "/agents/register", body=registration.to_dict())
+        return AgentRegistered.from_dict(data if isinstance(data, dict) else {})
 
     # -- request plumbing -------------------------------------------------
     def _sign(self, method: str, path: str, query: str, body: bytes) -> dict[str, str]:
