@@ -112,9 +112,7 @@ class Client:
     # -- request plumbing -------------------------------------------------
     def _sign(self, method: str, path: str, query: str, body: bytes) -> dict[str, str]:
         if not self._api_key or not self._api_secret:
-            raise MissingCredentialsError(
-                "signed request requires api_key and api_secret"
-            )
+            raise MissingCredentialsError("signed request requires api_key and api_secret")
         ts = str(int(time.time() * 1000))
         body_hash = hashlib.sha256(body).hexdigest()
         # Canonical string the indexer verifies (auth.rs::verify_hmac):

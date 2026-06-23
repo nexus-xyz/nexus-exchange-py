@@ -1,6 +1,6 @@
 """List markets and fetch a ticker against the public gateway — no credentials.
 
-    python examples/public_market_data.py
+python examples/public_market_data.py
 """
 
 from __future__ import annotations
