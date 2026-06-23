@@ -78,7 +78,7 @@ This SDK targets a released version of the Exchange API spec, pinned in
 
 | SDK version | API spec |
 |---|---|
-| `0.1.x` | `v0.3.5` |
+| `0.1.x` | `v0.4.0` |
 
 ## Development
 
