@@ -1,10 +1,10 @@
 """Synchronous HTTP client for the Nexus Exchange API.
 
 A thin wrapper mirroring the Rust SDK: typed methods over the REST routes, HMAC
-request signing, one error hierarchy. **Experimental** — only the public
-market-data endpoints are implemented today (see the README's support table).
-The request/signing plumbing already supports authenticated calls, but typed
-account/trading methods are not built yet.
+request signing, one error hierarchy. **Experimental.** Covers the public
+market-data routes plus the signed account / trading / admin routes (see the
+README's support table). WebSocket streaming and the wallet-signed auth flows
+(EIP-191 login, EIP-712 agent registration) are not built yet.
 """
 
 from __future__ import annotations
@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import time
+from decimal import Decimal
 from enum import Enum
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -21,7 +22,13 @@ import httpx
 
 from .errors import ApiError, MissingCredentialsError, TransportError
 from .types import (
+    AccountSummary,
     AdlEvent,
+    AgentInfo,
+    ApiKeyInfo,
+    CreditResult,
+    DepositResult,
+    Fill,
     FundingSample,
     HealthStatus,
     Market,
@@ -29,9 +36,17 @@ from .types import (
     MarketSummary,
     MarkPrice,
     Ohlcv,
+    Order,
     OrderBook,
+    OrderRequest,
+    OrderResponse,
+    Position,
+    RateLimitStatus,
     Ticker,
+    TierOverride,
     Trade,
+    Withdrawal,
+    WsToken,
 )
 
 __all__ = ["Client", "Network", "DEFAULT_USER_AGENT"]
@@ -204,6 +219,125 @@ class Client:
         """``GET /health`` — indexer health/status snapshot."""
         data = self._request("GET", "/health")
         return HealthStatus.from_dict(data if isinstance(data, dict) else {})
+
+    # -- account (signed reads) ------------------------------------------
+    def fetch_balance(self) -> AccountSummary:
+        """``GET /account`` — balance and collateral summary. Requires credentials."""
+        data = self._request("GET", "/account", signed=True)
+        return AccountSummary.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_positions(self) -> list[Position]:
+        """``GET /positions`` — open positions. Requires credentials."""
+        data = self._request("GET", "/positions", signed=True)
+        return [Position.from_dict(p) for p in (data if isinstance(data, list) else [])]
+
+    def fetch_my_trades(self) -> list[Fill]:
+        """``GET /fills`` — recent fills (private executions). Requires credentials."""
+        data = self._request("GET", "/fills", signed=True)
+        return [Fill.from_dict(f) for f in (data if isinstance(data, list) else [])]
+
+    def fetch_withdrawals(self) -> list[Withdrawal]:
+        """``GET /withdrawals`` — withdrawal history. Requires credentials."""
+        data = self._request("GET", "/withdrawals", signed=True)
+        return [Withdrawal.from_dict(w) for w in (data if isinstance(data, list) else [])]
+
+    def fetch_rate_limit_status(self) -> RateLimitStatus:
+        """``GET /account/rate-limit`` — the caller's rate-limit status.
+
+        Requires credentials. Does not consume a rate-limit token.
+        """
+        data = self._request("GET", "/account/rate-limit", signed=True)
+        return RateLimitStatus.from_dict(data if isinstance(data, dict) else {})
+
+    # -- account (signed writes) -----------------------------------------
+    def deposit(self, amount: Decimal | str) -> DepositResult:
+        """``POST /account/deposit`` — deposit USDX collateral. Requires credentials."""
+        data = self._request("POST", "/account/deposit", body={"amount": str(amount)}, signed=True)
+        return DepositResult.from_dict(data if isinstance(data, dict) else {})
+
+    def claim_credit(self, amount: Decimal | str | None = None) -> CreditResult:
+        """``POST /account/credit`` — claim synthetic (testnet) USDX from the faucet.
+
+        Omit ``amount`` to claim the full remaining daily allowance. Requires
+        credentials.
+        """
+        body = {} if amount is None else {"amount": str(amount)}
+        data = self._request("POST", "/account/credit", body=body, signed=True)
+        return CreditResult.from_dict(data if isinstance(data, dict) else {})
+
+    # -- orders (signed) -------------------------------------------------
+    def create_order(self, order: OrderRequest) -> OrderResponse:
+        """``POST /orders`` — place a single order. Requires credentials."""
+        data = self._request("POST", "/orders", body=order.to_payload(), signed=True)
+        return OrderResponse.from_dict(data if isinstance(data, dict) else {})
+
+    def create_orders(self, orders: list[OrderRequest]) -> Any:
+        """``POST /orders/batch`` — submit a batch of orders (sequential, non-atomic).
+
+        Requires credentials. The per-order result array is untyped in the spec,
+        so the raw decoded JSON is returned.
+        """
+        body = [o.to_payload() for o in orders]
+        return self._request("POST", "/orders/batch", body=body, signed=True)
+
+    def fetch_open_orders(self) -> list[Order]:
+        """``GET /orders`` — open orders for the account. Requires credentials."""
+        data = self._request("GET", "/orders", signed=True)
+        return [Order.from_dict(o) for o in (data if isinstance(data, list) else [])]
+
+    def fetch_order(self, order_id: str) -> Order:
+        """``GET /orders/{order_id}`` — fetch a single order. Requires credentials."""
+        data = self._request("GET", f"/orders/{quote(order_id, safe='')}", signed=True)
+        return Order.from_dict(data if isinstance(data, dict) else {})
+
+    def cancel_order(self, order_id: str) -> Any:
+        """``DELETE /orders/{order_id}`` — cancel a single order. Requires credentials."""
+        return self._request("DELETE", f"/orders/{quote(order_id, safe='')}", signed=True)
+
+    def cancel_all_orders(self) -> Any:
+        """``DELETE /orders`` — cancel all open orders. Requires credentials."""
+        return self._request("DELETE", "/orders", signed=True)
+
+    # -- keys / agents (signed) ------------------------------------------
+    def fetch_api_keys(self) -> list[ApiKeyInfo]:
+        """``GET /keys`` — API keys for the session. Requires credentials."""
+        data = self._request("GET", "/keys", signed=True)
+        return [ApiKeyInfo.from_dict(k) for k in (data if isinstance(data, list) else [])]
+
+    def delete_api_key(self, key_id: str) -> Any:
+        """``DELETE /keys/{key_id}`` — delete an API key you own. Requires credentials."""
+        return self._request("DELETE", f"/keys/{quote(key_id, safe='')}", signed=True)
+
+    def fetch_agents(self) -> list[AgentInfo]:
+        """``GET /agents`` — non-expired agent keys. Requires credentials."""
+        data = self._request("GET", "/agents", signed=True)
+        return [AgentInfo.from_dict(a) for a in (data if isinstance(data, list) else [])]
+
+    def revoke_agent(self, address: str) -> Any:
+        """``DELETE /agents/{address}`` — revoke an agent key. Requires credentials."""
+        return self._request("DELETE", f"/agents/{quote(address, safe='')}", signed=True)
+
+    def mint_web_socket_token(self) -> WsToken:
+        """``POST /ws-tokens`` — mint a single-use WebSocket token. Requires credentials."""
+        data = self._request("POST", "/ws-tokens", signed=True)
+        return WsToken.from_dict(data if isinstance(data, dict) else {})
+
+    # -- admin (signed) --------------------------------------------------
+    def set_account_tier(self, address: str, tier: str) -> TierOverride:
+        """``PUT /admin/tiers`` — set an account's rate-limit tier. Requires admin creds."""
+        data = self._request(
+            "PUT", "/admin/tiers", body={"address": address, "tier": tier}, signed=True
+        )
+        return TierOverride.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_tier_overrides(self) -> list[TierOverride]:
+        """``GET /admin/tiers`` — list tier overrides. Requires admin creds."""
+        data = self._request("GET", "/admin/tiers", signed=True)
+        return [TierOverride.from_dict(t) for t in (data if isinstance(data, list) else [])]
+
+    def reset_account_tier(self, address: str) -> Any:
+        """``DELETE /admin/tiers/{address}`` — reset to default tier. Requires admin creds."""
+        return self._request("DELETE", f"/admin/tiers/{quote(address, safe='')}", signed=True)
 
     # -- request plumbing -------------------------------------------------
     def _sign(self, method: str, path: str, query: str, body: bytes) -> dict[str, str]:

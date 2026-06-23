@@ -385,3 +385,365 @@ class HealthStatus:
             health=d.get("health"),
             raw=d,
         )
+
+
+# -- account & trading models ---------------------------------------------
+
+
+@dataclass(frozen=True)
+class Position:
+    """An open position. All money fields are exact decimal strings."""
+
+    market_id: str
+    side: str
+    size: Decimal
+    entry_price: Decimal
+    unrealized_pnl: Decimal
+    realized_pnl: Decimal
+    liquidation_price: Decimal | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Position:
+        return cls(
+            market_id=str(d.get("market_id", "")),
+            side=str(d.get("side", "")),
+            size=to_decimal(d.get("size", 0)),
+            entry_price=to_decimal(d.get("entry_price", 0)),
+            unrealized_pnl=to_decimal(d.get("unrealized_pnl", 0)),
+            realized_pnl=to_decimal(d.get("realized_pnl", 0)),
+            # Not `required` in the spec — absent in flat / cross-margin states.
+            liquidation_price=opt_decimal(d.get("liquidation_price")),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class AccountSummary:
+    """Account balance and collateral summary (``GET /account``)."""
+
+    balance: Decimal
+    collateral: Decimal
+    equity: Decimal
+    available_margin: Decimal
+    positions: list[Position]
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> AccountSummary:
+        return cls(
+            balance=to_decimal(d.get("balance", 0)),
+            collateral=to_decimal(d.get("collateral", 0)),
+            equity=to_decimal(d.get("equity", 0)),
+            available_margin=to_decimal(d.get("available_margin", 0)),
+            positions=[Position.from_dict(p) for p in d.get("positions", [])],
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class Fill:
+    """A fill (private trade execution) for the authenticated account.
+
+    Figures are exact decimal strings — the authoritative record of your own
+    executions, unlike the JSON-number :class:`Trade`.
+    """
+
+    id: str
+    order_id: str
+    market_id: str
+    side: str
+    price: Decimal
+    size: Decimal
+    fee: Decimal
+    taker_or_maker: str | None
+    timestamp: int
+    is_liquidation: bool
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Fill:
+        return cls(
+            id=str(d.get("id", "")),
+            order_id=str(d.get("order_id", "")),
+            market_id=str(d.get("market_id", "")),
+            side=str(d.get("side", "")),
+            price=to_decimal(d.get("price", 0)),
+            size=to_decimal(d.get("size", 0)),
+            fee=to_decimal(d.get("fee", 0)),
+            taker_or_maker=d.get("taker_or_maker"),
+            timestamp=int(d.get("timestamp", 0)),
+            is_liquidation=bool(d.get("is_liquidation", False)),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class Order:
+    """An order record. The spec marks every non-identity field optional, so
+    those default rather than fail the decode when omitted."""
+
+    id: str
+    market_id: str
+    account_id: str
+    side: str
+    order_type: str
+    price: Decimal | None
+    quantity: Decimal
+    filled_qty: Decimal
+    status: str
+    time_in_force: str
+    created_at: int
+    updated_at: int
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Order:
+        return cls(
+            id=str(d.get("id", "")),
+            market_id=str(d.get("market_id", "")),
+            account_id=str(d.get("account_id", "")),
+            side=str(d.get("side", "")),
+            order_type=str(d.get("order_type", "")),
+            price=opt_decimal(d.get("price")),
+            quantity=to_decimal(d.get("quantity", 0)),
+            filled_qty=to_decimal(d.get("filled_qty", 0)),
+            status=str(d.get("status", "")),
+            time_in_force=str(d.get("time_in_force", "")),
+            created_at=int(d.get("created_at", 0)),
+            updated_at=int(d.get("updated_at", 0)),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class OrderResponse:
+    """Response to ``POST /orders``: the resulting order plus immediate fills.
+
+    ``fills`` is currently untyped in the spec, so it stays as raw dicts.
+    """
+
+    order: Order
+    fills: list[dict[str, Any]]
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> OrderResponse:
+        return cls(
+            order=Order.from_dict(d.get("order", {})),
+            fills=list(d.get("fills", [])),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class OrderRequest:
+    """A new-order request (``POST /orders``).
+
+    Build with :meth:`limit` or :meth:`market`. ``price`` / ``reduce_only`` are
+    omitted from the wire payload when ``None``.
+    """
+
+    market_id: str
+    side: str
+    order_type: str
+    quantity: Decimal
+    time_in_force: str
+    price: Decimal | None = None
+    reduce_only: bool | None = None
+
+    @classmethod
+    def limit(
+        cls,
+        market_id: str,
+        side: str,
+        price: Decimal,
+        quantity: Decimal,
+        time_in_force: str = "GTC",
+        *,
+        reduce_only: bool | None = None,
+    ) -> OrderRequest:
+        return cls(
+            market_id=market_id,
+            side=side,
+            order_type="Limit",
+            quantity=quantity,
+            time_in_force=time_in_force,
+            price=price,
+            reduce_only=reduce_only,
+        )
+
+    @classmethod
+    def market(
+        cls,
+        market_id: str,
+        side: str,
+        quantity: Decimal,
+        *,
+        reduce_only: bool | None = None,
+    ) -> OrderRequest:
+        return cls(
+            market_id=market_id,
+            side=side,
+            order_type="Market",
+            quantity=quantity,
+            time_in_force="IOC",
+            price=None,
+            reduce_only=reduce_only,
+        )
+
+    def to_payload(self) -> dict[str, Any]:
+        """Serialize to the JSON body the API expects. Money is sent as strings;
+        ``price`` / ``reduce_only`` are omitted when ``None``."""
+        body: dict[str, Any] = {
+            "market_id": self.market_id,
+            "side": self.side,
+            "order_type": self.order_type,
+            "quantity": str(self.quantity),
+            "time_in_force": self.time_in_force,
+        }
+        if self.price is not None:
+            body["price"] = str(self.price)
+        if self.reduce_only is not None:
+            body["reduce_only"] = self.reduce_only
+        return body
+
+
+@dataclass(frozen=True)
+class DepositResult:
+    """Result of a deposit (``POST /account/deposit``)."""
+
+    balance: Decimal
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> DepositResult:
+        return cls(balance=to_decimal(d.get("balance", 0)), raw=d)
+
+
+@dataclass(frozen=True)
+class CreditResult:
+    """Result of claiming synthetic USDX credit (``POST /account/credit``)."""
+
+    amount: Decimal
+    credited_today: Decimal
+    daily_limit: Decimal
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> CreditResult:
+        return cls(
+            amount=to_decimal(d.get("amount", 0)),
+            credited_today=to_decimal(d.get("credited_today", 0)),
+            daily_limit=to_decimal(d.get("daily_limit", 0)),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class Withdrawal:
+    """A withdrawal record (``GET /withdrawals``)."""
+
+    id: str
+    amount: Decimal
+    timestamp: int
+    status: str
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> Withdrawal:
+        return cls(
+            id=str(d.get("id", "")),
+            amount=to_decimal(d.get("amount", 0)),
+            timestamp=int(d.get("timestamp", 0)),
+            status=str(d.get("status", "")),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class RateLimitStatus:
+    """The caller's rate-limit status (``GET /account/rate-limit``).
+
+    A token bucket: ``limit`` is the per-second ceiling / burst capacity,
+    ``remaining`` the tokens available now, ``reset_at_ms`` when it refills
+    (``0`` when full). All three are ``None`` for the unlimited tier.
+    """
+
+    tier: str
+    limit: int | None
+    remaining: int | None
+    reset_at_ms: int | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> RateLimitStatus:
+        return cls(
+            tier=str(d.get("tier", "")),
+            limit=d.get("limit"),
+            remaining=d.get("remaining"),
+            reset_at_ms=d.get("reset_at_ms"),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class ApiKeyInfo:
+    """An API key associated with the authenticated session (``GET /keys``)."""
+
+    key_id: str
+    tier: str
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ApiKeyInfo:
+        return cls(key_id=str(d.get("key_id", "")), tier=str(d.get("tier", "")), raw=d)
+
+
+@dataclass(frozen=True)
+class AgentInfo:
+    """A registered agent key for the authenticated wallet (``GET /agents``).
+
+    The wire sends camelCase; optional fields default rather than fail.
+    """
+
+    address: str
+    expires_at: int
+    registered_at: int
+    label: str | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> AgentInfo:
+        return cls(
+            address=str(d.get("address", "")),
+            expires_at=int(d.get("expiresAt", 0)),
+            registered_at=int(d.get("registeredAt", 0)),
+            label=d.get("label"),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class TierOverride:
+    """An account rate-limit tier override (``/admin/tiers``)."""
+
+    address: str
+    tier: str
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> TierOverride:
+        return cls(address=str(d.get("address", "")), tier=str(d.get("tier", "")), raw=d)
+
+
+@dataclass(frozen=True)
+class WsToken:
+    """A freshly minted, single-use WebSocket token (``POST /ws-tokens``)."""
+
+    token: str
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> WsToken:
+        return cls(token=str(d.get("token", "")), raw=d)
