@@ -50,7 +50,34 @@ jobs:
         with:
           python-version: ${{ matrix.python-version }}
       - run: pip install -e ".[dev]"
-      - run: pytest -q
+      # The 3.12 job reports coverage (machine-readable, additive — no fail-under
+      # gate). Other matrix versions keep running plain tests.
+      - name: Run tests
+        if: matrix.python-version != '3.12'
+        run: pytest -q
+      - name: Run tests with coverage
+        if: matrix.python-version == '3.12'
+        run: pytest -q --cov=nexus_exchange --cov-report=term-missing --cov-report=xml
+      - name: Emit coverage percentage
+        if: matrix.python-version == '3.12'
+        run: |
+          set -euo pipefail
+          pct="$(python -c "import xml.etree.ElementTree as ET; print(round(float(ET.parse('coverage.xml').getroot().get('line-rate')) * 100, 2))")"
+          echo "Test coverage: ${pct}%"
+          echo "coverage_pct=${pct}" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Test coverage"
+            echo ""
+            echo "**${pct}%** line coverage (\`nexus_exchange\`, Python 3.12)"
+          } >> "$GITHUB_STEP_SUMMARY"
+        id: coverage
+      - name: Upload coverage report
+        if: matrix.python-version == '3.12'
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml
+          if-no-files-found: error
 
   drift:
     runs-on: ubuntu-latest
