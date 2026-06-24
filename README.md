@@ -79,7 +79,7 @@ is the low-level escape hatch in the meantime.
 
 <!-- api-version-sync:start -->
 
-Currently targets Exchange API spec **`v0.3.5`**.
+Currently targets Exchange API spec **`v0.4.0`**.
 
 <!-- api-version-sync:end -->
 
