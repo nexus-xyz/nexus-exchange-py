@@ -50,13 +50,14 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | Wallet-signed auth — `sign_in` (EIP-191) + `register_agent` (EIP-712) | ✅ implemented |
 | Error taxonomy (terminal vs transient) | ✅ implemented |
 | Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
-| Typed account / positions / balances reads | ❌ not yet |
-| Trading — place / cancel orders | ❌ not yet |
-| Deposits / withdrawals | ❌ not yet |
+| Account reads — `GET /account`, `/positions`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
+| Trading — `POST /orders`, `/orders/batch`; `GET /orders`, `/orders/{id}`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
+| Funds — `POST /account/deposit`, `/account/credit` | ✅ implemented |
+| Keys / agents / WS token — `/keys`, `/agents`, `POST /ws-tokens` | ✅ implemented |
+| Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
 | WebSocket streaming | ❌ not yet |
 | Pagination helpers | ❌ not yet |
 | Rate-limit-aware retry (`429` / `Retry-After`, token bucket) | ❌ not yet |
-| Agent-key registration (wallet → agent) | ✅ implemented |
 | OAuth auth | ❌ not yet |
 
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
