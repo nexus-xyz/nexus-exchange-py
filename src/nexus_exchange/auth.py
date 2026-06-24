@@ -121,9 +121,13 @@ class LoginResponse:
 
     ``token`` is a session bearer token — treat it as a secret. Pass it to a
     future session-authenticated client; this SDK does not store it for you.
+
+    The :meth:`__repr__` redacts ``token`` (shown as ``<redacted>``) so the
+    bearer token can't leak into logs or tracebacks if the object is printed.
+    Read ``.token`` explicitly to use it.
     """
 
-    #: Session bearer token (64-char hex).
+    #: Session bearer token (64-char hex). Redacted in ``repr``.
     token: str
     #: Ethereum address recovered from the login signature (``0x``-prefixed).
     address: str
@@ -131,6 +135,12 @@ class LoginResponse:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> LoginResponse:
         return cls(token=str(d.get("token", "")), address=str(d.get("address", "")))
+
+    def __repr__(self) -> str:
+        # Never render the session token. Show a redaction marker (rather than
+        # omitting the field) so it's clear a token is present but withheld.
+        token = "<redacted>" if self.token else "''"
+        return f"LoginResponse(token={token}, address={self.address!r})"
 
 
 @dataclass(frozen=True)
@@ -166,9 +176,26 @@ def _parse_address(s: str) -> bytes:
 
 
 def _u256(value: int) -> bytes:
-    """Left-pad a non-negative integer into a 32-byte big-endian ABI word."""
+    """Left-pad a non-negative integer into a 32-byte big-endian ABI word.
+
+    For the ``uint256`` ABI type (here, the domain ``chainId``).
+    """
     if value < 0 or value >= 1 << 256:
         raise AuthError("value out of uint256 range")
+    return value.to_bytes(32, "big")
+
+
+def _u64(value: int) -> bytes:
+    """Encode a ``uint64`` value as a 32-byte big-endian ABI word.
+
+    ABI-encodes integers in a full 32-byte word regardless of declared width, so
+    the wire bytes match ``_u256`` for in-range values. The tighter ``uint64``
+    bound is enforced here so an out-of-range ``expiresAt``/``nonce`` is caught
+    at the library boundary (matching the EIP-712 ``uint64`` field types) rather
+    than being silently truncated by the server.
+    """
+    if value < 0 or value >= 1 << 64:
+        raise AuthError("value out of uint64 range")
     return value.to_bytes(32, "big")
 
 
@@ -193,7 +220,7 @@ def _register_agent_digest(agent: bytes, expires_at: int, nonce: int, chain_id: 
     )
 
     struct_type_hash = keccak(text="RegisterAgent(address agent,uint64 expiresAt,uint64 nonce)")
-    hash_struct = keccak(struct_type_hash + _address_word(agent) + _u256(expires_at) + _u256(nonce))
+    hash_struct = keccak(struct_type_hash + _address_word(agent) + _u64(expires_at) + _u64(nonce))
 
     return keccak(b"\x19\x01" + domain_separator + hash_struct)
 
@@ -238,6 +265,12 @@ class EthSigner:
             raise AuthError("invalid secp256k1 private key") from exc
         address = key.public_key.to_canonical_address()
         return cls(key, address)
+
+    def __repr__(self) -> str:
+        # Explicit, key-free repr: only the public address is shown so the
+        # private key can never leak into logs/tracebacks. (eth_keys.PrivateKey
+        # already suppresses its own repr, but this makes the intent explicit.)
+        return f"EthSigner(address={self.address!r})"
 
     @property
     def address(self) -> str:

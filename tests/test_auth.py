@@ -26,7 +26,7 @@ from nexus_exchange import (
     LoginResponse,
     Network,
 )
-from nexus_exchange.auth import _parse_address, _register_agent_digest
+from nexus_exchange.auth import _parse_address, _register_agent_digest, _u64
 
 # Canonical Hardhat/ethers account #0: a published, externally verifiable
 # keypair. Pins keccak + pubkey-to-address derivation against a known vector.
@@ -141,6 +141,52 @@ def test_register_agent_recovers_to_wallet() -> None:
 def test_register_agent_rejects_bad_agent_address() -> None:
     with pytest.raises(AuthError):
         signer().register_agent("0x1234", 1, 1, 1)
+
+
+# -- uint64 field bounds (expiresAt / nonce) ------------------------------
+
+
+def test_u64_encodes_full_32_byte_word() -> None:
+    # uint64 is ABI-encoded into a full 32-byte word, so in-range values match
+    # the uint256 encoding byte-for-byte (the digest KATs above stay valid).
+    assert _u64(KAT_EXPIRES_MS) == KAT_EXPIRES_MS.to_bytes(32, "big")
+    assert len(_u64(1)) == 32
+
+
+def test_u64_rejects_out_of_range() -> None:
+    # expiresAt / nonce are uint64 in the EIP-712 type; values >= 2**64 must be
+    # rejected at the library boundary rather than silently truncated.
+    with pytest.raises(AuthError):
+        _u64(1 << 64)
+    with pytest.raises(AuthError):
+        _u64(-1)
+
+
+def test_register_agent_rejects_out_of_range_expiry_or_nonce() -> None:
+    with pytest.raises(AuthError):
+        signer().register_agent(KAT_AGENT, 1 << 64, KAT_NONCE, KAT_CHAIN_ID)
+    with pytest.raises(AuthError):
+        signer().register_agent(KAT_AGENT, KAT_EXPIRES_MS, 1 << 64, KAT_CHAIN_ID)
+
+
+# -- credential-safe reprs ------------------------------------------------
+
+
+def test_eth_signer_repr_hides_key_material() -> None:
+    r = repr(signer())
+    assert r == f"EthSigner(address={TEST_ADDR!r})"
+    # The private key must never appear in the repr.
+    assert TEST_KEY not in r
+
+
+def test_login_response_repr_redacts_token() -> None:
+    resp = LoginResponse(token="a1b2c3d4e5f6deadbeef", address=TEST_ADDR)
+    r = repr(resp)
+    assert "a1b2c3d4e5f6deadbeef" not in r
+    assert "<redacted>" in r
+    assert TEST_ADDR in r
+    # The token is still accessible when explicitly read.
+    assert resp.token == "a1b2c3d4e5f6deadbeef"
 
 
 def test_label_omitted_when_none() -> None:
