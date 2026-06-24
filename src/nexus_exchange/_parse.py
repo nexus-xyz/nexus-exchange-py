@@ -21,11 +21,18 @@ from typing import Any
 
 
 def to_decimal(value: Any) -> Decimal:
-    """Coerce a wire value (string or JSON number) to an exact ``Decimal``.
+    """Coerce a *required* wire value (string or JSON number) to an exact ``Decimal``.
 
     Goes through ``str`` so a JSON number decodes to the decimal text that
     arrived, not an ``f64`` round-trip.
+
+    Raises :class:`ValueError` when ``value`` is ``None`` — i.e. the field was
+    missing or sent ``null``. Required money fields must not silently default to
+    ``Decimal(0)``, since that would mask a malformed payload. Use
+    :func:`opt_decimal` for fields that are legitimately optional/nullable.
     """
+    if value is None:
+        raise ValueError("required decimal field is missing or null")
     if isinstance(value, Decimal):
         return value
     return Decimal(str(value))
@@ -40,3 +47,21 @@ def opt_decimal(value: Any) -> Decimal | None:
     if value is None:
         return None
     return to_decimal(value)
+
+
+def opt_int(value: Any) -> int | None:
+    """Coerce an optional/nullable integer field; ``None`` (or missing) stays ``None``.
+
+    For fields like a CCXT ``timestamp`` that a venue may legitimately omit, so
+    callers can tell "no timestamp" from a real ``0``.
+    """
+    if value is None:
+        return None
+    return int(value)
+
+
+def opt_str(value: Any) -> str | None:
+    """Coerce an optional/nullable string field; ``None`` (or missing) stays ``None``."""
+    if value is None:
+        return None
+    return str(value)

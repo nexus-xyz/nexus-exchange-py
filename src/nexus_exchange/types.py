@@ -14,7 +14,7 @@ from dataclasses import dataclass
 from decimal import Decimal
 from typing import Any
 
-from ._parse import opt_decimal, to_decimal
+from ._parse import opt_decimal, opt_int, opt_str, to_decimal
 
 
 @dataclass(frozen=True)
@@ -42,12 +42,12 @@ class Market:
             market_id=str(d.get("market_id", "")),
             base_asset=str(d.get("base_asset", "")),
             quote_asset=str(d.get("quote_asset", "")),
-            tick_size=to_decimal(d.get("tick_size", 0)),
-            lot_size=to_decimal(d.get("lot_size", 0)),
-            min_order_size=to_decimal(d.get("min_order_size", 0)),
-            max_order_size=to_decimal(d.get("max_order_size", 0)),
-            initial_margin_rate=to_decimal(d.get("initial_margin_rate", 0)),
-            maintenance_margin_rate=to_decimal(d.get("maintenance_margin_rate", 0)),
+            tick_size=to_decimal(d.get("tick_size")),
+            lot_size=to_decimal(d.get("lot_size")),
+            min_order_size=to_decimal(d.get("min_order_size")),
+            max_order_size=to_decimal(d.get("max_order_size")),
+            initial_margin_rate=to_decimal(d.get("initial_margin_rate")),
+            maintenance_margin_rate=to_decimal(d.get("maintenance_margin_rate")),
             max_leverage=int(d.get("max_leverage", 0)),
             raw=d,
         )
@@ -78,7 +78,7 @@ class MarketSummary:
         return cls(
             market_id=str(d.get("market_id", "")),
             last_trade_price=opt_decimal(d.get("last_trade_price")),
-            volume_24h=to_decimal(d.get("volume_24h", 0)),
+            volume_24h=to_decimal(d.get("volume_24h")),
             trade_count=int(d.get("trade_count", 0)),
             status=str(d.get("status", "")),
             halt_reason=d.get("halt_reason"),
@@ -116,12 +116,15 @@ class Ticker:
     """CCXT-style ticker for a market (``GET /markets/{id}/ticker``).
 
     Price/volume fields arrive as JSON numbers and are ``None`` when the API
-    sends ``null`` (e.g. no trades yet). The full payload is kept on ``info``.
+    sends ``null`` (e.g. no trades yet). ``timestamp``/``datetime`` are likewise
+    ``None`` when the venue omits them (matching CCXT, which leaves them unset
+    on markets with no trades) rather than defaulting to ``0``/``""``. The full
+    payload is kept on ``info``.
     """
 
     symbol: str
-    timestamp: int
-    datetime: str
+    timestamp: int | None
+    datetime: str | None
     high: Decimal | None
     low: Decimal | None
     bid: Decimal | None
@@ -148,8 +151,8 @@ class Ticker:
     def from_dict(cls, d: dict[str, Any]) -> Ticker:
         return cls(
             symbol=str(d.get("symbol", "")),
-            timestamp=int(d.get("timestamp", 0)),
-            datetime=str(d.get("datetime", "")),
+            timestamp=opt_int(d.get("timestamp")),
+            datetime=opt_str(d.get("datetime")),
             high=opt_decimal(d.get("high")),
             low=opt_decimal(d.get("low")),
             bid=opt_decimal(d.get("bid")),
@@ -231,9 +234,9 @@ class Trade:
         return cls(
             id=str(d.get("id", "")),
             symbol=str(d.get("symbol", "")),
-            price=to_decimal(d.get("price", 0)),
-            amount=to_decimal(d.get("amount", 0)),
-            cost=to_decimal(d.get("cost", 0)),
+            price=to_decimal(d.get("price")),
+            amount=to_decimal(d.get("amount")),
+            cost=to_decimal(d.get("cost")),
             side=str(d.get("side", "")),
             timestamp=int(d.get("timestamp", 0)),
             datetime=str(d.get("datetime", "")),
@@ -284,10 +287,10 @@ class FundingSample:
     def from_dict(cls, d: dict[str, Any]) -> FundingSample:
         return cls(
             timestamp=int(d.get("timestamp", 0)),
-            funding_rate=to_decimal(d.get("funding_rate", 0)),
-            premium_index=to_decimal(d.get("premium_index", 0)),
-            mark_price=to_decimal(d.get("mark_price", 0)),
-            oracle_price=to_decimal(d.get("oracle_price", 0)),
+            funding_rate=to_decimal(d.get("funding_rate")),
+            premium_index=to_decimal(d.get("premium_index")),
+            mark_price=to_decimal(d.get("mark_price")),
+            oracle_price=to_decimal(d.get("oracle_price")),
             raw=d,
         )
 
@@ -304,7 +307,7 @@ class MarkPrice:
     def from_dict(cls, d: dict[str, Any]) -> MarkPrice:
         return cls(
             market_id=str(d.get("market_id", "")),
-            mark_price=to_decimal(d.get("mark_price", 0)),
+            mark_price=to_decimal(d.get("mark_price")),
             raw=d,
         )
 
@@ -322,8 +325,8 @@ class AdlClosure:
     def from_dict(cls, d: dict[str, Any]) -> AdlClosure:
         return cls(
             account_id=str(d.get("account_id", "")),
-            position_closed=to_decimal(d.get("position_closed", 0)),
-            settlement_amount=to_decimal(d.get("settlement_amount", 0)),
+            position_closed=to_decimal(d.get("position_closed")),
+            settlement_amount=to_decimal(d.get("settlement_amount")),
             raw=d,
         )
 
@@ -349,8 +352,8 @@ class AdlEvent:
         return cls(
             market_id=str(d.get("market_id", "")),
             target_account=str(d.get("target_account", "")),
-            bankruptcy_price=to_decimal(d.get("bankruptcy_price", 0)),
-            bad_debt_absorbed_by_fund=to_decimal(d.get("bad_debt_absorbed_by_fund", 0)),
+            bankruptcy_price=to_decimal(d.get("bankruptcy_price")),
+            bad_debt_absorbed_by_fund=to_decimal(d.get("bad_debt_absorbed_by_fund")),
             counterparty_closures=[
                 AdlClosure.from_dict(c) for c in d.get("counterparty_closures", [])
             ],
