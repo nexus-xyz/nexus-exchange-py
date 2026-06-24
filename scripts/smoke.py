@@ -35,10 +35,10 @@ def run(network: Network, base_url: str | None) -> int:
         else:
             first = markets[0].market_id
             ticker = client.fetch_ticker(first)
-            print(f"  fetch_ticker({first}): {len(ticker.raw)} fields")
+            print(f"  fetch_ticker({first}): last={ticker.last} mark={ticker.mark_price}")
 
         health = client.health_check()
-        print(f"  health_check: {health}")
+        print(f"  health_check: connected={health.connected} uptime={health.uptime_seconds}s")
     print("smoke: OK")
     return 0
 
