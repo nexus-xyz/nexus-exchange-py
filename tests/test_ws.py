@@ -100,9 +100,17 @@ def test_decode_each_frame_kind() -> None:
     assert isinstance(unsub, Unsubscribed)
 
     oos = ws_mod._decode(
-        json.dumps({"op": "out_of_sync", "channel": "trades", "market": "BTC", "oldest_seq": 200})
+        json.dumps(
+            {
+                "op": "out_of_sync",
+                "channel": "candles",
+                "market": "BTC",
+                "interval": "1m",
+                "oldest_seq": 200,
+            }
+        )
     )
-    assert isinstance(oos, OutOfSync) and oos.oldest_seq == 200
+    assert isinstance(oos, OutOfSync) and oos.oldest_seq == 200 and oos.interval == "1m"
 
     err = ws_mod._decode(json.dumps({"op": "error", "message": "no such market"}))
     assert isinstance(err, ServerError) and err.message == "no such market"
@@ -120,6 +128,9 @@ def test_cursor_advance_and_reset() -> None:
     oos = OutOfSync(channel="trades", market="BTC")
     assert ws_mod._cursor_reset(oos) == ("trades", "BTC", None)
     assert ws_mod._cursor_advance(oos) is None
+    # Candles cursors are keyed by interval, so the reset key must carry it.
+    oos_candles = OutOfSync(channel="candles", market="BTC", interval="1m")
+    assert ws_mod._cursor_reset(oos_candles) == ("candles", "BTC", "1m")
 
 
 # --------------------------------------------------------------------------
@@ -363,3 +374,106 @@ async def test_close_is_idempotent_and_ends_iteration(monkeypatch) -> None:
         assert isinstance(first, Event)
     # Exiting the context closed the stream; a second close must not raise.
     await stream.close()
+
+
+def _candle_ev(seq: int, market: str = "BTC-USDX-PERP", interval: str = "1m") -> str:
+    return json.dumps(
+        {
+            "op": "event",
+            "channel": "candles",
+            "market": market,
+            "interval": interval,
+            "seq": seq,
+            "payload": {},
+        }
+    )
+
+
+async def test_close_does_not_raise_when_queue_full(monkeypatch) -> None:
+    # A slow consumer that never drains can leave the bounded delivery queue
+    # full at shutdown. The _CLOSED sentinel must not raise QueueFull out of
+    # close()/__aexit__ (regression for ws.py:461 / _run finally).
+    conn = FakeConn([_ev(1), _ev(2), _ev(3), _ev(4), _ev(5)])
+    monkeypatch.setattr(ws_mod, "ws_connect", lambda url, **k: conn)
+    client = Client(Network.LOCAL)
+
+    # capacity=1 with no consumer: the read loop fills the one slot and starts
+    # dropping, so the queue stays full through shutdown.
+    stream = client.stream([Channel.trades("BTC-USDX-PERP")], channel_capacity=1)
+    stream.start()
+    # Let the background task connect, drain the scripted frames, and fill the queue.
+    await asyncio.sleep(0.05)
+    assert stream._queue.full(), "test precondition: delivery queue should be full"
+
+    # Must complete cleanly despite the full queue.
+    await asyncio.wait_for(stream.close(), timeout=2.0)
+
+    # __aexit__ path (also routes through the sentinel enqueue) must not raise either.
+    async with client.stream([Channel.trades("BTC-USDX-PERP")], channel_capacity=1) as s2:
+        await asyncio.sleep(0.05)
+        assert s2._queue.full()
+    # Exiting the context (await s2.close()) completed without raising.
+
+
+async def test_out_of_sync_clears_candles_cursor_so_reconnect_drops_stale_since(
+    monkeypatch,
+) -> None:
+    # A candles subscription advances its (channel, market, interval) cursor,
+    # then receives an out_of_sync. The cursor for that interval must be cleared
+    # so the reconnect resubscribes WITHOUT the stale `since` (regression for
+    # ws.py:341 / OutOfSync missing `interval`).
+    first = FakeConn(
+        [
+            json.dumps(
+                {
+                    "op": "subscribed",
+                    "channel": "candles",
+                    "market": "BTC-USDX-PERP",
+                    "interval": "1m",
+                    "seq_at_join": 50,
+                }
+            ),
+            _candle_ev(51),
+            _candle_ev(52),
+            json.dumps(
+                {
+                    "op": "out_of_sync",
+                    "channel": "candles",
+                    "market": "BTC-USDX-PERP",
+                    "interval": "1m",
+                    "oldest_seq": 999,
+                }
+            ),
+        ]
+    )
+    second = FakeConn([_candle_ev(60)])
+    conns = [first, second]
+    calls = {"n": 0}
+
+    def fake_connect(url, **kwargs):
+        c = conns[calls["n"]]
+        calls["n"] += 1
+        return c
+
+    monkeypatch.setattr(ws_mod, "ws_connect", fake_connect)
+
+    client = Client(Network.LOCAL)
+    stream = client.stream(
+        [Channel.candles("BTC-USDX-PERP", "1m")],
+        backoff=Backoff(initial=0.001, max=0.001, jitter=False),
+    )
+    # Subscribed + 2 events + OutOfSync + 1 event from the second connection.
+    items = await _collect(stream, 5)
+    await stream.close()
+
+    assert calls["n"] >= 2, "should have reconnected after the first socket dropped"
+    assert any(isinstance(it, OutOfSync) for it in items)
+
+    # The reconnect's resubscribe must NOT carry a stale `since` — the candles
+    # cursor was cleared by the out_of_sync.
+    second_sub = json.loads(second.sent[0])
+    assert second_sub["channel"] == "candles" and second_sub["interval"] == "1m"
+    assert "since" not in second_sub, "stale candles cursor was not cleared on out_of_sync"
+    # After the reconnect, seq 60 legitimately re-seeds the cursor at the live
+    # edge — proving recovery resumed from now rather than the dead `since`.
+    assert stream._cursors[("candles", "BTC-USDX-PERP", "1m")] == 60

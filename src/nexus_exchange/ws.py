@@ -246,6 +246,7 @@ class OutOfSync:
 
     channel: str
     market: str | None = None
+    interval: str | None = None
     oldest_seq: int | None = None
 
 
@@ -319,6 +320,7 @@ def _decode(text: str) -> ServerMessage | None:
         return OutOfSync(
             channel=str(d.get("channel", "")),
             market=d.get("market"),
+            interval=d.get("interval"),
             oldest_seq=d.get("oldest_seq"),
         )
     if op == "error":
@@ -338,7 +340,7 @@ def _cursor_advance(msg: ServerMessage) -> tuple[tuple[str, str | None, str | No
 def _cursor_reset(msg: ServerMessage) -> tuple[str, str | None, str | None] | None:
     """The cursor key this frame *invalidates* (``out_of_sync``), if any."""
     if isinstance(msg, OutOfSync):
-        return (msg.channel, msg.market, None)
+        return (msg.channel, msg.market, msg.interval)
     return None
 
 
@@ -457,8 +459,9 @@ class WsStream:
                 await self._task
             except asyncio.CancelledError:
                 pass
-        # Unblock any consumer parked on the queue.
-        self._queue.put_nowait(_CLOSED)
+        # Unblock any consumer parked on the queue. A slow consumer may have left
+        # the bounded queue full; closing must never raise.
+        self._enqueue_closed()
 
     async def __aenter__(self) -> WsStream:
         self.start()
@@ -539,7 +542,7 @@ class WsStream:
                     return
         finally:
             # Wake any consumer parked on the queue once the task ends.
-            self._queue.put_nowait(_CLOSED)
+            self._enqueue_closed()
 
     async def _connect_url(self, authed: bool) -> str:
         """Resolve the connect URL, minting a fresh single-use token when private."""
@@ -625,6 +628,30 @@ class WsStream:
         except asyncio.QueueFull:
             self._dropped += 1
             return False
+
+    def _enqueue_closed(self) -> None:
+        """Enqueue the close sentinel without ever raising.
+
+        A slow or stopped consumer can leave the bounded delivery queue full at
+        shutdown. A bare ``put_nowait(_CLOSED)`` would then raise
+        :class:`asyncio.QueueFull` out of ``close()`` / ``__aexit__`` / the
+        background task's ``finally`` — closing must never raise. Drain one slot
+        first so the sentinel always fits and a parked consumer is guaranteed to
+        observe it; fall back to swallowing ``QueueFull`` if even that races.
+        """
+        try:
+            self._queue.put_nowait(_CLOSED)
+            return
+        except asyncio.QueueFull:
+            pass
+        try:
+            self._queue.get_nowait()
+        except asyncio.QueueEmpty:
+            pass
+        try:
+            self._queue.put_nowait(_CLOSED)
+        except asyncio.QueueFull:
+            pass
 
     async def _emit(self, item: StreamItem) -> bool:
         """Best-effort deliver a one-off item (e.g. a surfaced error)."""
