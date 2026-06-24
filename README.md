@@ -77,9 +77,17 @@ is the low-level escape hatch in the meantime.
 
 ## API version
 
-This SDK targets a released version of the Exchange API spec, pinned in
-[`.api-version`](./.api-version). The spec lives in
+<!-- api-version-sync:start -->
+This SDK currently targets Exchange API spec **`v0.3.5`**.
+<!-- api-version-sync:end -->
+
+The pinned version lives in [`.api-version`](./.api-version); the spec itself is
+published by
 [`nexus-xyz/nexus-exchange-api`](https://github.com/nexus-xyz/nexus-exchange-api).
+This repo does not vendor a copy — the `drift` CI check fetches the pinned
+release to detect drift, and the scheduled `api-version-sync` workflow opens a PR
+when a newer spec releases. The line above is bot-managed; the table below is
+maintained by hand when an SDK release ships a new pin.
 
 | SDK version | API spec |
 |---|---|
