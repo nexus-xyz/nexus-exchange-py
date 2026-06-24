@@ -15,19 +15,41 @@ import json
 import time
 from enum import Enum
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlencode
 
 import httpx
 
 from .auth import AgentRegistered, AgentRegistration, EthSigner, LoginResponse
 from .errors import ApiError, MissingCredentialsError, TransportError
-from .types import Market, Ticker
+from .types import (
+    AdlEvent,
+    FundingSample,
+    HealthStatus,
+    Market,
+    MarketStatus,
+    MarketSummary,
+    MarkPrice,
+    Ohlcv,
+    OrderBook,
+    Ticker,
+    Trade,
+)
 
 __all__ = ["Client", "Network", "DEFAULT_USER_AGENT"]
 
 #: Identifies Python-SDK traffic in the exchange's per-client usage metrics.
 DEFAULT_USER_AGENT = "nexus-exchange-py/0.1.0"
 DEFAULT_TIMEOUT = 30.0
+
+
+def _query(**params: Any) -> str:
+    """Build a URL-encoded query string from non-``None`` params.
+
+    Params are emitted in the order given so the signed canonical query and the
+    sent query stay byte-for-byte identical (see :meth:`Client._request`).
+    """
+    items = [(k, str(v)) for k, v in params.items() if v is not None]
+    return urlencode(items)
 
 
 class Network(str, Enum):
@@ -95,20 +117,94 @@ class Client:
 
     # -- public market data ----------------------------------------------
     def fetch_markets(self) -> list[Market]:
-        """``GET /markets/summary`` — list all markets."""
-        data = self._request("GET", "/markets/summary")
+        """``GET /markets`` — all tradable markets and their trading rules."""
+        data = self._request("GET", "/markets")
         rows = data if isinstance(data, list) else data.get("markets", [])
         return [Market.from_dict(m) for m in rows]
+
+    def fetch_market_summaries(self) -> list[MarketSummary]:
+        """``GET /markets/summary`` — per-market 24h volume and halt state."""
+        data = self._request("GET", "/markets/summary")
+        rows = data if isinstance(data, list) else data.get("markets", [])
+        return [MarketSummary.from_dict(m) for m in rows]
+
+    def fetch_tickers(self) -> dict[str, Ticker]:
+        """``GET /tickers`` — tickers for all markets, keyed by market id.
+
+        The envelope is a bare object keyed by market id (spec:
+        ``additionalProperties: Ticker``); an empty result is ``{}``.
+        """
+        data = self._request("GET", "/tickers")
+        if not isinstance(data, dict):
+            return {}
+        return {mid: Ticker.from_dict(t) for mid, t in data.items()}
 
     def fetch_ticker(self, market_id: str) -> Ticker:
         """``GET /markets/{market_id}/ticker`` — latest ticker for one market."""
         data = self._request("GET", f"/markets/{quote(market_id, safe='')}/ticker")
-        return Ticker.from_dict(market_id, data if isinstance(data, dict) else {"value": data})
+        return Ticker.from_dict(data if isinstance(data, dict) else {"symbol": market_id})
 
-    def health_check(self) -> dict[str, Any]:
-        """``GET /health`` — gateway health."""
+    def fetch_order_book(self, market_id: str) -> OrderBook:
+        """``GET /markets/{market_id}/orderbook`` — order book snapshot."""
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/orderbook")
+        return OrderBook.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_trades(self, market_id: str, limit: int | None = None) -> list[Trade]:
+        """``GET /markets/{market_id}/trades`` — recent public trades (newest first)."""
+        query = _query(limit=limit)
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/trades", query=query)
+        rows = data if isinstance(data, list) else []
+        return [Trade.from_dict(t) for t in rows]
+
+    def fetch_ohlcv(
+        self,
+        market_id: str,
+        timeframe: str | None = None,
+        limit: int | None = None,
+    ) -> list[Ohlcv]:
+        """``GET /markets/{market_id}/candles`` — OHLCV candles."""
+        query = _query(timeframe=timeframe, limit=limit)
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/candles", query=query)
+        rows = data if isinstance(data, list) else []
+        return [Ohlcv.from_row(r) for r in rows]
+
+    def fetch_funding_rate_history(
+        self, market_id: str, limit: int | None = None
+    ) -> list[FundingSample]:
+        """``GET /markets/{market_id}/funding`` — intra-hour funding-rate history."""
+        query = _query(limit=limit)
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/funding", query=query)
+        rows = data if isinstance(data, list) else []
+        return [FundingSample.from_dict(s) for s in rows]
+
+    def fetch_mark_price(self, market_id: str) -> MarkPrice:
+        """``GET /markets/{market_id}/mark-price`` — current mark price."""
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/mark-price")
+        return MarkPrice.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_market_status(self, market_id: str) -> MarketStatus:
+        """``GET /markets/{market_id}/status`` — lifecycle / halt status."""
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/status")
+        return MarketStatus.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_market_adl_events(self, market_id: str, limit: int | None = None) -> list[AdlEvent]:
+        """``GET /markets/{market_id}/adl-events`` — ADL settlement events (newest first)."""
+        query = _query(limit=limit)
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/adl-events", query=query)
+        rows = data if isinstance(data, list) else []
+        return [AdlEvent.from_dict(e) for e in rows]
+
+    def fetch_account_adl_history(self, address: str, limit: int | None = None) -> list[AdlEvent]:
+        """``GET /account/{address}/adl-history`` — ADL events touching an account."""
+        query = _query(limit=limit)
+        data = self._request("GET", f"/account/{quote(address, safe='')}/adl-history", query=query)
+        rows = data if isinstance(data, list) else []
+        return [AdlEvent.from_dict(e) for e in rows]
+
+    def health_check(self) -> HealthStatus:
+        """``GET /health`` — indexer health/status snapshot."""
         data = self._request("GET", "/health")
-        return data if isinstance(data, dict) else {"status": data}
+        return HealthStatus.from_dict(data if isinstance(data, dict) else {})
 
     # -- wallet-signed auth ----------------------------------------------
     def sign_in(self, signer: EthSigner) -> LoginResponse:

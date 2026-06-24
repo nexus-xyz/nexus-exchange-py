@@ -27,7 +27,21 @@ from .errors import (
     NexusExchangeError,
     TransportError,
 )
-from .types import Market, Ticker
+from .types import (
+    AdlClosure,
+    AdlEvent,
+    FundingSample,
+    HealthStatus,
+    Market,
+    MarketStatus,
+    MarketSummary,
+    MarkPrice,
+    Ohlcv,
+    OrderBook,
+    PriceLevel,
+    Ticker,
+    Trade,
+)
 
 __version__ = "0.1.0"
 
@@ -35,7 +49,18 @@ __all__ = [
     "Client",
     "Network",
     "Market",
+    "MarketSummary",
+    "MarketStatus",
     "Ticker",
+    "OrderBook",
+    "PriceLevel",
+    "Trade",
+    "Ohlcv",
+    "FundingSample",
+    "MarkPrice",
+    "AdlEvent",
+    "AdlClosure",
+    "HealthStatus",
     "EthSigner",
     "LoginRequest",
     "AgentRegistration",

@@ -2,8 +2,18 @@
 # spec version pinned in .api-version. Hand-maintained source of truth for
 # coverage. The Python SDK deliberately trails the Rust SDK — add a line when
 # you add a typed method. Format: METHOD /path  ({market_id} = placeholder)
+GET /markets
 GET /markets/summary
+GET /tickers
 GET /markets/{market_id}/ticker
+GET /markets/{market_id}/orderbook
+GET /markets/{market_id}/trades
+GET /markets/{market_id}/candles
+GET /markets/{market_id}/funding
+GET /markets/{market_id}/mark-price
+GET /markets/{market_id}/status
+GET /markets/{market_id}/adl-events
+GET /account/{address}/adl-history
 GET /health
 POST /auth/login
 POST /agents/register
