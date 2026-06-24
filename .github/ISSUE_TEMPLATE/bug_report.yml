@@ -1,0 +1,56 @@
+name: Bug report
+description: Report a problem with the nexus-exchange package.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for filing a bug! Please search existing issues first to avoid duplicates.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug, including what you expected instead.
+      placeholder: Calling `client.…` returned … but I expected …
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: A minimal code snippet or sequence of calls that triggers the bug.
+      render: python
+    validations:
+      required: true
+  - type: input
+    id: package-version
+    attributes:
+      label: Package version
+      description: Output of `pip show nexus-exchange` (or the git rev) you're using.
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: input
+    id: python-version
+    attributes:
+      label: Python version
+      description: Output of `python --version`.
+      placeholder: "Python 3.12.3"
+    validations:
+      required: false
+  - type: input
+    id: api-version
+    attributes:
+      label: API spec version
+      description: Value of `.api-version` you're targeting, if relevant.
+      placeholder: "v0.3.5"
+    validations:
+      required: false
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / traceback
+      description: Relevant error output. Paste the full traceback if it's an exception.
+      render: text
+    validations:
+      required: false
