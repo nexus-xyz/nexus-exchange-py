@@ -35,12 +35,27 @@ def test_signed_without_credentials_raises() -> None:
 
 def test_fetch_markets_parses(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/markets/summary",
-        json=[{"market_id": "BTC-USDX-PERP"}, {"symbol": "ETH-USDX-PERP"}],
+        url="http://localhost:9090/markets",
+        json=[
+            {
+                "market_id": "BTC-USDX-PERP",
+                "base_asset": "BTC",
+                "quote_asset": "USDX",
+                "tick_size": "0.1",
+                "lot_size": "0.001",
+                "min_order_size": "0.001",
+                "max_order_size": "100",
+                "initial_margin_rate": "0.05",
+                "maintenance_margin_rate": "0.03",
+                "max_leverage": 20,
+            }
+        ],
     )
     with Client(Network.LOCAL) as client:
         markets = client.fetch_markets()
-    assert [m.market_id for m in markets] == ["BTC-USDX-PERP", "ETH-USDX-PERP"]
+    assert markets[0].market_id == "BTC-USDX-PERP"
+    assert str(markets[0].tick_size) == "0.1"
+    assert markets[0].max_leverage == 20
 
 
 def test_api_error_on_4xx_is_terminal(httpx_mock) -> None:

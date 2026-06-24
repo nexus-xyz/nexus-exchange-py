@@ -29,7 +29,7 @@ with Client() as client:                 # defaults to the public gateway
         print(market.market_id)
 
     ticker = client.fetch_ticker("BTC-USDX-PERP")
-    print(ticker.raw)
+    print(ticker.last, ticker.mark_price)
 ```
 
 No credentials are needed for market data. See `examples/public_market_data.py`.
@@ -38,11 +38,17 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 
 | Area | Status |
 |---|---|
-| List markets — `GET /markets/summary` | ✅ implemented |
+| Markets — `GET /markets`, `/markets/summary`, `/tickers` | ✅ implemented |
 | Ticker — `GET /markets/{id}/ticker` | ✅ implemented |
+| Order book — `GET /markets/{id}/orderbook` | ✅ implemented |
+| Trades — `GET /markets/{id}/trades` | ✅ implemented |
+| OHLCV candles — `GET /markets/{id}/candles` | ✅ implemented |
+| Funding / mark price / status — `GET /markets/{id}/{funding,mark-price,status}` | ✅ implemented |
+| ADL events — `GET /markets/{id}/adl-events`, `/account/{addr}/adl-history` | ✅ implemented |
 | Health — `GET /health` | ✅ implemented |
 | HMAC request signing (the plumbing for authed calls) | ✅ implemented |
 | Error taxonomy (terminal vs transient) | ✅ implemented |
+| Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
 | Typed account / positions / balances reads | ❌ not yet |
 | Trading — place / cancel orders | ❌ not yet |
 | Deposits / withdrawals | ❌ not yet |
@@ -50,7 +56,6 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | Pagination helpers | ❌ not yet |
 | Rate-limit-aware retry (`429` / `Retry-After`, token bucket) | ❌ not yet |
 | Agent-key / OAuth auth | ❌ not yet |
-| Richer typed models (Decimal prices/sizes) | 🟡 partial — models keep the full payload on `.raw` |
 
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
 Anything not listed there is not wrapped yet — contributions welcome.
@@ -85,9 +90,24 @@ This SDK targets a released version of the Exchange API spec, pinned in
 ```bash
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
-pytest          # tests (HMAC scheme, parsing, error mapping) — mocked, no network
+pytest          # tests — unit (mocked httpx) + an integration smoke over a
+                # real loopback socket; both run offline, no network
 ruff check .    # lint
 mypy src        # types
+```
+
+`tests/test_integration_smoke.py` stands up a real local HTTP server and drives
+a real `Client` against it (`fetch_markets` / `fetch_ticker` / `health_check`),
+mirroring the Rust SDK's wiremock tests — so the transport, URL building, and
+JSON decoding are exercised end to end, not just the mock layer.
+
+For an opt-in round-trip against a **live** gateway (read-only, unauthenticated;
+not run in CI), use the smoke script:
+
+```bash
+python scripts/smoke.py                  # stable public gateway
+python scripts/smoke.py --network beta
+python scripts/smoke.py --base-url http://localhost:9090
 ```
 
 ## License
