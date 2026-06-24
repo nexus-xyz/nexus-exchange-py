@@ -10,7 +10,9 @@ from __future__ import annotations
 
 from decimal import Decimal
 
-from nexus_exchange import Client, Network
+import pytest
+
+from nexus_exchange import Client, MarkPrice, Network, Ticker
 
 
 def test_fetch_market_summaries_handles_numbers_and_halted_null(httpx_mock) -> None:
@@ -104,6 +106,33 @@ def test_fetch_ticker_parses_numbers_and_nulls(httpx_mock) -> None:
     assert ticker.last is not None and str(ticker.last) == "1.1"
     # Omitted fields default to None rather than failing the decode.
     assert ticker.high is None
+
+
+def test_ticker_timestamp_and_datetime_are_nullable_when_omitted() -> None:
+    # A market with no trades may omit timestamp/datetime; these must decode to
+    # None rather than silently defaulting to 0/"" (so callers can tell the
+    # difference between "no timestamp" and the epoch).
+    ticker = Ticker.from_dict({"symbol": "BTC-USDX-PERP", "last": 1.1})
+    assert ticker.timestamp is None
+    assert ticker.datetime is None
+    # An explicit null decodes to None too.
+    ticker2 = Ticker.from_dict({"symbol": "BTC-USDX-PERP", "timestamp": None, "datetime": None})
+    assert ticker2.timestamp is None
+    assert ticker2.datetime is None
+    # A present value still decodes normally.
+    ticker3 = Ticker.from_dict(
+        {"symbol": "BTC-USDX-PERP", "timestamp": 123, "datetime": "2026-04-13T00:00:00Z"}
+    )
+    assert ticker3.timestamp == 123
+    assert ticker3.datetime == "2026-04-13T00:00:00Z"
+
+
+def test_required_decimal_field_missing_raises() -> None:
+    # A required money field (mark_price) absent from the payload must raise
+    # rather than silently decoding to Decimal(0), which would mask a malformed
+    # response.
+    with pytest.raises(ValueError):
+        MarkPrice.from_dict({"market_id": "BTC-USDX-PERP"})
 
 
 def test_fetch_order_book_parses_levels(httpx_mock) -> None:
