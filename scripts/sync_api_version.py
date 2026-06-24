@@ -128,9 +128,7 @@ def update_readme(new_tag):
             f"{README} is missing the {MARK_START} / {MARK_END} markers; add the "
             f"managed block under '## API version' so the bot has a line to own."
         )
-    block = (
-        f"{MARK_START}\nThis SDK currently targets Exchange API spec **`{new_tag}`**.\n{MARK_END}"
-    )
+    block = f"{MARK_START}\n\nCurrently targets Exchange API spec **`{new_tag}`**.\n\n{MARK_END}"
     new_text = MANAGED_BLOCK_RE.sub(lambda _: block, text, count=1)
     if new_text == text:
         return False
