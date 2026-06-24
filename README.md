@@ -49,13 +49,15 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | HMAC request signing (the plumbing for authed calls) | ✅ implemented |
 | Error taxonomy (terminal vs transient) | ✅ implemented |
 | Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
-| Typed account / positions / balances reads | ❌ not yet |
-| Trading — place / cancel orders | ❌ not yet |
-| Deposits / withdrawals | ❌ not yet |
+| Account reads — `GET /account`, `/positions`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
+| Trading — `POST /orders`, `/orders/batch`; `GET /orders`, `/orders/{id}`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
+| Funds — `POST /account/deposit`, `/account/credit` | ✅ implemented |
+| Keys / agents / WS token — `/keys`, `/agents`, `POST /ws-tokens` | ✅ implemented |
+| Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
+| Wallet-signed auth flows — `POST /auth/login` (EIP-191), `/agents/register` (EIP-712) | ❌ not yet (needs an Ethereum signer dep) |
 | WebSocket streaming | ❌ not yet |
 | Pagination helpers | ❌ not yet |
 | Rate-limit-aware retry (`429` / `Retry-After`, token bucket) | ❌ not yet |
-| Agent-key / OAuth auth | ❌ not yet |
 
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
 Anything not listed there is not wrapped yet — contributions welcome.
