@@ -17,7 +17,8 @@ pip install nexus-exchange   # once published; for now, install from source:
 pip install git+https://github.com/nexus-xyz/nexus-exchange-py
 ```
 
-Requires Python **3.10+**. Depends only on [`httpx`](https://www.python-httpx.org/).
+Requires Python **3.10+**. Depends on [`httpx`](https://www.python-httpx.org/)
+(REST) and [`websockets`](https://websockets.readthedocs.io/) (streaming).
 
 ## Quick start
 
@@ -55,7 +56,7 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | Keys / agents / WS token — `/keys`, `/agents`, `POST /ws-tokens` | ✅ implemented |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
 | Wallet-signed auth flows — `POST /auth/login` (EIP-191), `/agents/register` (EIP-712) | ❌ not yet (needs an Ethereum signer dep) |
-| WebSocket streaming | ❌ not yet |
+| WebSocket streaming — `GET /ws` (asyncio, reconnect + resume) | ✅ implemented |
 | Pagination helpers | ❌ not yet |
 | Rate-limit-aware retry (`429` / `Retry-After`, token bucket) | ❌ not yet |
 
@@ -76,6 +77,35 @@ gateway proxies signed calls to the *site* account; to act as a specific account
 point `base_url` (or `Network.LOCAL`) at a direct gateway that verifies client
 HMAC. Typed authed methods are not built yet — `Client._request(..., signed=True)`
 is the low-level escape hatch in the meantime.
+
+## Streaming (WebSocket)
+
+`Client.stream(...)` opens an **asyncio** WebSocket stream — the async counterpart
+to the synchronous REST client. The background task connects, reconnects with
+jittered exponential backoff, ponges heartbeats, re-subscribes each channel after
+every reconnect, and resumes each stream from a `since` cursor. Async-iterate it
+for decoded, typed frames; a `Lagged` item reports any frames dropped when a slow
+consumer can't keep up (the queue is bounded, so the socket is never starved).
+
+```python
+import asyncio
+from nexus_exchange import Client, Channel, Network
+
+async def main() -> None:
+    client = Client(Network.LOCAL)
+    async with client.stream([Channel.trades("BTC-USDX-PERP")]) as stream:
+        async for msg in stream:
+            print(msg)        # Subscribed / Event / OutOfSync / ServerError / Lagged
+
+asyncio.run(main())
+```
+
+Public channels (`Channel.trades`, `Channel.book`, `Channel.candles`) need no
+credentials. Account channels (`Channel.orders`, `.fills`, `.positions`,
+`.balances`) are private: pass `api_key` / `api_secret` and the client mints a
+single-use `/ws-tokens` before each connection. The WS host is a separate origin
+from the REST base; it is only known for `Network.LOCAL` today (production host
+pending — ENG-3398), so pass `ws_url=...` to `stream()` for other networks.
 
 ## API version
 

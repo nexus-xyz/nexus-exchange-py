@@ -47,6 +47,20 @@ from .types import (
     Withdrawal,
     WsToken,
 )
+from .ws import (
+    Backoff,
+    Channel,
+    EngineEnvelope,
+    Event,
+    Lagged,
+    OutOfSync,
+    ServerError,
+    ServerMessage,
+    StreamItem,
+    Subscribed,
+    Unsubscribed,
+    WsStream,
+)
 
 __version__ = "0.1.0"
 
@@ -80,6 +94,18 @@ __all__ = [
     "AgentInfo",
     "TierOverride",
     "WsToken",
+    "WsStream",
+    "Channel",
+    "ServerMessage",
+    "Subscribed",
+    "Unsubscribed",
+    "Event",
+    "OutOfSync",
+    "ServerError",
+    "EngineEnvelope",
+    "Lagged",
+    "StreamItem",
+    "Backoff",
     "NexusExchangeError",
     "ApiError",
     "TransportError",

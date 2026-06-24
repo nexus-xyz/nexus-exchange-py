@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import time
+from collections.abc import Sequence
 from decimal import Decimal
 from enum import Enum
 from typing import Any
@@ -48,6 +49,7 @@ from .types import (
     Withdrawal,
     WsToken,
 )
+from .ws import DEFAULT_WS_CHANNEL_CAPACITY, Backoff, Channel, WsStream
 
 __all__ = ["Client", "Network", "DEFAULT_USER_AGENT"]
 
@@ -81,6 +83,23 @@ class Network(str, Enum):
             Network.LOCAL: "http://localhost:9090",
         }[self]
 
+    @property
+    def ws_base(self) -> str | None:
+        """The indexer's WebSocket origin — host-root ``/ws``, or ``None`` if unknown.
+
+        A **separate host** from :attr:`base_url`: the ``/api/exchange`` HTTP
+        gateway does not proxy WebSocket upgrades, so the stream connects straight
+        to the indexer and the WS origin cannot be derived from the REST base.
+        Returns ``None`` for networks whose production WS host is not yet confirmed
+        (ENG-3398); pass ``ws_url=`` to :meth:`Client.stream` in the meantime.
+        Mirrors the Rust SDK's ``Network::ws_base``.
+        """
+        return {
+            Network.STABLE: None,
+            Network.BETA: None,
+            Network.LOCAL: "ws://localhost:9090/ws",
+        }[self]
+
 
 class Client:
     """Client for the Nexus Exchange REST API.
@@ -107,6 +126,10 @@ class Client:
         http_client: httpx.Client | None = None,
     ) -> None:
         self._base_url = (base_url or network.base_url).rstrip("/")
+        # WebSocket origin for this network (a separate host from the REST base;
+        # see ``Network.ws_base``). ``None`` for networks whose WS host is not yet
+        # confirmed — ``stream()`` then requires an explicit ``ws_url``.
+        self._ws_base = network.ws_base
         self._api_key = api_key
         self._api_secret = api_secret
         self._owns_http = http_client is None
@@ -128,6 +151,12 @@ class Client:
     @property
     def has_credentials(self) -> bool:
         return bool(self._api_key and self._api_secret)
+
+    @property
+    def ws_base(self) -> str | None:
+        """The WebSocket origin :meth:`stream` connects to, or ``None`` if the
+        network's WS host is not yet confirmed (pass ``ws_url=`` to ``stream``)."""
+        return self._ws_base
 
     # -- public market data ----------------------------------------------
     def fetch_markets(self) -> list[Market]:
@@ -321,6 +350,49 @@ class Client:
         """``POST /ws-tokens`` — mint a single-use WebSocket token. Requires credentials."""
         data = self._request("POST", "/ws-tokens", signed=True)
         return WsToken.from_dict(data if isinstance(data, dict) else {})
+
+    # -- streaming (asyncio) ---------------------------------------------
+    def stream(
+        self,
+        channels: Sequence[Channel] | None = None,
+        *,
+        ws_url: str | None = None,
+        backoff: Backoff | None = None,
+        channel_capacity: int = DEFAULT_WS_CHANNEL_CAPACITY,
+    ) -> WsStream:
+        """Open an asyncio WebSocket stream subscribed to ``channels``.
+
+        Mirrors the Rust SDK's ``Client::subscribe``. Returns a :class:`WsStream`
+        you ``async for`` over; the background task connects, reconnects with
+        jittered backoff, ponging heartbeats, and re-subscribes each channel after
+        every reconnect. If any channel is private, a single-use ``/ws-tokens`` is
+        minted (signed) before each connection — so private channels need
+        credentials, and a private request without them fails fast here.
+
+        ``ws_url`` overrides the network's WS origin; it is **required** for
+        networks whose host is not yet confirmed (``ws_base`` is ``None`` — see
+        ENG-3398). Connecting happens lazily when iteration begins, so this call
+        does not require a running event loop.
+        """
+        channels = list(channels or [])
+        if any(c.is_private for c in channels) and not self.has_credentials:
+            raise MissingCredentialsError(
+                "private channels require api_key / api_secret to mint a /ws-tokens"
+            )
+        resolved = ws_url or self._ws_base
+        if resolved is None:
+            raise ValueError(
+                "no WebSocket endpoint configured for this network (production WS "
+                "host not yet confirmed — ENG-3398); pass ws_url=... to stream()"
+            )
+        return WsStream(
+            ws_url=resolved,
+            channels=channels,
+            mint_token=self.mint_web_socket_token,
+            user_agent=DEFAULT_USER_AGENT,
+            backoff=backoff or Backoff(),
+            channel_capacity=channel_capacity,
+        )
 
     # -- admin (signed) --------------------------------------------------
     def set_account_tier(self, address: str, tier: str) -> TierOverride:
