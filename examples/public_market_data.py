@@ -18,7 +18,9 @@ def main() -> None:
         if markets:
             ticker = client.fetch_ticker(markets[0].market_id)
             print(f"\nticker for {ticker.market_id}:")
-            print(ticker.raw)
+            print(
+                f"  last={ticker.last} mark={ticker.mark_price} bid={ticker.bid} ask={ticker.ask}"
+            )
 
 
 if __name__ == "__main__":
