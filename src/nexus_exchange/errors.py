@@ -48,3 +48,10 @@ class TransportError(NexusExchangeError):
 
 class MissingCredentialsError(NexusExchangeError):
     """A signed request was attempted without ``api_key`` / ``api_secret``."""
+
+
+class AuthError(NexusExchangeError):
+    """A wallet-signing input was invalid (bad key, bad address, out of range).
+
+    Mirrors the Rust SDK's ``Error::Auth`` — terminal, never retryable.
+    """

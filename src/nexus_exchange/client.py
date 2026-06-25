@@ -2,9 +2,9 @@
 
 A thin wrapper mirroring the Rust SDK: typed methods over the REST routes, HMAC
 request signing, one error hierarchy. **Experimental.** Covers the public
-market-data routes plus the signed account / trading / admin routes (see the
-README's support table). WebSocket streaming and the wallet-signed auth flows
-(EIP-191 login, EIP-712 agent registration) are not built yet.
+market-data routes, the signed account / trading / admin routes, and the
+wallet-signed auth flows (EIP-191 login, EIP-712 agent registration) — see the
+README's support table. WebSocket streaming is not built yet.
 """
 
 from __future__ import annotations
@@ -20,6 +20,7 @@ from urllib.parse import quote, urlencode
 
 import httpx
 
+from .auth import AgentRegistered, AgentRegistration, EthSigner, LoginResponse
 from .errors import ApiError, MissingCredentialsError, TransportError
 from .types import (
     AccountSummary,
@@ -219,6 +220,28 @@ class Client:
         """``GET /health`` — indexer health/status snapshot."""
         data = self._request("GET", "/health")
         return HealthStatus.from_dict(data if isinstance(data, dict) else {})
+
+    # -- wallet-signed auth ----------------------------------------------
+    def sign_in(self, signer: EthSigner) -> LoginResponse:
+        """``POST /auth/login`` — EIP-191 session login.
+
+        Signs the fixed login message with ``signer`` and posts the result.
+        Unauthenticated: the EIP-191 signature in the body is the credential.
+        Returns the session token (treat as secret) and the recovered address.
+        """
+        body = signer.sign_in().to_dict()
+        data = self._request("POST", "/auth/login", body=body)
+        return LoginResponse.from_dict(data if isinstance(data, dict) else {})
+
+    def register_agent(self, registration: AgentRegistration) -> AgentRegistered:
+        """``POST /agents/register`` — EIP-712 agent-key registration.
+
+        Takes a pre-signed body from
+        :meth:`EthSigner.register_agent <nexus_exchange.EthSigner.register_agent>`.
+        Unauthenticated: the EIP-712 signature in the body is the credential.
+        """
+        data = self._request("POST", "/agents/register", body=registration.to_dict())
+        return AgentRegistered.from_dict(data if isinstance(data, dict) else {})
 
     # -- account (signed reads) ------------------------------------------
     def fetch_balance(self) -> AccountSummary:
