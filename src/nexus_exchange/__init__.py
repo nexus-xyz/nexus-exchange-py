@@ -11,9 +11,18 @@ See the README for the current support table. Quick start::
 
 from __future__ import annotations
 
+from .auth import (
+    SIGN_IN_MESSAGE,
+    AgentRegistered,
+    AgentRegistration,
+    EthSigner,
+    LoginRequest,
+    LoginResponse,
+)
 from .client import DEFAULT_USER_AGENT, Client, Network
 from .errors import (
     ApiError,
+    AuthError,
     MissingCredentialsError,
     NexusExchangeError,
     TransportError,
@@ -66,6 +75,12 @@ __all__ = [
     "AdlEvent",
     "AdlClosure",
     "HealthStatus",
+    "EthSigner",
+    "LoginRequest",
+    "AgentRegistration",
+    "LoginResponse",
+    "AgentRegistered",
+    "SIGN_IN_MESSAGE",
     "AccountSummary",
     "Position",
     "Fill",
@@ -82,6 +97,7 @@ __all__ = [
     "WsToken",
     "NexusExchangeError",
     "ApiError",
+    "AuthError",
     "TransportError",
     "MissingCredentialsError",
     "DEFAULT_USER_AGENT",

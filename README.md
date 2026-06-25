@@ -49,6 +49,7 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | ADL events — `GET /markets/{id}/adl-events`, `/account/{addr}/adl-history` | ✅ implemented |
 | Health — `GET /health` | ✅ implemented |
 | HMAC request signing (the plumbing for authed calls) | ✅ implemented |
+| Wallet-signed auth — `sign_in` (EIP-191) + `register_agent` (EIP-712) | ✅ implemented |
 | CCXT-compatible adapter — public market data | ✅ implemented |
 | Error taxonomy (terminal vs transient) | ✅ implemented |
 | Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
@@ -57,10 +58,10 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | Funds — `POST /account/deposit`, `/account/credit` | ✅ implemented |
 | Keys / agents / WS token — `/keys`, `/agents`, `POST /ws-tokens` | ✅ implemented |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
-| Wallet-signed auth flows — `POST /auth/login` (EIP-191), `/agents/register` (EIP-712) | ❌ not yet (needs an Ethereum signer dep) |
 | WebSocket streaming | ❌ not yet |
 | Pagination helpers | ❌ not yet |
 | Rate-limit-aware retry (`429` / `Retry-After`, token bucket) | ❌ not yet |
+| OAuth auth | ❌ not yet |
 
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
 Anything not listed there is not wrapped yet — contributions welcome.
@@ -79,6 +80,44 @@ gateway proxies signed calls to the *site* account; to act as a specific account
 point `base_url` (or `Network.LOCAL`) at a direct gateway that verifies client
 HMAC. Typed authed methods are not built yet — `Client._request(..., signed=True)`
 is the low-level escape hatch in the meantime.
+
+### Wallet-signed auth
+
+The HMAC scheme above signs *requests* with an API key. The two wallet-authorized
+flows are different: an EVM wallet key authorizes a **session** or an **agent
+key**, with the signature carried in the request *body* (these POSTs are
+themselves unauthenticated). This mirrors the
+[Rust SDK](https://github.com/nexus-xyz/nexus-exchange-rs)'s `EthSigner` and the
+digests are cross-checked, byte-for-byte, against the server's known-answer
+vectors.
+
+`EthSigner` is a pure signer — the caller supplies the private key (a library
+pattern; there is no key prompt or file handling). It needs the
+[`eth-account`](https://pypi.org/project/eth-account/) dependency, which ships
+with the SDK.
+
+```python
+from nexus_exchange import Client, EthSigner
+
+signer = EthSigner.from_hex("0x<wallet-private-key>")   # you own the key
+
+with Client() as client:
+    # EIP-191 personal_sign → POST /auth/login → session token.
+    session = client.sign_in(signer)
+    print(session.address, session.token)   # token is a secret
+
+    # EIP-712 → POST /agents/register. expires_at_ms / nonce / chain_id are
+    # caller-supplied; expiry must fall in [now + 1d, now + 90d].
+    registration = signer.register_agent(
+        agent="0x<agent-address>",
+        expires_at_ms=1_782_000_000_000,
+        nonce=1,
+        chain_id=393,
+        label="my-bot",
+    )
+    registered = client.register_agent(registration)
+    print(registered.agent_address, registered.expires_at)
+```
 
 ## CCXT compatibility
 

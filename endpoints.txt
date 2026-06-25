@@ -15,6 +15,8 @@ GET /markets/{market_id}/status
 GET /markets/{market_id}/adl-events
 GET /account/{address}/adl-history
 GET /health
+POST /auth/login
+POST /agents/register
 GET /account
 GET /positions
 GET /fills
