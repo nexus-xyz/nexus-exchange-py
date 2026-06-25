@@ -1,5 +1,7 @@
 # nexus-exchange (Python)
 
+[![License](https://img.shields.io/badge/license-MIT%2FApache--2.0-blue.svg)](#license)
+
 Official Python SDK for the [Nexus Exchange](https://exchange.nexus.xyz) API — a
 thin, typed wrapper over the public REST API.
 
@@ -47,15 +49,18 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | ADL events — `GET /markets/{id}/adl-events`, `/account/{addr}/adl-history` | ✅ implemented |
 | Health — `GET /health` | ✅ implemented |
 | HMAC request signing (the plumbing for authed calls) | ✅ implemented |
+| CCXT-compatible adapter — public market data | ✅ implemented |
 | Error taxonomy (terminal vs transient) | ✅ implemented |
 | Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
-| Typed account / positions / balances reads | ❌ not yet |
-| Trading — place / cancel orders | ❌ not yet |
-| Deposits / withdrawals | ❌ not yet |
+| Account reads — `GET /account`, `/positions`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
+| Trading — `POST /orders`, `/orders/batch`; `GET /orders`, `/orders/{id}`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
+| Funds — `POST /account/deposit`, `/account/credit` | ✅ implemented |
+| Keys / agents / WS token — `/keys`, `/agents`, `POST /ws-tokens` | ✅ implemented |
+| Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
+| Wallet-signed auth flows — `POST /auth/login` (EIP-191), `/agents/register` (EIP-712) | ❌ not yet (needs an Ethereum signer dep) |
 | WebSocket streaming | ❌ not yet |
 | Pagination helpers | ❌ not yet |
 | Rate-limit-aware retry (`429` / `Retry-After`, token bucket) | ❌ not yet |
-| Agent-key / OAuth auth | ❌ not yet |
 
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
 Anything not listed there is not wrapped yet — contributions welcome.
@@ -75,11 +80,48 @@ point `base_url` (or `Network.LOCAL`) at a direct gateway that verifies client
 HMAC. Typed authed methods are not built yet — `Client._request(..., signed=True)`
 is the low-level escape hatch in the meantime.
 
+## CCXT compatibility
+
+[CCXT](https://github.com/ccxt/ccxt) is the unified API the Python quant/retail
+stack (freqtrade, hummingbot, bots) speaks. `nexus_exchange.ccxt_adapter`
+exposes the exchange under CCXT's unified method names and return shapes, so
+CCXT-shaped code can talk to Nexus with minimal changes.
+
+This first increment covers `describe()` and public market data —
+`fetch_markets`, `fetch_ticker`, `fetch_tickers`, `fetch_order_book`,
+`fetch_ohlcv`, `fetch_trades`, plus `load_markets`. Private / trading methods
+are a follow-up.
+
+```python
+from nexus_exchange.ccxt_adapter import NexusExchange
+
+with NexusExchange() as ex:
+    ex.load_markets()
+    ticker = ex.fetch_ticker("BTC-USDX-PERP")     # unified ticker dict
+    book = ex.fetch_order_book("BTC-USDX-PERP", limit=10)   # [price, amount] levels
+    candles = ex.fetch_ohlcv("BTC-USDX-PERP", "1m", limit=100)  # [ts,o,h,l,c,v]
+    trades = ex.fetch_trades("BTC-USDX-PERP", limit=50)
+```
+
+The adapter returns plain CCXT-shaped `dict`/`list` structures and does **not**
+import or subclass `ccxt` — it follows CCXT's conventions without taking the
+dependency. See `examples/ccxt_market_data.py`.
+
 ## API version
 
-This SDK targets a released version of the Exchange API spec, pinned in
-[`.api-version`](./.api-version). The spec lives in
+<!-- api-version-sync:start -->
+
+Currently targets Exchange API spec **`v0.4.0`**.
+
+<!-- api-version-sync:end -->
+
+The pinned version lives in [`.api-version`](./.api-version); the spec itself is
+published by
 [`nexus-xyz/nexus-exchange-api`](https://github.com/nexus-xyz/nexus-exchange-api).
+This repo does not vendor a copy — the `drift` CI check fetches the pinned
+release to detect drift, and the scheduled `api-version-sync` workflow opens a PR
+when a newer spec releases. The line above is bot-managed; the table below is
+maintained by hand when an SDK release ships a new pin.
 
 | SDK version | API spec |
 |---|---|
