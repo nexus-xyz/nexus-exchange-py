@@ -1,9 +1,18 @@
 import hashlib
 import hmac
+from decimal import Decimal
 
+import httpx
 import pytest
 
-from nexus_exchange import ApiError, Client, MissingCredentialsError, Network
+from nexus_exchange import (
+    ApiError,
+    Client,
+    MissingCredentialsError,
+    Network,
+    OrderRequest,
+    TransportError,
+)
 
 
 def test_network_base_urls() -> None:
@@ -66,3 +75,60 @@ def test_api_error_on_4xx_is_terminal(httpx_mock) -> None:
     assert excinfo.value.status == 404
     assert excinfo.value.code == "not_found"
     assert excinfo.value.transient is False
+
+
+def test_has_credentials_reflects_keys() -> None:
+    assert Client(Network.LOCAL).has_credentials is False
+    secret = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+    assert Client(Network.LOCAL, api_key="nx_test", api_secret=secret).has_credentials is True
+
+
+def test_tickers_non_dict_response_is_empty_map(httpx_mock) -> None:
+    # A malformed /tickers envelope (array instead of the spec's keyed object)
+    # degrades to an empty map rather than raising.
+    httpx_mock.add_response(url="http://localhost:9090/tickers", json=[])
+    with Client(Network.LOCAL) as client:
+        assert client.fetch_tickers() == {}
+
+
+def test_order_request_serializes_reduce_only() -> None:
+    payload = OrderRequest.market(
+        "BTC-USDX-PERP", "Sell", Decimal("1"), reduce_only=True
+    ).to_payload()
+    assert payload["reduce_only"] is True
+
+
+def test_transport_error_wraps_httpx_error(httpx_mock) -> None:
+    # A network-layer failure surfaces as the SDK's TransportError, not a raw
+    # httpx exception, so callers catch one error hierarchy.
+    httpx_mock.add_exception(httpx.ConnectError("connection refused"))
+    with Client(Network.LOCAL) as client:
+        with pytest.raises(TransportError):
+            client.fetch_markets()
+
+
+def test_no_content_response_decodes_to_none(httpx_mock) -> None:
+    # An empty 200 body (e.g. some DELETEs) decodes to None, not a parse error.
+    httpx_mock.add_response(url="http://localhost:9090/orders", method="DELETE", status_code=200)
+    secret = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+    with Client(Network.LOCAL, api_key="nx_test", api_secret=secret) as client:
+        assert client.cancel_all_orders() is None
+
+
+def test_non_json_error_body_still_raises_api_error(httpx_mock) -> None:
+    # A 5xx with a plain-text (non-JSON) body must still raise ApiError with the
+    # status, leaving code/message None rather than failing to parse the envelope.
+    httpx_mock.add_response(status_code=502, text="upstream down")
+    with Client(Network.LOCAL) as client:
+        with pytest.raises(ApiError) as excinfo:
+            client.fetch_markets()
+    assert excinfo.value.status == 502
+    assert excinfo.value.code is None
+    assert excinfo.value.transient is True
+
+
+def test_non_json_success_body_returns_raw_text(httpx_mock) -> None:
+    # A 200 whose body is not JSON falls back to the raw text rather than raising.
+    httpx_mock.add_response(url="http://localhost:9090/health", text="OK")
+    with Client(Network.LOCAL) as client:
+        assert client._request("GET", "/health") == "OK"
