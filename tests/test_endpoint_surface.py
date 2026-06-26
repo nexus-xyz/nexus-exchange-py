@@ -10,6 +10,9 @@ the existing files this exercises every implemented REST route at least once.
 
 from __future__ import annotations
 
+import hashlib
+import hmac
+
 import pytest
 
 from nexus_exchange import Client, MissingCredentialsError, Network
@@ -23,12 +26,22 @@ def _authed() -> Client:
 
 
 def _assert_signed(req, method: str, path: str) -> None:
-    """Every signed request carries the HMAC headers and hits the right route."""
+    """Every signed request hits the right route AND carries a signature that
+    matches a reference HMAC over the canonical string — so a signing-logic bug
+    (wrong canonical string, wrong key encoding) fails the test rather than
+    silently passing on header-presence alone."""
     assert req.method == method
     assert req.url.raw_path.decode().split("?")[0] == path
     assert req.headers["x-api-key"] == "nx_test"
-    assert "x-timestamp" in req.headers
-    assert "x-signature" in req.headers
+    ts = req.headers["x-timestamp"]
+    assert ts
+    # Recompute the canonical string the indexer verifies (client.py::_sign):
+    #   <ts>\n<METHOD>\n<path>\n<query>\n<sha256hex(body)>
+    query = req.url.query.decode()
+    body_hash = hashlib.sha256(req.content).hexdigest()
+    canonical = "\n".join([ts, method.upper(), path, query, body_hash])
+    expected = hmac.new(bytes.fromhex(_SECRET), canonical.encode(), hashlib.sha256).hexdigest()
+    assert req.headers["x-signature"] == expected
 
 
 # -- signed account reads with thin existing coverage --------------------------

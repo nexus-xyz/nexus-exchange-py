@@ -32,14 +32,17 @@ def main() -> None:
             f"status={resp.order.status}"
         )
 
-        fetched = client.fetch_order(oid)
-        print(f"fetched {fetched.id}: status={fetched.status} filled={fetched.filled_qty}")
+        try:
+            fetched = client.fetch_order(oid)
+            print(f"fetched {fetched.id}: status={fetched.status} filled={fetched.filled_qty}")
 
-        open_orders = client.fetch_open_orders()
-        print(f"open orders: {len(open_orders)}")
-
-        client.cancel_order(oid)
-        print(f"cancelled {oid}")
+            open_orders = client.fetch_open_orders()
+            print(f"open orders: {len(open_orders)}")
+        finally:
+            # Always cancel, even if a read above raises, so the example never
+            # leaves a resting order on the book.
+            client.cancel_order(oid)
+            print(f"cancelled {oid}")
 
 
 if __name__ == "__main__":

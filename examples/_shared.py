@@ -43,6 +43,9 @@ def make_signed_client() -> Client:
         )
         raise SystemExit(2)
     base_url = os.environ.get("NEXUS_BASE_URL")
+    # NEXUS_NETWORK is honored; the default differs from make_client (LOCAL, not
+    # STABLE) on purpose — a signed/trading example should default to local so it
+    # can't accidentally place real orders against a public network.
     network = Network(os.environ.get("NEXUS_NETWORK", Network.LOCAL.value))
     print(f"-> {base_url or network.base_url}")
     return Client(network=network, base_url=base_url, api_key=api_key, api_secret=api_secret)
