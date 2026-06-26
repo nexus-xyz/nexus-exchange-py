@@ -94,10 +94,12 @@ def test_fetch_order_hits_id_path_and_parses(httpx_mock) -> None:
 
 
 def test_cancel_all_orders_signs_delete_collection(httpx_mock) -> None:
-    httpx_mock.add_response(url=f"{_BASE}/orders", method="DELETE", json={"cancelled": 3})
+    # Per the v0.5.0 spec, DELETE /orders returns 200 with no body, so the client
+    # yields None (matches tests/test_client.py). Mock an empty 200 accordingly.
+    httpx_mock.add_response(url=f"{_BASE}/orders", method="DELETE")
     with _authed() as client:
         result = client.cancel_all_orders()
-    assert result == {"cancelled": 3}
+    assert result is None
     _assert_signed(httpx_mock.get_request(), "DELETE", "/orders")
 
 
