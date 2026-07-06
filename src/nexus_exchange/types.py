@@ -545,6 +545,13 @@ class OrderRequest:
 
     Build with :meth:`limit` or :meth:`market`. ``price`` / ``reduce_only`` are
     omitted from the wire payload when ``None``.
+
+    ``time_in_force`` is sent verbatim and the engine is case-sensitive:
+    ``"GTC"``, ``"IOC"``, ``"FOK"`` (uppercase) or ``"PostOnly"`` (PascalCase —
+    ``"POSTONLY"`` is rejected). A post-only (add-liquidity-only) order is
+    rejected if it would take liquidity (cross the book) on entry, guaranteeing
+    it rests as a maker; a crossing post-only order is rejected server-side
+    with the ``WouldTakeLiquidity`` error code.
     """
 
     market_id: str
@@ -566,6 +573,9 @@ class OrderRequest:
         *,
         reduce_only: bool | None = None,
     ) -> OrderRequest:
+        """A limit order. ``time_in_force`` accepts ``"GTC"`` (default),
+        ``"IOC"``, ``"FOK"``, or ``"PostOnly"`` — see the class docstring for
+        the exact wire values and post-only semantics."""
         return cls(
             market_id=market_id,
             side=side,
