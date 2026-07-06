@@ -523,18 +523,19 @@ class Order:
 class OrderResponse:
     """Response to ``POST /orders``: the resulting order plus immediate fills.
 
-    ``fills`` is currently untyped in the spec, so it stays as raw dicts.
+    ``fills`` is typed as :class:`Fill` (the spec types the fill shape as of
+    v0.5.0); the full decoded response stays on :attr:`raw`.
     """
 
     order: Order
-    fills: list[dict[str, Any]]
+    fills: list[Fill]
     raw: dict[str, Any]
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> OrderResponse:
         return cls(
             order=Order.from_dict(d.get("order", {})),
-            fills=list(d.get("fills", [])),
+            fills=[Fill.from_dict(f) for f in d.get("fills", []) if isinstance(f, dict)],
             raw=d,
         )
 
@@ -688,6 +689,54 @@ class LeverageUpdate:
         return cls(
             market_id=str(d.get("market_id", "")),
             leverage=int(d.get("leverage", 0)),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class BatchOrderResult:
+    """One entry in the array returned by ``POST /orders/batch``.
+
+    The batch is processed sequentially and non-atomically, so each entry
+    independently reports either a placed order or a per-order rejection, in
+    request order. The spec models this as a union tagged by ``outcome``:
+
+    * ``outcome == "ok"`` carries the same ``{ order, fills }`` shape as
+      ``POST /orders`` — :attr:`order` is set (and :attr:`fills` populated),
+      while :attr:`error` / :attr:`message` are ``None``.
+    * ``outcome == "err"`` mirrors the global error envelope —
+      :attr:`error` and :attr:`message` are set while :attr:`order` is ``None``.
+
+    Use :attr:`is_ok` / :attr:`is_err` to branch. Unknown/absent fields decode to
+    ``None`` rather than failing, and the full entry stays on :attr:`raw`.
+    """
+
+    outcome: str
+    order: Order | None
+    fills: list[Fill]
+    error: str | None
+    message: str | None
+    raw: dict[str, Any]
+
+    @property
+    def is_ok(self) -> bool:
+        """True when this entry placed an order (``outcome == "ok"``)."""
+        return self.outcome == "ok"
+
+    @property
+    def is_err(self) -> bool:
+        """True when this entry was rejected (``outcome == "err"``)."""
+        return self.outcome == "err"
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BatchOrderResult:
+        order_raw = d.get("order")
+        return cls(
+            outcome=str(d.get("outcome", "")),
+            order=Order.from_dict(order_raw) if isinstance(order_raw, dict) else None,
+            fills=[Fill.from_dict(f) for f in d.get("fills", []) if isinstance(f, dict)],
+            error=opt_str(d.get("error")),
+            message=opt_str(d.get("message")),
             raw=d,
         )
 

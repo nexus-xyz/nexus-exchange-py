@@ -28,6 +28,7 @@ from .types import (
     AgentInfo,
     AmendOrder,
     ApiKeyInfo,
+    BatchOrderResult,
     CreditResult,
     DepositResult,
     Fill,
@@ -393,14 +394,22 @@ class Client:
         data = self._request("POST", "/orders", body=order.to_payload(), signed=True, direct=True)
         return OrderResponse.from_dict(data if isinstance(data, dict) else {})
 
-    def create_orders(self, orders: list[OrderRequest]) -> Any:
+    def create_orders(self, orders: list[OrderRequest]) -> list[BatchOrderResult]:
         """``POST /orders/batch`` — submit a batch of orders (sequential, non-atomic).
 
-        Requires credentials. The per-order result array is untyped in the spec,
-        so the raw decoded JSON is returned.
+        Requires credentials. Returns one :class:`BatchOrderResult` per submitted
+        order, in request order. The batch is non-atomic, so each entry
+        independently reports either a placed order (``outcome == "ok"``) or a
+        per-order rejection (``outcome == "err"``) — check ``result.is_ok`` /
+        ``result.is_err`` on each entry.
         """
         body = [o.to_payload() for o in orders]
-        return self._request("POST", "/orders/batch", body=body, signed=True, direct=True)
+        data = self._request("POST", "/orders/batch", body=body, signed=True, direct=True)
+        return [
+            BatchOrderResult.from_dict(r)
+            for r in (data if isinstance(data, list) else [])
+            if isinstance(r, dict)
+        ]
 
     def fetch_open_orders(self) -> list[Order]:
         """``GET /orders`` — open orders for the account. Requires credentials."""

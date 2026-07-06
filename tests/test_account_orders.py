@@ -14,6 +14,7 @@ from decimal import Decimal
 import pytest
 
 from nexus_exchange import (
+    BatchOrderResult,
     Client,
     MissingCredentialsError,
     Network,
@@ -215,7 +216,7 @@ def test_market_order_omits_price() -> None:
 
 def test_create_orders_batch_sends_array(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/orders/batch", json=[{"status": "ok"}]
+        url="http://localhost:9090/api/v1/orders/batch", json=[{"outcome": "ok"}]
     )
     orders = [
         OrderRequest.limit("BTC-USDX-PERP", "Buy", Decimal("50000"), Decimal("0.1")),
@@ -226,6 +227,77 @@ def test_create_orders_batch_sends_array(httpx_mock) -> None:
     body = json.loads(httpx_mock.get_request().content)
     assert isinstance(body, list) and len(body) == 2
     assert body[0]["market_id"] == "BTC-USDX-PERP"
+
+
+def test_create_orders_batch_parses_typed_results(httpx_mock) -> None:
+    # Per-order results, in request order: one placed order (ok) and one rejection
+    # (err). The batch is non-atomic, so both outcomes coexist in a 201 response.
+    httpx_mock.add_response(
+        url="http://localhost:9090/api/v1/orders/batch",
+        json=[
+            {
+                "outcome": "ok",
+                "order": {
+                    "id": "o1",
+                    "market_id": "BTC-USDX-PERP",
+                    "side": "Buy",
+                    "order_type": "Limit",
+                    "price": "50000",
+                    "quantity": "0.1",
+                    "filled_qty": "0.1",
+                    "status": "Filled",
+                    "time_in_force": "GTC",
+                    "created_at": 1776033900000,
+                    "updated_at": 1776033900000,
+                },
+                "fills": [
+                    {
+                        "id": "f1",
+                        "order_id": "o1",
+                        "market_id": "BTC-USDX-PERP",
+                        "side": "buy",
+                        "price": "50000",
+                        "size": "0.1",
+                        "fee": "0.25",
+                        "taker_or_maker": "taker",
+                        "timestamp": 1776033900000,
+                        "is_liquidation": False,
+                    }
+                ],
+            },
+            {
+                "outcome": "err",
+                "error": "insufficient_margin",
+                "message": "not enough collateral for this order",
+            },
+        ],
+    )
+    orders = [
+        OrderRequest.limit("BTC-USDX-PERP", "Buy", Decimal("50000"), Decimal("0.1")),
+        OrderRequest.market("ETH-USDX-PERP", "Sell", Decimal("1")),
+    ]
+    with _authed() as client:
+        results = client.create_orders(orders)
+
+    assert isinstance(results, list) and len(results) == 2
+    assert all(isinstance(r, BatchOrderResult) for r in results)
+
+    ok, err = results
+    assert ok.is_ok and not ok.is_err
+    assert ok.outcome == "ok"
+    assert ok.order is not None
+    assert ok.order.id == "o1"
+    assert ok.order.price == Decimal("50000")
+    assert len(ok.fills) == 1
+    assert ok.fills[0].fee == Decimal("0.25")
+    assert ok.error is None and ok.message is None
+
+    assert err.is_err and not err.is_ok
+    assert err.outcome == "err"
+    assert err.order is None
+    assert err.fills == []
+    assert err.error == "insufficient_margin"
+    assert err.message == "not enough collateral for this order"
 
 
 def test_fetch_open_orders_parses(httpx_mock) -> None:
