@@ -53,8 +53,15 @@ from .types import (
 __all__ = ["Client", "Network", "DEFAULT_USER_AGENT"]
 
 #: Identifies Python-SDK traffic in the exchange's per-client usage metrics.
-DEFAULT_USER_AGENT = "nexus-exchange-py/0.1.0"
+DEFAULT_USER_AGENT = "nexus-exchange-py/0.2.0"
 DEFAULT_TIMEOUT = 30.0
+
+#: Path prefix for the direct-service ("/api/v1") surface. Under the gateway
+#: elimination (ENG-4740) each backend service exposes its own REST API under
+#: this prefix, served at the host root rather than the ``/api/exchange``
+#: gateway base. The HMAC signature is computed over the full request path
+#: *including* this prefix (e.g. ``/api/v1/orders``), matching the server.
+API_V1_PREFIX = "/api/v1"
 
 
 def _query(**params: Any) -> str:
@@ -76,9 +83,21 @@ class Network(str, Enum):
 
     @property
     def base_url(self) -> str:
+        """Legacy gateway base (``/api/exchange``) for routes not yet migrated
+        to the direct ``/api/v1`` service."""
         return {
             Network.STABLE: "https://exchange.nexus.xyz/api/exchange",
             Network.BETA: "https://beta.exchange.nexus.xyz/api/exchange",
+            Network.LOCAL: "http://localhost:9090",
+        }[self]
+
+    @property
+    def direct_base_url(self) -> str:
+        """Direct-service base for the ``/api/v1`` surface — the host root, with
+        no ``/api/exchange`` gateway prefix (see :data:`API_V1_PREFIX`)."""
+        return {
+            Network.STABLE: "https://exchange.nexus.xyz",
+            Network.BETA: "https://beta.exchange.nexus.xyz",
             Network.LOCAL: "http://localhost:9090",
         }[self]
 
@@ -90,6 +109,13 @@ class Client:
     ``api_secret`` (HMAC) to sign requests. Note the public gateway proxies
     signed calls to the *site* account; for per-account auth point ``base_url``
     at a direct gateway (e.g. ``Network.LOCAL``). See the README.
+
+    Routing targets two bases. The migrated market-data and account/trading
+    surface is served directly by its backend service under ``/api/v1`` at the
+    host root (:attr:`Network.direct_base_url`); routes not yet migrated stay on
+    the legacy ``/api/exchange`` gateway (:attr:`Network.base_url`). A custom
+    ``base_url`` overrides *both* and must therefore point at the service root
+    (e.g. ``http://localhost:9090``), not a ``/api/exchange`` gateway URL.
 
     Usable as a context manager::
 
@@ -108,6 +134,10 @@ class Client:
         http_client: httpx.Client | None = None,
     ) -> None:
         self._base_url = (base_url or network.base_url).rstrip("/")
+        # Direct-service base for the /api/v1 surface. A caller-supplied base_url
+        # overrides both bases (the local/direct-gateway case); otherwise each
+        # network supplies its own gateway and direct roots.
+        self._direct_base_url = (base_url or network.direct_base_url).rstrip("/")
         self._api_key = api_key
         self._api_secret = api_secret
         self._owns_http = http_client is None
@@ -131,15 +161,23 @@ class Client:
         return bool(self._api_key and self._api_secret)
 
     # -- public market data ----------------------------------------------
+    # Most market-data reads are served by the direct /api/v1 service
+    # (``direct=True``). A handful have no /api/v1 equivalent yet and stay on
+    # the legacy gateway: ``GET /markets`` (the list route), ``/adl-events``,
+    # ``/account/{addr}/adl-history`` and ``/health``.
     def fetch_markets(self) -> list[Market]:
-        """``GET /markets`` — all tradable markets and their trading rules."""
+        """``GET /markets`` — all tradable markets and their trading rules.
+
+        Not migrated to ``/api/v1`` (no direct-service route yet); stays on the
+        legacy gateway.
+        """
         data = self._request("GET", "/markets")
         rows = data if isinstance(data, list) else data.get("markets", [])
         return [Market.from_dict(m) for m in rows]
 
     def fetch_market_summaries(self) -> list[MarketSummary]:
         """``GET /markets/summary`` — per-market 24h volume and halt state."""
-        data = self._request("GET", "/markets/summary")
+        data = self._request("GET", "/markets/summary", direct=True)
         rows = data if isinstance(data, list) else data.get("markets", [])
         return [MarketSummary.from_dict(m) for m in rows]
 
@@ -149,25 +187,27 @@ class Client:
         The envelope is a bare object keyed by market id (spec:
         ``additionalProperties: Ticker``); an empty result is ``{}``.
         """
-        data = self._request("GET", "/tickers")
+        data = self._request("GET", "/tickers", direct=True)
         if not isinstance(data, dict):
             return {}
         return {mid: Ticker.from_dict(t) for mid, t in data.items()}
 
     def fetch_ticker(self, market_id: str) -> Ticker:
         """``GET /markets/{market_id}/ticker`` — latest ticker for one market."""
-        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/ticker")
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/ticker", direct=True)
         return Ticker.from_dict(data if isinstance(data, dict) else {"symbol": market_id})
 
     def fetch_order_book(self, market_id: str) -> OrderBook:
         """``GET /markets/{market_id}/orderbook`` — order book snapshot."""
-        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/orderbook")
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/orderbook", direct=True)
         return OrderBook.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_trades(self, market_id: str, limit: int | None = None) -> list[Trade]:
         """``GET /markets/{market_id}/trades`` — recent public trades (newest first)."""
         query = _query(limit=limit)
-        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/trades", query=query)
+        data = self._request(
+            "GET", f"/markets/{quote(market_id, safe='')}/trades", query=query, direct=True
+        )
         rows = data if isinstance(data, list) else []
         return [Trade.from_dict(t) for t in rows]
 
@@ -179,7 +219,9 @@ class Client:
     ) -> list[Ohlcv]:
         """``GET /markets/{market_id}/candles`` — OHLCV candles."""
         query = _query(timeframe=timeframe, limit=limit)
-        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/candles", query=query)
+        data = self._request(
+            "GET", f"/markets/{quote(market_id, safe='')}/candles", query=query, direct=True
+        )
         rows = data if isinstance(data, list) else []
         return [Ohlcv.from_row(r) for r in rows]
 
@@ -188,18 +230,20 @@ class Client:
     ) -> list[FundingSample]:
         """``GET /markets/{market_id}/funding`` — intra-hour funding-rate history."""
         query = _query(limit=limit)
-        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/funding", query=query)
+        data = self._request(
+            "GET", f"/markets/{quote(market_id, safe='')}/funding", query=query, direct=True
+        )
         rows = data if isinstance(data, list) else []
         return [FundingSample.from_dict(s) for s in rows]
 
     def fetch_mark_price(self, market_id: str) -> MarkPrice:
         """``GET /markets/{market_id}/mark-price`` — current mark price."""
-        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/mark-price")
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/mark-price", direct=True)
         return MarkPrice.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_market_status(self, market_id: str) -> MarketStatus:
         """``GET /markets/{market_id}/status`` — lifecycle / halt status."""
-        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/status")
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/status", direct=True)
         return MarketStatus.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_market_adl_events(self, market_id: str, limit: int | None = None) -> list[AdlEvent]:
@@ -246,17 +290,17 @@ class Client:
     # -- account (signed reads) ------------------------------------------
     def fetch_balance(self) -> AccountSummary:
         """``GET /account`` — balance and collateral summary. Requires credentials."""
-        data = self._request("GET", "/account", signed=True)
+        data = self._request("GET", "/account", signed=True, direct=True)
         return AccountSummary.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_positions(self) -> list[Position]:
         """``GET /positions`` — open positions. Requires credentials."""
-        data = self._request("GET", "/positions", signed=True)
+        data = self._request("GET", "/positions", signed=True, direct=True)
         return [Position.from_dict(p) for p in (data if isinstance(data, list) else [])]
 
     def fetch_my_trades(self) -> list[Fill]:
         """``GET /fills`` — recent fills (private executions). Requires credentials."""
-        data = self._request("GET", "/fills", signed=True)
+        data = self._request("GET", "/fills", signed=True, direct=True)
         return [Fill.from_dict(f) for f in (data if isinstance(data, list) else [])]
 
     def fetch_withdrawals(self) -> list[Withdrawal]:
@@ -269,12 +313,15 @@ class Client:
 
         Requires credentials. Does not consume a rate-limit token.
         """
-        data = self._request("GET", "/account/rate-limit", signed=True)
+        data = self._request("GET", "/account/rate-limit", signed=True, direct=True)
         return RateLimitStatus.from_dict(data if isinstance(data, dict) else {})
 
     # -- account (signed writes) -----------------------------------------
     def deposit(self, amount: Decimal | str) -> DepositResult:
-        """``POST /account/deposit`` — deposit USDX collateral. Requires credentials."""
+        """``POST /account/deposit`` — deposit USDX collateral. Requires credentials.
+
+        Not in the ``/api/v1`` spec; stays on the legacy gateway.
+        """
         data = self._request("POST", "/account/deposit", body={"amount": str(amount)}, signed=True)
         return DepositResult.from_dict(data if isinstance(data, dict) else {})
 
@@ -285,13 +332,13 @@ class Client:
         credentials.
         """
         body = {} if amount is None else {"amount": str(amount)}
-        data = self._request("POST", "/account/credit", body=body, signed=True)
+        data = self._request("POST", "/account/credit", body=body, signed=True, direct=True)
         return CreditResult.from_dict(data if isinstance(data, dict) else {})
 
     # -- orders (signed) -------------------------------------------------
     def create_order(self, order: OrderRequest) -> OrderResponse:
         """``POST /orders`` — place a single order. Requires credentials."""
-        data = self._request("POST", "/orders", body=order.to_payload(), signed=True)
+        data = self._request("POST", "/orders", body=order.to_payload(), signed=True, direct=True)
         return OrderResponse.from_dict(data if isinstance(data, dict) else {})
 
     def create_orders(self, orders: list[OrderRequest]) -> Any:
@@ -301,27 +348,36 @@ class Client:
         so the raw decoded JSON is returned.
         """
         body = [o.to_payload() for o in orders]
-        return self._request("POST", "/orders/batch", body=body, signed=True)
+        return self._request("POST", "/orders/batch", body=body, signed=True, direct=True)
 
     def fetch_open_orders(self) -> list[Order]:
         """``GET /orders`` — open orders for the account. Requires credentials."""
-        data = self._request("GET", "/orders", signed=True)
+        data = self._request("GET", "/orders", signed=True, direct=True)
         return [Order.from_dict(o) for o in (data if isinstance(data, list) else [])]
 
     def fetch_order(self, order_id: str) -> Order:
-        """``GET /orders/{order_id}`` — fetch a single order. Requires credentials."""
+        """``GET /orders/{order_id}`` — fetch a single order. Requires credentials.
+
+        Stays on the legacy gateway: the ``/api/v1`` order-by-id route exposes
+        only ``PATCH`` (amend) and ``DELETE`` (cancel); GET-by-id was not
+        migrated to the direct service.
+        """
         data = self._request("GET", f"/orders/{quote(order_id, safe='')}", signed=True)
         return Order.from_dict(data if isinstance(data, dict) else {})
 
     def cancel_order(self, order_id: str) -> Any:
         """``DELETE /orders/{order_id}`` — cancel a single order. Requires credentials."""
-        return self._request("DELETE", f"/orders/{quote(order_id, safe='')}", signed=True)
+        return self._request(
+            "DELETE", f"/orders/{quote(order_id, safe='')}", signed=True, direct=True
+        )
 
     def cancel_all_orders(self) -> Any:
         """``DELETE /orders`` — cancel all open orders. Requires credentials."""
-        return self._request("DELETE", "/orders", signed=True)
+        return self._request("DELETE", "/orders", signed=True, direct=True)
 
     # -- keys / agents (signed) ------------------------------------------
+    # None of the keys / agents / ws-token routes are in the /api/v1 spec yet,
+    # so they stay on the legacy gateway (no ``direct=True``).
     def fetch_api_keys(self) -> list[ApiKeyInfo]:
         """``GET /keys`` — API keys for the session. Requires credentials."""
         data = self._request("GET", "/keys", signed=True)
@@ -346,6 +402,8 @@ class Client:
         return WsToken.from_dict(data if isinstance(data, dict) else {})
 
     # -- admin (signed) --------------------------------------------------
+    # Admin/observability was intentionally excluded from the /api/v1 spec
+    # (ENG-4748), so these stay on the legacy gateway.
     def set_account_tier(self, address: str, tier: str) -> TierOverride:
         """``PUT /admin/tiers`` — set an account's rate-limit tier. Requires admin creds."""
         data = self._request(
@@ -384,17 +442,25 @@ class Client:
         query: str = "",
         body: Any | None = None,
         signed: bool = False,
+        direct: bool = False,
     ) -> Any:
+        # `direct` routes target the /api/v1 backend service at the host root;
+        # everything else stays on the legacy gateway base. The /api/v1 prefix
+        # is part of the signed canonical path, so resolve the full path *once*
+        # and use the same value for both signing and the sent URL.
+        base = self._direct_base_url if direct else self._base_url
+        full_path = f"{API_V1_PREFIX}{path}" if direct else path
+
         body_bytes = b"" if body is None else json.dumps(body).encode()
         headers: dict[str, str] = {}
         if body is not None:
             headers["content-type"] = "application/json"
         if signed:
-            headers.update(self._sign(method, path, query, body_bytes))
+            headers.update(self._sign(method, full_path, query, body_bytes))
 
         # Build the URL by hand so the signed query matches the sent query byte
         # for byte (no client-side re-encoding).
-        url = f"{self._base_url}{path}"
+        url = f"{base}{full_path}"
         if query:
             url = f"{url}?{query}"
 

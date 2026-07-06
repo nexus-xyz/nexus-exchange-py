@@ -23,7 +23,7 @@ import pytest
 
 from nexus_exchange import ApiError, Client
 
-# Canned, spec-shaped (v0.4.0) response bodies, keyed by request path.
+# Canned, spec-shaped (v0.6.1) response bodies, keyed by request path.
 _MARKETS = [
     {
         "market_id": "BTC-USDX-PERP",
@@ -86,9 +86,11 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802 (http.server dispatch name)
+        # `/markets` and `/health` are legacy-gateway routes; the ticker read is
+        # served by the direct /api/v1 service, so it carries the /api/v1 prefix.
         if self.path == "/markets":
             self._send(200, _MARKETS)
-        elif self.path == "/markets/BTC-USDX-PERP/ticker":
+        elif self.path == "/api/v1/markets/BTC-USDX-PERP/ticker":
             self._send(200, _TICKER)
         elif self.path == "/health":
             self._send(200, _HEALTH)

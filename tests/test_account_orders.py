@@ -29,7 +29,7 @@ def _authed() -> Client:
 
 def test_fetch_balance_parses_and_signs(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/account",
+        url="http://localhost:9090/api/v1/account",
         json={
             "balance": "1000.00",
             "collateral": "1000.00",
@@ -58,7 +58,7 @@ def test_fetch_balance_parses_and_signs(httpx_mock) -> None:
 
 def test_fetch_balance_tolerates_missing_liquidation_price(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/account",
+        url="http://localhost:9090/api/v1/account",
         json={
             "balance": "1000.00",
             "collateral": "1000.00",
@@ -83,7 +83,7 @@ def test_fetch_balance_tolerates_missing_liquidation_price(httpx_mock) -> None:
 
 def test_fetch_my_trades_parses_fills(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/fills",
+        url="http://localhost:9090/api/v1/fills",
         json=[
             {
                 "id": "f1",
@@ -107,7 +107,7 @@ def test_fetch_my_trades_parses_fills(httpx_mock) -> None:
 
 def test_fetch_rate_limit_status_handles_nulls(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/account/rate-limit",
+        url="http://localhost:9090/api/v1/account/rate-limit",
         json={"tier": "unlimited", "limit": None, "remaining": None, "reset_at_ms": None},
     )
     with _authed() as client:
@@ -129,7 +129,7 @@ def test_deposit_sends_amount_and_parses(httpx_mock) -> None:
 
 def test_claim_credit_omits_amount_when_none(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/account/credit",
+        url="http://localhost:9090/api/v1/account/credit",
         json={"amount": "100", "credited_today": "100", "daily_limit": "1000"},
     )
     with _authed() as client:
@@ -140,7 +140,7 @@ def test_claim_credit_omits_amount_when_none(httpx_mock) -> None:
 
 def test_create_order_serializes_limit_body(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/orders",
+        url="http://localhost:9090/api/v1/orders",
         json={
             "order": {
                 "id": "o1",
@@ -182,7 +182,9 @@ def test_market_order_omits_price() -> None:
 
 
 def test_create_orders_batch_sends_array(httpx_mock) -> None:
-    httpx_mock.add_response(url="http://localhost:9090/orders/batch", json=[{"status": "ok"}])
+    httpx_mock.add_response(
+        url="http://localhost:9090/api/v1/orders/batch", json=[{"status": "ok"}]
+    )
     orders = [
         OrderRequest.limit("BTC-USDX-PERP", "Buy", Decimal("50000"), Decimal("0.1")),
         OrderRequest.market("ETH-USDX-PERP", "Sell", Decimal("1")),
@@ -196,7 +198,7 @@ def test_create_orders_batch_sends_array(httpx_mock) -> None:
 
 def test_fetch_open_orders_parses(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/orders",
+        url="http://localhost:9090/api/v1/orders",
         json=[
             {
                 "id": "o1",
@@ -221,7 +223,7 @@ def test_fetch_open_orders_parses(httpx_mock) -> None:
 
 def test_cancel_order_signs_delete(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/orders/o1", method="DELETE", json={"cancelled": True}
+        url="http://localhost:9090/api/v1/orders/o1", method="DELETE", json={"cancelled": True}
     )
     with _authed() as client:
         client.cancel_order("o1")

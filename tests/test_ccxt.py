@@ -89,7 +89,7 @@ def test_load_markets_caches_by_symbol(httpx_mock) -> None:
 
 def test_fetch_ticker_normalizes(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/markets/BTC-USDX-PERP/ticker",
+        url="http://localhost:9090/api/v1/markets/BTC-USDX-PERP/ticker",
         json={
             "symbol": "BTC-USDX-PERP",
             "timestamp": 1_776_000_000_000,
@@ -122,7 +122,7 @@ def test_fetch_ticker_normalizes(httpx_mock) -> None:
 
 def test_fetch_order_book_levels_and_limit(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/markets/BTC-USDX-PERP/orderbook",
+        url="http://localhost:9090/api/v1/markets/BTC-USDX-PERP/orderbook",
         json={
             "symbol": "BTC-USDX-PERP",
             "bids": [[65000.0, 1.0], [64999.0, 2.0], [64998.0, 3.0]],
@@ -147,7 +147,7 @@ def test_fetch_order_book_levels_and_limit(httpx_mock) -> None:
 
 def test_fetch_ohlcv_rows_and_query(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/markets/BTC-USDX-PERP/candles?timeframe=5m&limit=2",
+        url="http://localhost:9090/api/v1/markets/BTC-USDX-PERP/candles?timeframe=5m&limit=2",
         json=[
             [1_776_000_000_000, 100.0, 110.0, 95.0, 105.0, 1000.0],
             [1_776_000_300_000, 105.0, 115.0, 100.0, 112.0, 1200.0],
@@ -164,7 +164,7 @@ def test_fetch_ohlcv_rows_and_query(httpx_mock) -> None:
 
 def test_fetch_ohlcv_since_filters_client_side(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/markets/BTC-USDX-PERP/candles?timeframe=1m",
+        url="http://localhost:9090/api/v1/markets/BTC-USDX-PERP/candles?timeframe=1m",
         json=[
             [1_000, 1.0, 1.0, 1.0, 1.0, 1.0],
             [2_000, 2.0, 2.0, 2.0, 2.0, 2.0],
@@ -186,7 +186,7 @@ def test_fetch_ohlcv_rejects_unknown_timeframe() -> None:
 
 def test_fetch_trades_maps_unified(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/markets/BTC-USDX-PERP/trades?limit=2",
+        url="http://localhost:9090/api/v1/markets/BTC-USDX-PERP/trades?limit=2",
         json=[
             {
                 "id": "t2",
@@ -228,7 +228,7 @@ def test_fetch_trades_maps_unified(httpx_mock) -> None:
 
 def test_fetch_trades_since_filters(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/markets/BTC-USDX-PERP/trades",
+        url="http://localhost:9090/api/v1/markets/BTC-USDX-PERP/trades",
         json=[
             {"id": "a", "side": "buy", "price": 1, "amount": 1, "cost": 1, "timestamp": 500},
             {"id": "b", "side": "buy", "price": 1, "amount": 1, "cost": 1, "timestamp": 1500},
@@ -244,7 +244,7 @@ def test_fetch_trades_since_filters(httpx_mock) -> None:
 
 def test_fetch_tickers_keyed_and_filtered(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/tickers",
+        url="http://localhost:9090/api/v1/tickers",
         json={
             "BTC-USDX-PERP": {"symbol": "BTC-USDX-PERP", "last": 65000.0},
             "ETH-USDX-PERP": {"symbol": "ETH-USDX-PERP", "last": 3200.0},

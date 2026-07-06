@@ -66,6 +66,19 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
 Anything not listed there is not wrapped yet — contributions welcome.
 
+### Routing: direct `/api/v1` service vs. legacy gateway
+
+As the REST gateway is retired (ENG-4740), backend services expose their own
+REST API under an **`/api/v1`** prefix served at the host root
+(`https://exchange.nexus.xyz`), rather than the `…/api/exchange` gateway. The
+migrated market-data and account/trading routes now target this direct service;
+the HMAC signature covers the full path (e.g. `/api/v1/orders`). Routes with no
+`/api/v1` equivalent yet — `GET /markets`, `/health`, ADL history, `GET
+/orders/{id}`, deposits, keys/agents, WS tokens and admin tiers — stay on the
+legacy gateway. This split is internal; method names and signatures are
+unchanged. A custom `base_url` overrides both bases, so point it at the service
+root (e.g. `http://localhost:9090`), not a `/api/exchange` URL.
+
 ## Authentication
 
 Signed requests use the canonical HMAC-SHA256 scheme the exchange verifies:
@@ -150,9 +163,15 @@ dependency. See `examples/ccxt_market_data.py`.
 
 <!-- api-version-sync:start -->
 
-Currently targets Exchange API spec **`v0.4.0`**.
+Currently targets Exchange API spec **`v0.6.1`**.
 
 <!-- api-version-sync:end -->
+
+> **⏳ Pending upstream release.** `v0.6.1` is not published yet — it is cut when
+> the blocker PR [`nexus-xyz/nexus-exchange-api#41`](https://github.com/nexus-xyz/nexus-exchange-api/pull/41)
+> (ENG-4943) merges. Until then the `drift` CI check validates the `/api/v1`
+> surface against that PR's **branch** instead of a release tag; see the
+> RESTORE-on-merge note in [`.github/workflows/ci.yml`](./.github/workflows/ci.yml).
 
 The pinned version lives in [`.api-version`](./.api-version); the spec itself is
 published by
@@ -165,6 +184,7 @@ maintained by hand when an SDK release ships a new pin.
 | SDK version | API spec |
 |---|---|
 | `0.1.x` | `v0.4.0` |
+| `0.2.x` | `v0.6.1` |
 
 ## Development
 
