@@ -32,6 +32,7 @@ from .client import (
     PORTFOLIO_LIMIT_MAX,
     TRADES_LIMIT_MAX,
     Client,
+    RetryConfig,
     __version__,
 )
 from .errors import (
@@ -133,6 +134,7 @@ __all__ = [
     "BridgeWalletChallenge",
     "Client",
     "Network",
+    "RetryConfig",
     "NetworkConfig",
     "Funds",
     "SigningDomain",
