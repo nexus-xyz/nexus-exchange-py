@@ -19,10 +19,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `GET /orders/{id}`, deposits, keys/agents, WS tokens, admin tiers) stay on
   the legacy gateway. See `endpoints.txt` for the per-route split.
 
-  Pins the Exchange API spec to `v0.6.1` (was `v0.4.0`). **`v0.6.1` is not
-  released yet** — it is cut when `nexus-xyz/nexus-exchange-api#41` (ENG-4943)
-  merges. Until then the `drift` check validates against that PR's branch; the
-  release-tag check is restored on merge (see `.github/workflows/ci.yml`).
+  Pins the Exchange API spec to `v0.6.2` (was `v0.4.0`).
 
 - Pinned the Exchange API spec to `v0.4.0` (was `v0.3.5`).
 

@@ -163,15 +163,9 @@ dependency. See `examples/ccxt_market_data.py`.
 
 <!-- api-version-sync:start -->
 
-Currently targets Exchange API spec **`v0.6.1`**.
+Currently targets Exchange API spec **`v0.6.2`**.
 
 <!-- api-version-sync:end -->
-
-> **⏳ Pending upstream release.** `v0.6.1` is not published yet — it is cut when
-> the blocker PR [`nexus-xyz/nexus-exchange-api#41`](https://github.com/nexus-xyz/nexus-exchange-api/pull/41)
-> (ENG-4943) merges. Until then the `drift` CI check validates the `/api/v1`
-> surface against that PR's **branch** instead of a release tag; see the
-> RESTORE-on-merge note in [`.github/workflows/ci.yml`](./.github/workflows/ci.yml).
 
 The pinned version lives in [`.api-version`](./.api-version); the spec itself is
 published by
@@ -184,7 +178,7 @@ maintained by hand when an SDK release ships a new pin.
 | SDK version | API spec |
 |---|---|
 | `0.1.x` | `v0.4.0` |
-| `0.2.x` | `v0.6.1` |
+| `0.2.x` | `v0.6.2` |
 
 ## Development
 

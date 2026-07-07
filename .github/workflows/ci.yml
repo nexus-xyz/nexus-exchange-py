@@ -81,69 +81,26 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      # ───────────────────────────────────────────────────────────────────────
-      # TEMPORARY (ENG-4946): pinned spec v0.6.1 is NOT released yet.
-      #
-      # It is defined by the open blocker PR nexus-xyz/nexus-exchange-api#41
-      # (ENG-4943), which cuts v0.6.1 on merge. Until then, .api-version cannot
-      # match a published release, so the normal release-tag drift check below
-      # would (correctly) fail. In the meantime this step validates the /api/v1
-      # surface against the blocker PR BRANCH instead of a release tag.
-      #
-      # ┌─ RESTORE WHEN ENG-4943 MERGES AND v0.6.1 IS CUT ─────────────────────┐
-      # │ Delete this "against branch" step and uncomment the "against release"│
-      # │ step below. That points the pin verification back at the published   │
-      # │ release on the api repo's main, exactly as before this PR.           │
-      # └──────────────────────────────────────────────────────────────────────┘
-      - name: Check pinned API spec version (against blocker BRANCH — temporary)
+      - name: Check pinned API spec version against latest release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SPEC_REPO: nexus-xyz/nexus-exchange-api
-          # The ENG-4943 branch that adds /api/v1 and will cut v0.6.1 on merge.
-          SPEC_BRANCH: lucascampos/eng-4943-nexus-exchange-api-add-apiv1-routes-to-openapi-spec-cut
         run: |
           set -euo pipefail
           pinned="$(tr -d '[:space:]' < .api-version)"
           [ -n "$pinned" ] || { echo "::error file=.api-version::.api-version is empty"; exit 1; }
-          echo "Pinned API spec version (pending release): $pinned"
-          echo "::warning::Pinned to UNRELEASED spec ${pinned}; validating against blocker branch ${SPEC_BRANCH} (nexus-exchange-api#41). Restore the release-tag drift check when ENG-4943 merges."
+          echo "Pinned API spec version: $pinned"
           api="https://api.github.com/repos/${SPEC_REPO}"
-          # Fetch openapi.json off the blocker branch and confirm it carries the
-          # /api/v1 surface this SDK now targets. Non-fatal if unreachable (the
-          # branch may already be merged/deleted — that is the signal to restore
-          # the release check), but a reachable branch with no /api/v1 paths is
-          # a real error worth failing on.
-          if spec="$(curl -fsS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github.raw+json" \
-              "${api}/contents/openapi.json?ref=${SPEC_BRANCH}")"; then
-            n="$(printf '%s' "$spec" | jq '[.paths | keys[] | select(startswith("/api/v1"))] | length')"
-            echo "Blocker branch defines ${n} /api/v1 path items."
-            [ "$n" -gt 0 ] || { echo "::error::blocker branch ${SPEC_BRANCH} has no /api/v1 paths — spec/pin mismatch."; exit 1; }
-            echo "OK: /api/v1 surface present on the blocker branch."
-          else
-            echo "::warning::Could not read openapi.json from ${SPEC_BRANCH}; it may already be merged. If v0.6.1 is released, restore the release-tag drift check (see comment in ci.yml)."
+          pinned_status="$(curl -sS -o /dev/null -w '%{http_code}' \
+            -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+            "${api}/releases/tags/${pinned}")"
+          [ "$pinned_status" = "200" ] || { echo "::error::Pinned spec ${pinned} not found as a release in ${SPEC_REPO} (HTTP ${pinned_status})."; exit 1; }
+          latest="$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
+            "${api}/releases/latest" | jq -r '.tag_name // empty')"
+          [ -n "$latest" ] || { echo "::error::Could not determine latest release of ${SPEC_REPO}."; exit 1; }
+          echo "Latest API spec release:  $latest"
+          if [ "$pinned" != "$latest" ]; then
+            echo "::error::Spec drift: SDK pins ${pinned} but the latest Exchange API spec is ${latest}. Bump .api-version (and the README table) once updated."
+            exit 1
           fi
-      # ── RESTORE-ON-MERGE: re-enable this step (and delete the one above) once
-      # ── nexus-exchange-api#41 merges and v0.6.1 is published. ───────────────
-      # - name: Check pinned API spec version against latest release
-      #   env:
-      #     GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      #     SPEC_REPO: nexus-xyz/nexus-exchange-api
-      #   run: |
-      #     set -euo pipefail
-      #     pinned="$(tr -d '[:space:]' < .api-version)"
-      #     [ -n "$pinned" ] || { echo "::error file=.api-version::.api-version is empty"; exit 1; }
-      #     echo "Pinned API spec version: $pinned"
-      #     api="https://api.github.com/repos/${SPEC_REPO}"
-      #     pinned_status="$(curl -sS -o /dev/null -w '%{http_code}' \
-      #       -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
-      #       "${api}/releases/tags/${pinned}")"
-      #     [ "$pinned_status" = "200" ] || { echo "::error::Pinned spec ${pinned} not found as a release in ${SPEC_REPO} (HTTP ${pinned_status})."; exit 1; }
-      #     latest="$(curl -sS -H "Authorization: Bearer ${GH_TOKEN}" -H "Accept: application/vnd.github+json" \
-      #       "${api}/releases/latest" | jq -r '.tag_name // empty')"
-      #     [ -n "$latest" ] || { echo "::error::Could not determine latest release of ${SPEC_REPO}."; exit 1; }
-      #     echo "Latest API spec release:  $latest"
-      #     if [ "$pinned" != "$latest" ]; then
-      #       echo "::error::Spec drift: SDK pins ${pinned} but the latest Exchange API spec is ${latest}. Bump .api-version (and the README table) once updated."
-      #       exit 1
-      #     fi
-      #     echo "No drift: pinned to the latest API spec (${pinned})."
+          echo "No drift: pinned to the latest API spec (${pinned})."
