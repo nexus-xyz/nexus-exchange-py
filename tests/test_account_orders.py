@@ -174,6 +174,38 @@ def test_create_order_serializes_limit_body(httpx_mock) -> None:
     }
 
 
+def test_create_order_post_only_sends_exact_wire_value(httpx_mock) -> None:
+    # PostOnly is PascalCase on the wire (unlike uppercase GTC/IOC/FOK) — the
+    # engine rejects "POSTONLY", so the value must pass through verbatim.
+    httpx_mock.add_response(
+        url="http://localhost:9090/orders",
+        json={
+            "order": {
+                "id": "o2",
+                "market_id": "BTC-USDX-PERP",
+                "side": "Buy",
+                "order_type": "Limit",
+                "price": "50000",
+                "quantity": "0.5",
+                "filled_qty": "0",
+                "status": "Open",
+                "time_in_force": "PostOnly",
+                "created_at": 1776033900000,
+                "updated_at": 1776033900000,
+            },
+            "fills": [],
+        },
+    )
+    order = OrderRequest.limit(
+        "BTC-USDX-PERP", "Buy", Decimal("50000"), Decimal("0.5"), time_in_force="PostOnly"
+    )
+    with _authed() as client:
+        resp = client.create_order(order)
+    body = json.loads(httpx_mock.get_request().content)
+    assert body["time_in_force"] == "PostOnly"
+    assert resp.order.time_in_force == "PostOnly"
+
+
 def test_market_order_omits_price() -> None:
     payload = OrderRequest.market("BTC-USDX-PERP", "Sell", Decimal("1")).to_payload()
     assert "price" not in payload
