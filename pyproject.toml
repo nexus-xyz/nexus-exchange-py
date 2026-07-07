@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nexus-exchange"
-version = "0.1.0"
+version = "0.2.0"
 description = "Official Python SDK for the Nexus Exchange API (experimental)"
 readme = "README.md"
 requires-python = ">=3.10"
