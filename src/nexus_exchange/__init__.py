@@ -19,7 +19,7 @@ from .auth import (
     LoginRequest,
     LoginResponse,
 )
-from .client import DEFAULT_USER_AGENT, Client, Network
+from .client import DEFAULT_USER_AGENT, Client, Network, RetryConfig
 from .errors import (
     ApiError,
     AuthError,
@@ -65,6 +65,7 @@ __version__ = "0.2.0"
 __all__ = [
     "Client",
     "Network",
+    "RetryConfig",
     "Market",
     "MarketSummary",
     "MarketStatus",
