@@ -45,6 +45,7 @@ DELETE /keys/{key_id}
 GET /agents
 DELETE /agents/{address}
 POST /ws-tokens
+GET /ws
 PUT /admin/tiers
 GET /admin/tiers
 DELETE /admin/tiers/{address}
