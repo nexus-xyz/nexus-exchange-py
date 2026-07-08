@@ -59,6 +59,15 @@ from .types import (
     Withdrawal,
     WsToken,
 )
+from .ws import (
+    ACCOUNT_CHANNELS,
+    CHANNELS,
+    PUBLIC_CHANNELS,
+    WsClient,
+    WsError,
+    WsEvent,
+    WsSubscription,
+)
 
 __version__ = "0.2.0"
 
@@ -102,6 +111,13 @@ __all__ = [
     "AgentInfo",
     "TierOverride",
     "WsToken",
+    "WsClient",
+    "WsEvent",
+    "WsSubscription",
+    "WsError",
+    "PUBLIC_CHANNELS",
+    "ACCOUNT_CHANNELS",
+    "CHANNELS",
     "NexusExchangeError",
     "ApiError",
     "AuthError",

@@ -58,7 +58,7 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | Funds — `POST /account/deposit`, `/account/credit` | ✅ implemented |
 | Keys / agents / WS token — `/keys`, `/agents`, `POST /ws-tokens` | ✅ implemented |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
-| WebSocket streaming | ❌ not yet |
+| WebSocket streaming — `GET /ws` (async `WsClient`, multiplexed, auto-resume) | ✅ implemented (`pip install nexus-exchange[ws]`) |
 | Pagination helpers | ❌ not yet |
 | Rate-limit-aware retry (`429` / `Retry-After`, token bucket) | ❌ not yet |
 | OAuth auth | ❌ not yet |
