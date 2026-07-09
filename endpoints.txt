@@ -25,6 +25,7 @@ POST /api/v1/account/credit
 POST /api/v1/orders
 POST /api/v1/orders/batch
 GET /api/v1/orders
+PATCH /api/v1/orders/{order_id}
 DELETE /api/v1/orders/{order_id}
 DELETE /api/v1/orders
 
@@ -37,6 +38,7 @@ POST /auth/login
 POST /agents/register
 GET /withdrawals
 POST /account/deposit
+POST /account/margin
 GET /orders/{order_id}
 GET /keys
 DELETE /keys/{key_id}
