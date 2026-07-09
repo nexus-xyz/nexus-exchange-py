@@ -623,6 +623,76 @@ class OrderRequest:
 
 
 @dataclass(frozen=True)
+class AmendOrder:
+    """A resting order amendment (``PATCH /orders/{order_id}``).
+
+    Mirrors the Rust SDK's ``AmendOrder``. Set only the fields you want to
+    change; ``None`` fields are omitted from the wire payload, so an amend never
+    accidentally resets a field. At least one of ``price`` / ``size`` must be
+    set — :meth:`has_changes` reports whether that holds. Money is sent as
+    decimal strings.
+    """
+
+    price: Decimal | None = None
+    size: Decimal | None = None
+
+    def has_changes(self) -> bool:
+        """True when at least one field is set (i.e. the amend is non-empty)."""
+        return self.price is not None or self.size is not None
+
+    def to_payload(self) -> dict[str, Any]:
+        """Serialize to the JSON body; unset fields are omitted."""
+        body: dict[str, Any] = {}
+        if self.price is not None:
+            body["price"] = str(self.price)
+        if self.size is not None:
+            body["size"] = str(self.size)
+        return body
+
+
+@dataclass(frozen=True)
+class MarginAdjustment:
+    """Result of adding/removing isolated margin (``POST /account/margin``).
+
+    Mirrors the Rust SDK's ``MarginAdjustment``.
+    """
+
+    market_id: str
+    allocated_margin: Decimal
+    collateral: Decimal
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> MarginAdjustment:
+        return cls(
+            market_id=str(d.get("market_id", "")),
+            allocated_margin=to_decimal(d.get("allocated_margin", 0)),
+            collateral=to_decimal(d.get("collateral", 0)),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class LeverageUpdate:
+    """Result of setting a market's leverage (``POST /account/leverage``).
+
+    Mirrors the Rust SDK's ``LeverageUpdate``.
+    """
+
+    market_id: str
+    leverage: int
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> LeverageUpdate:
+        return cls(
+            market_id=str(d.get("market_id", "")),
+            leverage=int(d.get("leverage", 0)),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
 class DepositResult:
     """Result of a deposit (``POST /account/deposit``)."""
 

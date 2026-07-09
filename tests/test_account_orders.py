@@ -178,7 +178,7 @@ def test_create_order_post_only_sends_exact_wire_value(httpx_mock) -> None:
     # PostOnly is PascalCase on the wire (unlike uppercase GTC/IOC/FOK) — the
     # engine rejects "POSTONLY", so the value must pass through verbatim.
     httpx_mock.add_response(
-        url="http://localhost:9090/orders",
+        url="http://localhost:9090/api/v1/orders",
         json={
             "order": {
                 "id": "o2",

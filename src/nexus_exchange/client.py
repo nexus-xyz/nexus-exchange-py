@@ -26,12 +26,15 @@ from .types import (
     AccountSummary,
     AdlEvent,
     AgentInfo,
+    AmendOrder,
     ApiKeyInfo,
     CreditResult,
     DepositResult,
     Fill,
     FundingSample,
     HealthStatus,
+    LeverageUpdate,
+    MarginAdjustment,
     Market,
     MarketStatus,
     MarketSummary,
@@ -335,6 +338,55 @@ class Client:
         data = self._request("POST", "/account/credit", body=body, signed=True, direct=True)
         return CreditResult.from_dict(data if isinstance(data, dict) else {})
 
+    def adjust_margin(
+        self, market_id: str, direction: str, amount: Decimal | str
+    ) -> MarginAdjustment:
+        """``POST /account/margin`` — add/remove isolated margin on a position.
+
+        Requires credentials. Only applies to a position in ``isolated`` margin
+        mode; the server rejects a cross-margined position with
+        ``MarginModeNotIsolated``. ``direction`` is ``"add"`` or ``"remove"``
+        (sent verbatim); ``amount`` is the collateral to move, sent as a decimal
+        string and must be positive.
+
+        Not in the ``/api/v1`` spec; stays on the legacy gateway.
+        """
+        if not market_id:
+            raise ValueError("market_id is required")
+        if direction not in ("add", "remove"):
+            raise ValueError('direction must be "add" or "remove"')
+        if Decimal(str(amount)) <= 0:
+            raise ValueError("margin amount must be positive")
+        data = self._request(
+            "POST",
+            "/account/margin",
+            body={"market_id": market_id, "direction": direction, "amount": str(amount)},
+            signed=True,
+        )
+        return MarginAdjustment.from_dict(data if isinstance(data, dict) else {})
+
+    def set_leverage(self, market_id: str, leverage: int) -> LeverageUpdate:
+        """``POST /account/leverage`` — set the leverage used for a market.
+
+        Requires credentials. ``leverage`` is the integer multiplier (e.g. ``10``
+        for 10x) and must be at least 1; the server rejects a value above the
+        market's ceiling.
+
+        Ahead of the pinned spec (a code-only op, like the Rust SDK), so it
+        stays on the legacy gateway and is not listed in ``endpoints.txt``.
+        """
+        if not market_id:
+            raise ValueError("market_id is required")
+        if leverage < 1:
+            raise ValueError("leverage must be at least 1")
+        data = self._request(
+            "POST",
+            "/account/leverage",
+            body={"market_id": market_id, "leverage": leverage},
+            signed=True,
+        )
+        return LeverageUpdate.from_dict(data if isinstance(data, dict) else {})
+
     # -- orders (signed) -------------------------------------------------
     def create_order(self, order: OrderRequest) -> OrderResponse:
         """``POST /orders`` — place a single order. Requires credentials."""
@@ -374,6 +426,29 @@ class Client:
     def cancel_all_orders(self) -> Any:
         """``DELETE /orders`` — cancel all open orders. Requires credentials."""
         return self._request("DELETE", "/orders", signed=True, direct=True)
+
+    def amend_order(self, order_id: str, market_id: str, amend: AmendOrder) -> OrderResponse:
+        """``PATCH /orders/{order_id}`` — amend a resting order's price/size.
+
+        Requires credentials. ``market_id`` is required (the engine routes the
+        amend by market, ENG-4645) and is sent as a query parameter, so it is
+        part of the signed canonical string. ``amend`` must change at least one
+        field; an empty amend raises :class:`ValueError` before any request.
+        """
+        if not market_id:
+            raise ValueError("market_id is required")
+        if not amend.has_changes():
+            raise ValueError("amend_order requires at least one field to change")
+        query = urlencode({"market_id": market_id})
+        data = self._request(
+            "PATCH",
+            f"/orders/{quote(order_id, safe='')}",
+            query=query,
+            body=amend.to_payload(),
+            signed=True,
+            direct=True,
+        )
+        return OrderResponse.from_dict(data if isinstance(data, dict) else {})
 
     # -- keys / agents (signed) ------------------------------------------
     # None of the keys / agents / ws-token routes are in the /api/v1 spec yet,
