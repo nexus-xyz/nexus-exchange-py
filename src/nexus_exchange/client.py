@@ -4,7 +4,8 @@ A thin wrapper mirroring the Rust SDK: typed methods over the REST routes, HMAC
 request signing, one error hierarchy. **Experimental.** Covers the public
 market-data routes, the signed account / trading / admin routes, and the
 wallet-signed auth flows (EIP-191 login, EIP-712 agent registration) — see the
-README's support table. WebSocket streaming is not built yet.
+README's support table. WebSocket streaming lives in the async
+:mod:`nexus_exchange.ws` client (:class:`~nexus_exchange.WsClient`).
 """
 
 from __future__ import annotations
