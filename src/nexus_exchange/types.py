@@ -740,6 +740,25 @@ class BatchOrderResult:
             raw=d,
         )
 
+    @classmethod
+    def malformed(cls, value: Any) -> BatchOrderResult:
+        """Error-shaped placeholder for a response entry that is not an object.
+
+        ``create_orders`` promises one result per submitted order, in request
+        order. A malformed element therefore decodes to an ``err``-shaped entry
+        (``error == "malformed_result"``) instead of being dropped, so callers
+        zipping results back to their requests never silently misalign. The
+        offending value is preserved on ``raw["value"]``.
+        """
+        return cls(
+            outcome="err",
+            order=None,
+            fills=[],
+            error="malformed_result",
+            message=f"malformed batch result entry: expected an object, got {type(value).__name__}",
+            raw={"value": value},
+        )
+
 
 @dataclass(frozen=True)
 class DepositResult:

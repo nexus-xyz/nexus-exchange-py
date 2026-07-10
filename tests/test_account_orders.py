@@ -300,6 +300,49 @@ def test_create_orders_batch_parses_typed_results(httpx_mock) -> None:
     assert err.message == "not enough collateral for this order"
 
 
+def test_create_orders_batch_keeps_alignment_for_malformed_elements(httpx_mock) -> None:
+    # A non-dict element must not be dropped: it decodes to an err-shaped
+    # placeholder so results stay positionally aligned with the request.
+    httpx_mock.add_response(
+        url="http://localhost:9090/api/v1/orders/batch",
+        json=[{"outcome": "ok"}, "garbage", {"outcome": "err", "error": "bad_qty"}],
+    )
+    orders = [
+        OrderRequest.limit("BTC-USDX-PERP", "Buy", Decimal("50000"), Decimal("0.1")),
+        OrderRequest.limit("ETH-USDX-PERP", "Buy", Decimal("3000"), Decimal("1")),
+        OrderRequest.market("SOL-USDX-PERP", "Sell", Decimal("2")),
+    ]
+    with _authed() as client:
+        results = client.create_orders(orders)
+
+    assert len(results) == len(orders)
+    assert results[0].is_ok
+    assert results[1].is_err
+    assert results[1].error == "malformed_result"
+    assert results[1].raw == {"value": "garbage"}
+    assert results[2].is_err
+    assert results[2].error == "bad_qty"
+
+
+def test_create_orders_batch_non_list_payload_yields_one_err_per_order(httpx_mock) -> None:
+    # A payload that is not a list carries no per-order results; the SDK
+    # returns one err-shaped placeholder per submitted order instead of [].
+    httpx_mock.add_response(
+        url="http://localhost:9090/api/v1/orders/batch",
+        json={"error": "internal", "message": "boom"},
+    )
+    orders = [
+        OrderRequest.limit("BTC-USDX-PERP", "Buy", Decimal("50000"), Decimal("0.1")),
+        OrderRequest.market("ETH-USDX-PERP", "Sell", Decimal("1")),
+    ]
+    with _authed() as client:
+        results = client.create_orders(orders)
+
+    assert len(results) == len(orders)
+    assert all(r.is_err and r.error == "malformed_result" for r in results)
+    assert results[0].raw == {"value": {"error": "internal", "message": "boom"}}
+
+
 def test_fetch_open_orders_parses(httpx_mock) -> None:
     httpx_mock.add_response(
         url="http://localhost:9090/api/v1/orders",

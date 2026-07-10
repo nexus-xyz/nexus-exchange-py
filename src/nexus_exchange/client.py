@@ -402,13 +402,23 @@ class Client:
         independently reports either a placed order (``outcome == "ok"``) or a
         per-order rejection (``outcome == "err"``) — check ``result.is_ok`` /
         ``result.is_err`` on each entry.
+
+        Positional alignment is preserved even for malformed payloads: a
+        response element that is not an object decodes to an ``err``-shaped
+        placeholder (``error == "malformed_result"``) rather than being
+        dropped, and a payload that is not a list at all yields one such
+        placeholder per submitted order — so ``zip(orders, results)`` is
+        always safe.
         """
         body = [o.to_payload() for o in orders]
         data = self._request("POST", "/orders/batch", body=body, signed=True, direct=True)
+        if not isinstance(data, list):
+            # A non-list payload carries no per-order results to align; surface
+            # one error-shaped entry per submitted order instead of returning [].
+            return [BatchOrderResult.malformed(data) for _ in orders]
         return [
-            BatchOrderResult.from_dict(r)
-            for r in (data if isinstance(data, list) else [])
-            if isinstance(r, dict)
+            BatchOrderResult.from_dict(r) if isinstance(r, dict) else BatchOrderResult.malformed(r)
+            for r in data
         ]
 
     def fetch_open_orders(self) -> list[Order]:
