@@ -17,7 +17,7 @@ from nexus_exchange import Client, MarkPrice, Network, Ticker
 
 def test_fetch_market_summaries_handles_numbers_and_halted_null(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/markets/summary",
+        url="http://localhost:9090/api/v1/markets/summary",
         json=[
             {
                 "market_id": "BTC-USDX-PERP",
@@ -54,7 +54,7 @@ def test_fetch_market_summaries_handles_numbers_and_halted_null(httpx_mock) -> N
 
 def test_fetch_tickers_parses_market_keyed_map(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/tickers",
+        url="http://localhost:9090/api/v1/tickers",
         json={
             "BTC-USDX-PERP": {
                 "symbol": "BTC-USDX-PERP",
@@ -80,14 +80,14 @@ def test_fetch_tickers_parses_market_keyed_map(httpx_mock) -> None:
 
 
 def test_fetch_tickers_empty_is_empty_map(httpx_mock) -> None:
-    httpx_mock.add_response(url="http://localhost:9090/tickers", json={})
+    httpx_mock.add_response(url="http://localhost:9090/api/v1/tickers", json={})
     with Client(Network.LOCAL) as client:
         assert client.fetch_tickers() == {}
 
 
 def test_fetch_ticker_parses_numbers_and_nulls(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/markets/BTC-USDX-PERP/ticker",
+        url="http://localhost:9090/api/v1/markets/BTC-USDX-PERP/ticker",
         json={
             "symbol": "BTC-USDX-PERP",
             "timestamp": 1776033900000,
@@ -137,7 +137,7 @@ def test_required_decimal_field_missing_raises() -> None:
 
 def test_fetch_order_book_parses_levels(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/markets/BTC-USDX-PERP/orderbook",
+        url="http://localhost:9090/api/v1/markets/BTC-USDX-PERP/orderbook",
         json={
             "symbol": "BTC-USDX-PERP",
             "bids": [[50010.5, 1.2], [50010.0, 3.4]],
@@ -157,7 +157,7 @@ def test_fetch_order_book_parses_levels(httpx_mock) -> None:
 
 def test_fetch_trades_sends_limit_and_parses(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/markets/BTC-USDX-PERP/trades?limit=1",
+        url="http://localhost:9090/api/v1/markets/BTC-USDX-PERP/trades?limit=1",
         json=[
             {
                 "id": "t1",
@@ -183,7 +183,7 @@ def test_fetch_trades_sends_limit_and_parses(httpx_mock) -> None:
 
 def test_fetch_ohlcv_parses_array_candles(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/markets/BTC-USDX-PERP/candles?timeframe=1m&limit=1",
+        url="http://localhost:9090/api/v1/markets/BTC-USDX-PERP/candles?timeframe=1m&limit=1",
         json=[[1776033900000, 48062.0, 51903.0, 44992.0, 51903.0, 27.123]],
     )
     with Client(Network.LOCAL) as client:
@@ -195,7 +195,7 @@ def test_fetch_ohlcv_parses_array_candles(httpx_mock) -> None:
 
 def test_fetch_funding_rate_history_parses_string_decimals(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/markets/BTC-USDX-PERP/funding",
+        url="http://localhost:9090/api/v1/markets/BTC-USDX-PERP/funding",
         json=[
             {
                 "timestamp": 1776033900000,
@@ -214,7 +214,7 @@ def test_fetch_funding_rate_history_parses_string_decimals(httpx_mock) -> None:
 
 def test_fetch_mark_price_parses_string_decimal(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/markets/BTC-USDX-PERP/mark-price",
+        url="http://localhost:9090/api/v1/markets/BTC-USDX-PERP/mark-price",
         json={"market_id": "BTC-USDX-PERP", "mark_price": "50011.60"},
     )
     with Client(Network.LOCAL) as client:
@@ -225,7 +225,7 @@ def test_fetch_mark_price_parses_string_decimal(httpx_mock) -> None:
 
 def test_fetch_market_status_parses_halt_fields(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/markets/BTC-USDX-PERP/status",
+        url="http://localhost:9090/api/v1/markets/BTC-USDX-PERP/status",
         json={
             "market_id": "BTC-USDX-PERP",
             "status": "halted",

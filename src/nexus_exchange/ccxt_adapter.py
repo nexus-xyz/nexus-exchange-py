@@ -182,7 +182,9 @@ class NexusExchange:
         /markets/{symbol}/ticker``); this normalizes numerics and guarantees the
         unified keys are present.
         """
-        data = self._client._request("GET", f"/markets/{quote(symbol, safe='')}/ticker")
+        data = self._client._request(
+            "GET", f"/markets/{quote(symbol, safe='')}/ticker", direct=True
+        )
         return self._parse_ticker(symbol, data if isinstance(data, dict) else {})
 
     def fetch_tickers(
@@ -193,7 +195,7 @@ class NexusExchange:
         ``GET /tickers`` returns an object keyed by market id; this maps each to
         a unified ticker. ``symbols`` filters the result client-side.
         """
-        data = self._client._request("GET", "/tickers")
+        data = self._client._request("GET", "/tickers", direct=True)
         if not isinstance(data, dict):
             return {}
         wanted = set(symbols) if symbols else None
@@ -214,7 +216,9 @@ class NexusExchange:
         bids descending and asks ascending, matching CCXT. ``limit`` truncates
         each side client-side (the endpoint returns a full snapshot).
         """
-        data = self._client._request("GET", f"/markets/{quote(symbol, safe='')}/orderbook")
+        data = self._client._request(
+            "GET", f"/markets/{quote(symbol, safe='')}/orderbook", direct=True
+        )
         data = data if isinstance(data, dict) else {}
         bids = self._parse_levels(data.get("bids"))
         asks = self._parse_levels(data.get("asks"))
@@ -258,6 +262,7 @@ class NexusExchange:
             "GET",
             f"/markets/{quote(symbol, safe='')}/candles",
             query=urlencode(query),
+            direct=True,
         )
         if not isinstance(rows, list):
             return []
@@ -286,6 +291,7 @@ class NexusExchange:
             "GET",
             f"/markets/{quote(symbol, safe='')}/trades",
             query=urlencode(query) if query else "",
+            direct=True,
         )
         if not isinstance(rows, list):
             return []

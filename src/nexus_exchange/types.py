@@ -523,18 +523,19 @@ class Order:
 class OrderResponse:
     """Response to ``POST /orders``: the resulting order plus immediate fills.
 
-    ``fills`` is currently untyped in the spec, so it stays as raw dicts.
+    ``fills`` is typed as :class:`Fill` (the spec types the fill shape as of
+    v0.5.0); the full decoded response stays on :attr:`raw`.
     """
 
     order: Order
-    fills: list[dict[str, Any]]
+    fills: list[Fill]
     raw: dict[str, Any]
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> OrderResponse:
         return cls(
             order=Order.from_dict(d.get("order", {})),
-            fills=list(d.get("fills", [])),
+            fills=[Fill.from_dict(f) for f in d.get("fills", []) if isinstance(f, dict)],
             raw=d,
         )
 
@@ -545,6 +546,13 @@ class OrderRequest:
 
     Build with :meth:`limit` or :meth:`market`. ``price`` / ``reduce_only`` are
     omitted from the wire payload when ``None``.
+
+    ``time_in_force`` is sent verbatim and the engine is case-sensitive:
+    ``"GTC"``, ``"IOC"``, ``"FOK"`` (uppercase) or ``"PostOnly"`` (PascalCase —
+    ``"POSTONLY"`` is rejected). A post-only (add-liquidity-only) order is
+    rejected if it would take liquidity (cross the book) on entry, guaranteeing
+    it rests as a maker; a crossing post-only order is rejected server-side
+    with the ``WouldTakeLiquidity`` error code.
     """
 
     market_id: str
@@ -566,6 +574,9 @@ class OrderRequest:
         *,
         reduce_only: bool | None = None,
     ) -> OrderRequest:
+        """A limit order. ``time_in_force`` accepts ``"GTC"`` (default),
+        ``"IOC"``, ``"FOK"``, or ``"PostOnly"`` — see the class docstring for
+        the exact wire values and post-only semantics."""
         return cls(
             market_id=market_id,
             side=side,
@@ -610,6 +621,143 @@ class OrderRequest:
         if self.reduce_only is not None:
             body["reduce_only"] = self.reduce_only
         return body
+
+
+@dataclass(frozen=True)
+class AmendOrder:
+    """A resting order amendment (``PATCH /orders/{order_id}``).
+
+    Mirrors the Rust SDK's ``AmendOrder``. Set only the fields you want to
+    change; ``None`` fields are omitted from the wire payload, so an amend never
+    accidentally resets a field. At least one of ``price`` / ``size`` must be
+    set — :meth:`has_changes` reports whether that holds. Money is sent as
+    decimal strings.
+    """
+
+    price: Decimal | None = None
+    size: Decimal | None = None
+
+    def has_changes(self) -> bool:
+        """True when at least one field is set (i.e. the amend is non-empty)."""
+        return self.price is not None or self.size is not None
+
+    def to_payload(self) -> dict[str, Any]:
+        """Serialize to the JSON body; unset fields are omitted."""
+        body: dict[str, Any] = {}
+        if self.price is not None:
+            body["price"] = str(self.price)
+        if self.size is not None:
+            body["size"] = str(self.size)
+        return body
+
+
+@dataclass(frozen=True)
+class MarginAdjustment:
+    """Result of adding/removing isolated margin (``POST /account/margin``).
+
+    Mirrors the Rust SDK's ``MarginAdjustment``.
+    """
+
+    market_id: str
+    allocated_margin: Decimal
+    collateral: Decimal
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> MarginAdjustment:
+        return cls(
+            market_id=str(d.get("market_id", "")),
+            allocated_margin=to_decimal(d.get("allocated_margin", 0)),
+            collateral=to_decimal(d.get("collateral", 0)),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class LeverageUpdate:
+    """Result of setting a market's leverage (``POST /account/leverage``).
+
+    Mirrors the Rust SDK's ``LeverageUpdate``.
+    """
+
+    market_id: str
+    leverage: int
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> LeverageUpdate:
+        return cls(
+            market_id=str(d.get("market_id", "")),
+            leverage=int(d.get("leverage", 0)),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class BatchOrderResult:
+    """One entry in the array returned by ``POST /orders/batch``.
+
+    The batch is processed sequentially and non-atomically, so each entry
+    independently reports either a placed order or a per-order rejection, in
+    request order. The spec models this as a union tagged by ``outcome``:
+
+    * ``outcome == "ok"`` carries the same ``{ order, fills }`` shape as
+      ``POST /orders`` — :attr:`order` is set (and :attr:`fills` populated),
+      while :attr:`error` / :attr:`message` are ``None``.
+    * ``outcome == "err"`` mirrors the global error envelope —
+      :attr:`error` and :attr:`message` are set while :attr:`order` is ``None``.
+
+    Use :attr:`is_ok` / :attr:`is_err` to branch. Unknown/absent fields decode to
+    ``None`` rather than failing, and the full entry stays on :attr:`raw`.
+    """
+
+    outcome: str
+    order: Order | None
+    fills: list[Fill]
+    error: str | None
+    message: str | None
+    raw: dict[str, Any]
+
+    @property
+    def is_ok(self) -> bool:
+        """True when this entry placed an order (``outcome == "ok"``)."""
+        return self.outcome == "ok"
+
+    @property
+    def is_err(self) -> bool:
+        """True when this entry was rejected (``outcome == "err"``)."""
+        return self.outcome == "err"
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BatchOrderResult:
+        order_raw = d.get("order")
+        return cls(
+            outcome=str(d.get("outcome", "")),
+            order=Order.from_dict(order_raw) if isinstance(order_raw, dict) else None,
+            fills=[Fill.from_dict(f) for f in d.get("fills", []) if isinstance(f, dict)],
+            error=opt_str(d.get("error")),
+            message=opt_str(d.get("message")),
+            raw=d,
+        )
+
+    @classmethod
+    def malformed(cls, value: Any) -> BatchOrderResult:
+        """Error-shaped placeholder for a response entry that is not an object.
+
+        ``create_orders`` promises one result per submitted order, in request
+        order. A malformed element therefore decodes to an ``err``-shaped entry
+        (``error == "malformed_result"``) instead of being dropped, so callers
+        zipping results back to their requests never silently misalign. The
+        offending value is preserved on ``raw["value"]``.
+        """
+        return cls(
+            outcome="err",
+            order=None,
+            fills=[],
+            error="malformed_result",
+            message=f"malformed batch result entry: expected an object, got {type(value).__name__}",
+            raw={"value": value},
+        )
 
 
 @dataclass(frozen=True)

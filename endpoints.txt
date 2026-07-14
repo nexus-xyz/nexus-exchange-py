@@ -2,34 +2,44 @@
 # spec version pinned in .api-version. Hand-maintained source of truth for
 # coverage. The Python SDK deliberately trails the Rust SDK — add a line when
 # you add a typed method. Format: METHOD /path  ({market_id} = placeholder)
+#
+# Paths under /api/v1 are served by the direct backend service (host root, no
+# /api/exchange gateway prefix) as the gateway is retired (ENG-4740); the rest
+# stay on the legacy gateway until they gain an /api/v1 route upstream.
+
+# -- direct /api/v1 service --
+GET /api/v1/markets/summary
+GET /api/v1/tickers
+GET /api/v1/markets/{market_id}/ticker
+GET /api/v1/markets/{market_id}/orderbook
+GET /api/v1/markets/{market_id}/trades
+GET /api/v1/markets/{market_id}/candles
+GET /api/v1/markets/{market_id}/funding
+GET /api/v1/markets/{market_id}/mark-price
+GET /api/v1/markets/{market_id}/status
+GET /api/v1/account
+GET /api/v1/positions
+GET /api/v1/fills
+GET /api/v1/account/rate-limit
+POST /api/v1/account/credit
+POST /api/v1/orders
+POST /api/v1/orders/batch
+GET /api/v1/orders
+PATCH /api/v1/orders/{order_id}
+DELETE /api/v1/orders/{order_id}
+DELETE /api/v1/orders
+
+# -- legacy gateway (no /api/v1 route yet) --
 GET /markets
-GET /markets/summary
-GET /tickers
-GET /markets/{market_id}/ticker
-GET /markets/{market_id}/orderbook
-GET /markets/{market_id}/trades
-GET /markets/{market_id}/candles
-GET /markets/{market_id}/funding
-GET /markets/{market_id}/mark-price
-GET /markets/{market_id}/status
 GET /markets/{market_id}/adl-events
 GET /account/{address}/adl-history
 GET /health
 POST /auth/login
 POST /agents/register
-GET /account
-GET /positions
-GET /fills
 GET /withdrawals
-GET /account/rate-limit
 POST /account/deposit
-POST /account/credit
-POST /orders
-POST /orders/batch
-GET /orders
+POST /account/margin
 GET /orders/{order_id}
-DELETE /orders/{order_id}
-DELETE /orders
 GET /keys
 DELETE /keys/{key_id}
 GET /agents

@@ -18,6 +18,37 @@ from nexus_exchange import (
 def test_network_base_urls() -> None:
     assert Network.STABLE.base_url.startswith("https://")
     assert Client(Network.LOCAL)._base_url == "http://localhost:9090"
+    # The direct /api/v1 base is the host root — no /api/exchange gateway prefix.
+    assert Network.STABLE.base_url == "https://exchange.nexus.xyz/api/exchange"
+    assert Network.STABLE.direct_base_url == "https://exchange.nexus.xyz"
+    assert Client(Network.LOCAL)._direct_base_url == "http://localhost:9090"
+
+
+def test_direct_route_signs_full_api_v1_path(httpx_mock) -> None:
+    # A /api/v1 route must be signed over the FULL path including the prefix
+    # (the server verifies "/api/v1/account", not "/account") and sent to the
+    # direct-service base, not the gateway.
+    secret = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+    httpx_mock.add_response(url="http://localhost:9090/api/v1/account", json={})
+    with Client(Network.LOCAL, api_key="nx_test", api_secret=secret) as client:
+        client._request("GET", "/account", signed=True, direct=True)
+
+    req = httpx_mock.get_request()
+    ts = req.headers["x-timestamp"]
+    body_hash = hashlib.sha256(b"").hexdigest()
+    canonical = "\n".join([ts, "GET", "/api/v1/account", "", body_hash])
+    expected = hmac.new(bytes.fromhex(secret), canonical.encode(), hashlib.sha256).hexdigest()
+    assert str(req.url) == "http://localhost:9090/api/v1/account"
+    assert req.headers["x-signature"] == expected
+
+
+def test_custom_base_url_overrides_both_bases() -> None:
+    # A caller-supplied base_url is the service root for legacy and direct
+    # routes alike (the local / direct-gateway case), so /api/v1 stacks on it
+    # without duplicating a gateway prefix.
+    client = Client(base_url="http://127.0.0.1:8080")
+    assert client._base_url == "http://127.0.0.1:8080"
+    assert client._direct_base_url == "http://127.0.0.1:8080"
 
 
 def test_signed_request_uses_canonical_hmac(httpx_mock) -> None:

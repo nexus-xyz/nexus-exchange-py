@@ -32,12 +32,16 @@ from .types import (
     AdlClosure,
     AdlEvent,
     AgentInfo,
+    AmendOrder,
     ApiKeyInfo,
+    BatchOrderResult,
     CreditResult,
     DepositResult,
     Fill,
     FundingSample,
     HealthStatus,
+    LeverageUpdate,
+    MarginAdjustment,
     Market,
     MarketStatus,
     MarketSummary,
@@ -57,7 +61,7 @@ from .types import (
     WsToken,
 )
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 
 __all__ = [
     "Client",
@@ -87,6 +91,10 @@ __all__ = [
     "Order",
     "OrderRequest",
     "OrderResponse",
+    "AmendOrder",
+    "MarginAdjustment",
+    "LeverageUpdate",
+    "BatchOrderResult",
     "DepositResult",
     "CreditResult",
     "Withdrawal",
