@@ -50,3 +50,8 @@ POST /ws-tokens
 PUT /admin/tiers
 GET /admin/tiers
 DELETE /admin/tiers/{address}
+POST /bridge/deposit-addresses
+GET /bridge/deposit-addresses
+GET /bridge/assets
+GET /bridge/deposits
+GET /bridge/deposits/{id}
