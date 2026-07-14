@@ -27,6 +27,11 @@ python examples/public_market_data.py
 | `place_and_cancel_order.py` | HMAC | `POST /orders`, `GET /orders/{id}`, `GET /orders`, `DELETE /orders/{id}` |
 | `fills_and_withdrawals.py` | HMAC | `fills`, `withdrawals` |
 
+Most of these routes are served by the direct `/api/v1` service (the gateway is
+being retired, ENG-4740); a few (`markets`, `withdrawals`, `GET /orders/{id}`)
+remain on the legacy gateway. The client routes each method transparently — see
+`endpoints.txt` for the authoritative split.
+
 The public gateway proxies signed calls to the *site* account; for per-account
 auth point `NEXUS_BASE_URL` at a direct gateway (e.g. `http://localhost:9090`).
 See the top-level README.

@@ -1,7 +1,8 @@
 """Recent fills and withdrawal history — signed (HMAC).
 
-Reads the authenticated account's own executions (``GET /fills``) and its
-withdrawal records (``GET /withdrawals``). Read-only.
+Reads the authenticated account's own executions (``GET /api/v1/fills``, on the
+direct service) and its withdrawal records (``GET /withdrawals``, still on the
+legacy gateway). Read-only.
 
     NEXUS_API_KEY=... NEXUS_API_SECRET=... NEXUS_BASE_URL=http://localhost:9090 \\
         python examples/fills_and_withdrawals.py

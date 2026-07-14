@@ -121,15 +121,16 @@ class _Handler(BaseHTTPRequestHandler):
         return False
 
     def do_GET(self) -> None:  # noqa: N802 (http.server dispatch name)
-        # `/markets` and `/health` are legacy-gateway routes; the ticker read is
-        # served by the direct /api/v1 service, so it carries the /api/v1 prefix.
+        # `/markets` and `/health` are legacy-gateway routes; the ticker and
+        # account reads are served by the direct /api/v1 service, so they carry
+        # the /api/v1 prefix (ENG-4946).
         if self.path == "/markets":
             self._send(200, _MARKETS)
         elif self.path == "/api/v1/markets/BTC-USDX-PERP/ticker":
             self._send(200, _TICKER)
         elif self.path == "/health":
             self._send(200, _HEALTH)
-        elif self.path == "/account":
+        elif self.path == "/api/v1/account":
             if self._require_signed():
                 self._send(200, _ACCOUNT)
         else:
@@ -138,14 +139,14 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 (http.server dispatch name)
         length = int(self.headers.get("content-length", 0))
         self.rfile.read(length)  # drain the signed body off the socket
-        if self.path == "/orders":
+        if self.path == "/api/v1/orders":
             if self._require_signed():
                 self._send(200, {"order": _ORDER, "fills": []})
         else:
             self._send(404, {"code": "not_found", "message": f"no route {self.path}"})
 
     def do_DELETE(self) -> None:  # noqa: N802 (http.server dispatch name)
-        if self.path == "/orders/o-live-1":
+        if self.path == "/api/v1/orders/o-live-1":
             if self._require_signed():
                 self._send(200, {"cancelled": True})
         else:

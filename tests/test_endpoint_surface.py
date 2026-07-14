@@ -6,6 +6,11 @@ single-order fetch, cancel-all, key/agent revocation, the WS-token mint, and the
 admin tier reads/writes — and pins, for *every* typed method, the exact path the
 SDK hits, the HTTP verb it uses, and that the request was signed. Together with
 the existing files this exercises every implemented REST route at least once.
+
+Migrated routes (positions, orders, market data) are served by the direct
+``/api/v1`` service and the HMAC is computed over the full path *including*
+that prefix (ENG-4946); the rest stay on the legacy gateway — the expected
+paths below pin that split per ``endpoints.txt``.
 """
 
 from __future__ import annotations
@@ -47,7 +52,7 @@ def _assert_signed(req, method: str, path: str) -> None:
 # -- signed account reads with thin existing coverage --------------------------
 def test_fetch_positions_parses_and_signs(httpx_mock) -> None:
     httpx_mock.add_response(
-        url=f"{_BASE}/positions",
+        url=f"{_BASE}/api/v1/positions",
         json=[
             {
                 "market_id": "ETH-USDX-PERP",
@@ -65,7 +70,7 @@ def test_fetch_positions_parses_and_signs(httpx_mock) -> None:
     assert positions[0].market_id == "ETH-USDX-PERP"
     assert positions[0].side == "short"
     assert str(positions[0].liquidation_price) == "3300"
-    _assert_signed(httpx_mock.get_request(), "GET", "/positions")
+    _assert_signed(httpx_mock.get_request(), "GET", "/api/v1/positions")
 
 
 def test_fetch_withdrawals_parses_and_signs(httpx_mock) -> None:
@@ -107,13 +112,14 @@ def test_fetch_order_hits_id_path_and_parses(httpx_mock) -> None:
 
 
 def test_cancel_all_orders_signs_delete_collection(httpx_mock) -> None:
-    # Per the v0.5.0 spec, DELETE /orders returns 200 with no body, so the client
+    # Per the v0.6.2 spec, DELETE /orders returns 200 with no body, so the client
     # yields None (matches tests/test_client.py). Mock an empty 200 accordingly.
-    httpx_mock.add_response(url=f"{_BASE}/orders", method="DELETE")
+    # The route is served by the direct /api/v1 service (ENG-4946).
+    httpx_mock.add_response(url=f"{_BASE}/api/v1/orders", method="DELETE")
     with _authed() as client:
         result = client.cancel_all_orders()
     assert result is None
-    _assert_signed(httpx_mock.get_request(), "DELETE", "/orders")
+    _assert_signed(httpx_mock.get_request(), "DELETE", "/api/v1/orders")
 
 
 # -- keys / agents revocation + WS token ---------------------------------------
@@ -167,13 +173,13 @@ def test_market_id_is_url_encoded_in_path(httpx_mock) -> None:
     # A market id with a slash must be percent-encoded into a single path segment
     # so it can't traverse the route tree.
     httpx_mock.add_response(
-        url=f"{_BASE}/markets/BTC%2FUSDX/ticker",
+        url=f"{_BASE}/api/v1/markets/BTC%2FUSDX/ticker",
         json={"symbol": "BTC/USDX"},
     )
     with Client(Network.LOCAL) as client:
         ticker = client.fetch_ticker("BTC/USDX")
     assert ticker.market_id == "BTC/USDX"
-    assert httpx_mock.get_request().url.raw_path.decode() == "/markets/BTC%2FUSDX/ticker"
+    assert httpx_mock.get_request().url.raw_path.decode() == "/api/v1/markets/BTC%2FUSDX/ticker"
 
 
 def test_create_order_uses_post_verb(httpx_mock) -> None:
@@ -182,7 +188,7 @@ def test_create_order_uses_post_verb(httpx_mock) -> None:
     from nexus_exchange import OrderRequest
 
     httpx_mock.add_response(
-        url=f"{_BASE}/orders",
+        url=f"{_BASE}/api/v1/orders",
         method="POST",
         json={
             "order": {
@@ -203,7 +209,7 @@ def test_create_order_uses_post_verb(httpx_mock) -> None:
     with _authed() as client:
         resp = client.create_order(OrderRequest.market("BTC-USDX-PERP", "Buy", Decimal("0.1")))
     assert resp.order.status == "Filled"
-    _assert_signed(httpx_mock.get_request(), "POST", "/orders")
+    _assert_signed(httpx_mock.get_request(), "POST", "/api/v1/orders")
 
 
 # -- credential guard applies across the whole signed surface ------------------

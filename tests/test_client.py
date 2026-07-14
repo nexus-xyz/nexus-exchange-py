@@ -116,8 +116,9 @@ def test_has_credentials_reflects_keys() -> None:
 
 def test_tickers_non_dict_response_is_empty_map(httpx_mock) -> None:
     # A malformed /tickers envelope (array instead of the spec's keyed object)
-    # degrades to an empty map rather than raising.
-    httpx_mock.add_response(url="http://localhost:9090/tickers", json=[])
+    # degrades to an empty map rather than raising. Tickers are served by the
+    # direct /api/v1 service (ENG-4946).
+    httpx_mock.add_response(url="http://localhost:9090/api/v1/tickers", json=[])
     with Client(Network.LOCAL) as client:
         assert client.fetch_tickers() == {}
 
@@ -140,7 +141,10 @@ def test_transport_error_wraps_httpx_error(httpx_mock) -> None:
 
 def test_no_content_response_decodes_to_none(httpx_mock) -> None:
     # An empty 200 body (e.g. some DELETEs) decodes to None, not a parse error.
-    httpx_mock.add_response(url="http://localhost:9090/orders", method="DELETE", status_code=200)
+    # DELETE /orders is served by the direct /api/v1 service (ENG-4946).
+    httpx_mock.add_response(
+        url="http://localhost:9090/api/v1/orders", method="DELETE", status_code=200
+    )
     secret = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
     with Client(Network.LOCAL, api_key="nx_test", api_secret=secret) as client:
         assert client.cancel_all_orders() is None
