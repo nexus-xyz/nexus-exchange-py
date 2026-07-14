@@ -976,3 +976,137 @@ class WsToken:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> WsToken:
         return cls(token=str(d.get("token", "")), raw=d)
+
+
+@dataclass(frozen=True)
+class BridgeAsset:
+    """A bridgeable asset on a specific chain (``/bridge/assets``)."""
+
+    symbol: str
+    decimals: int
+    min_amount: Decimal
+    confirmations: int
+    fee: Decimal | None
+    contract_address: str | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BridgeAsset:
+        return cls(
+            symbol=str(d.get("symbol", "")),
+            decimals=int(d.get("decimals", 0)),
+            min_amount=to_decimal(d.get("min_amount", 0)),
+            confirmations=int(d.get("confirmations", 0)),
+            fee=opt_decimal(d.get("fee")),
+            contract_address=opt_str(d.get("contract_address")),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class BridgeChainAssets:
+    """Bridgeable assets for one chain."""
+
+    chain: str
+    chain_id: int | None
+    deposit_assets: list[BridgeAsset]
+    withdraw_assets: list[BridgeAsset]
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BridgeChainAssets:
+        return cls(
+            chain=str(d.get("chain", "")),
+            chain_id=opt_int(d.get("chain_id")),
+            deposit_assets=[
+                BridgeAsset.from_dict(a) for a in d.get("deposit_assets", []) if isinstance(a, dict)
+            ],
+            withdraw_assets=[
+                BridgeAsset.from_dict(a)
+                for a in d.get("withdraw_assets", [])
+                if isinstance(a, dict)
+            ],
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class BridgeAssetsResponse:
+    """Supported bridge chains and their assets (``GET /bridge/assets``)."""
+
+    chains: list[BridgeChainAssets]
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BridgeAssetsResponse:
+        return cls(
+            chains=[
+                BridgeChainAssets.from_dict(c) for c in d.get("chains", []) if isinstance(c, dict)
+            ],
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class BridgeDepositAddress:
+    """A per-account deposit address on a specific chain."""
+
+    address: str
+    chain: str
+    accepts: list[str]
+    account_id: str
+    created_at: int
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BridgeDepositAddress:
+        return cls(
+            address=str(d.get("address", "")),
+            chain=str(d.get("chain", "")),
+            accepts=[str(a) for a in d.get("accepts", [])],
+            account_id=str(d.get("account_id", "")),
+            created_at=int(d.get("created_at", 0)),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class BridgeDeposit:
+    """A cross-chain deposit tracked by the watcher (read model).
+
+    ``status`` moves ``detected`` -> ``confirming`` -> ``credited`` | ``failed``.
+    """
+
+    id: str
+    account_id: str
+    chain: str
+    asset: str
+    amount: Decimal
+    address: str
+    status: str
+    confirmations: int | None
+    required_confirmations: int | None
+    tx_hash: str | None
+    credited_at: int | None
+    created_at: int
+    updated_at: int | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BridgeDeposit:
+        return cls(
+            id=str(d.get("id", "")),
+            account_id=str(d.get("account_id", "")),
+            chain=str(d.get("chain", "")),
+            asset=str(d.get("asset", "")),
+            amount=to_decimal(d.get("amount", 0)),
+            address=str(d.get("address", "")),
+            status=str(d.get("status", "")),
+            confirmations=opt_int(d.get("confirmations")),
+            required_confirmations=opt_int(d.get("required_confirmations")),
+            tx_hash=opt_str(d.get("tx_hash")),
+            credited_at=opt_int(d.get("credited_at")),
+            created_at=int(d.get("created_at", 0)),
+            updated_at=opt_int(d.get("updated_at")),
+            raw=d,
+        )

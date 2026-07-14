@@ -30,6 +30,9 @@ from .types import (
     AmendOrder,
     ApiKeyInfo,
     BatchOrderResult,
+    BridgeAssetsResponse,
+    BridgeDeposit,
+    BridgeDepositAddress,
     CancelOnDisconnectStatus,
     CreditResult,
     DepositResult,
@@ -354,6 +357,56 @@ class Client:
         """``GET /withdrawals`` — withdrawal history. Requires credentials."""
         data = self._request("GET", "/withdrawals", signed=True)
         return [Withdrawal.from_dict(w) for w in (data if isinstance(data, list) else [])]
+
+    # -- bridge (deposits) ---------------------------------------------------
+
+    def fetch_bridge_assets(self) -> BridgeAssetsResponse:
+        """``GET /bridge/assets`` — bridgeable chains and assets. Requires credentials."""
+        data = self._request("GET", "/bridge/assets", signed=True, direct=True)
+        return BridgeAssetsResponse.from_dict(data if isinstance(data, dict) else {})
+
+    def create_bridge_deposit_address(self, chain: str) -> BridgeDepositAddress:
+        """``POST /bridge/deposit-addresses`` — get-or-create the account's deposit
+        address on ``chain`` (idempotent per account+chain). Requires credentials.
+        """
+        data = self._request(
+            "POST",
+            "/bridge/deposit-addresses",
+            body={"chain": chain},
+            signed=True,
+            direct=True,
+        )
+        return BridgeDepositAddress.from_dict(data if isinstance(data, dict) else {})
+
+    def list_bridge_deposit_addresses(self) -> list[BridgeDepositAddress]:
+        """``GET /bridge/deposit-addresses`` — list deposit addresses. Requires credentials."""
+        data = self._request("GET", "/bridge/deposit-addresses", signed=True, direct=True)
+        return [BridgeDepositAddress.from_dict(a) for a in (data if isinstance(data, list) else [])]
+
+    def fetch_bridge_deposits(
+        self,
+        limit: int | None = None,
+        chain: str | None = None,
+        asset: str | None = None,
+        status: str | None = None,
+    ) -> list[BridgeDeposit]:
+        """``GET /bridge/deposits`` — the account's bridge deposits; all filters
+        optional. Poll a deposit until its ``status`` reaches ``credited``.
+        Requires credentials.
+        """
+        query = _query(limit=limit, chain=chain, asset=asset, status=status)
+        data = self._request("GET", "/bridge/deposits", query=query, signed=True, direct=True)
+        return [BridgeDeposit.from_dict(x) for x in (data if isinstance(data, list) else [])]
+
+    def fetch_bridge_deposit(self, deposit_id: str) -> BridgeDeposit:
+        """``GET /bridge/deposits/{id}`` — a single bridge deposit. Requires credentials."""
+        data = self._request(
+            "GET",
+            f"/bridge/deposits/{quote(deposit_id, safe='')}",
+            signed=True,
+            direct=True,
+        )
+        return BridgeDeposit.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_rate_limit_status(self) -> RateLimitStatus:
         """``GET /account/rate-limit`` — the caller's rate-limit status.
