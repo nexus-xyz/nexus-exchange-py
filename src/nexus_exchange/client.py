@@ -28,6 +28,7 @@ from .types import (
     AgentInfo,
     AmendOrder,
     ApiKeyInfo,
+    BatchOrderResult,
     CreditResult,
     DepositResult,
     Fill,
@@ -393,14 +394,32 @@ class Client:
         data = self._request("POST", "/orders", body=order.to_payload(), signed=True, direct=True)
         return OrderResponse.from_dict(data if isinstance(data, dict) else {})
 
-    def create_orders(self, orders: list[OrderRequest]) -> Any:
+    def create_orders(self, orders: list[OrderRequest]) -> list[BatchOrderResult]:
         """``POST /orders/batch`` — submit a batch of orders (sequential, non-atomic).
 
-        Requires credentials. The per-order result array is untyped in the spec,
-        so the raw decoded JSON is returned.
+        Requires credentials. Returns one :class:`BatchOrderResult` per submitted
+        order, in request order. The batch is non-atomic, so each entry
+        independently reports either a placed order (``outcome == "ok"``) or a
+        per-order rejection (``outcome == "err"``) — check ``result.is_ok`` /
+        ``result.is_err`` on each entry.
+
+        Positional alignment is preserved even for malformed payloads: a
+        response element that is not an object decodes to an ``err``-shaped
+        placeholder (``error == "malformed_result"``) rather than being
+        dropped, and a payload that is not a list at all yields one such
+        placeholder per submitted order — so ``zip(orders, results)`` is
+        always safe.
         """
         body = [o.to_payload() for o in orders]
-        return self._request("POST", "/orders/batch", body=body, signed=True, direct=True)
+        data = self._request("POST", "/orders/batch", body=body, signed=True, direct=True)
+        if not isinstance(data, list):
+            # A non-list payload carries no per-order results to align; surface
+            # one error-shaped entry per submitted order instead of returning [].
+            return [BatchOrderResult.malformed(data) for _ in orders]
+        return [
+            BatchOrderResult.from_dict(r) if isinstance(r, dict) else BatchOrderResult.malformed(r)
+            for r in data
+        ]
 
     def fetch_open_orders(self) -> list[Order]:
         """``GET /orders`` — open orders for the account. Requires credentials."""
