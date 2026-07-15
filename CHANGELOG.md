@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Request identity headers (ENG-5955).** Every REST request now sends
+  `X-Nexus-Api-Version: <spec tag>` (defaulting to the pinned `.api-version`,
+  overridable via `Client(api_version=…)`) and a normalized
+  `User-Agent: nexus-exchange-py/<package version>`, so the edge can pin the
+  request to a contract version and segment per-key usage metrics by client +
+  version (ENG-5350 / ENG-4804). Both headers are also sent on a
+  caller-supplied `http_client`. Adds `DEFAULT_API_VERSION` to the public API.
+
 ### Changed
 
 - **Typed `create_orders` return value (ENG-3976).** `Client.create_orders`

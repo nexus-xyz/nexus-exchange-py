@@ -15,6 +15,7 @@ import json
 import time
 from decimal import Decimal
 from enum import Enum
+from importlib import metadata
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -54,10 +55,40 @@ from .types import (
     WsToken,
 )
 
-__all__ = ["Client", "Network", "DEFAULT_USER_AGENT"]
+__all__ = ["Client", "Network", "DEFAULT_USER_AGENT", "DEFAULT_API_VERSION"]
 
-#: Identifies Python-SDK traffic in the exchange's per-client usage metrics.
-DEFAULT_USER_AGENT = "nexus-exchange-py/0.2.0"
+_DISTRIBUTION_NAME = "nexus-exchange"
+
+
+def _resolve_version() -> str:
+    """Version of the installed ``nexus-exchange`` distribution.
+
+    Read from package metadata so the ``User-Agent`` always reflects the
+    actually-installed version — one source of truth (``pyproject.toml``) rather
+    than a hand-updated string that can drift. Falls back to a literal when
+    running from a source tree with no install, so import never fails.
+    """
+    try:
+        return metadata.version(_DISTRIBUTION_NAME)
+    except metadata.PackageNotFoundError:  # pragma: no cover - only without an install
+        return "0.2.0"
+
+
+#: Package version, resolved from installed distribution metadata.
+__version__ = _resolve_version()
+
+#: Identifies Python-SDK traffic in the exchange's per-client usage metrics
+#: (ENG-4804). Normalized to ``nexus-exchange-py/<package version>`` and sent as
+#: ``User-Agent`` on every request.
+DEFAULT_USER_AGENT = f"nexus-exchange-py/{__version__}"
+
+#: Exchange API spec tag this SDK is compiled against, sent as
+#: ``X-Nexus-Api-Version`` on every request so the edge can pin each request to a
+#: contract version (ENG-5350). Mirrors the repo's source of truth in
+#: ``.api-version``; that file is not shipped in the wheel, so the tag is baked
+#: in here and ``tests/test_headers.py`` asserts the two never drift.
+DEFAULT_API_VERSION = "v0.6.2"
+
 DEFAULT_TIMEOUT = 30.0
 
 #: Path prefix for the direct-service ("/api/v1") surface. Under the gateway
@@ -134,6 +165,7 @@ class Client:
         base_url: str | None = None,
         api_key: str | None = None,
         api_secret: str | None = None,
+        api_version: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.Client | None = None,
     ) -> None:
@@ -144,10 +176,20 @@ class Client:
         self._direct_base_url = (base_url or network.direct_base_url).rstrip("/")
         self._api_key = api_key
         self._api_secret = api_secret
+        # Spec tag advertised on every request. Defaults to the tag the package
+        # is pinned to; overridable so a caller can target a specific contract.
+        # A blank / whitespace-only override falls back to the default rather
+        # than sending an empty header.
+        self._api_version = (api_version or "").strip() or DEFAULT_API_VERSION
+        # Emitted on every request, whether the httpx client is owned or
+        # caller-supplied. Copied per request in ``_request`` so the per-call
+        # content-type / signing headers never mutate this shared dict.
+        self._default_headers = {
+            "user-agent": DEFAULT_USER_AGENT,
+            "x-nexus-api-version": self._api_version,
+        }
         self._owns_http = http_client is None
-        self._http = http_client or httpx.Client(
-            timeout=timeout, headers={"user-agent": DEFAULT_USER_AGENT}
-        )
+        self._http = http_client or httpx.Client(timeout=timeout)
 
     # -- lifecycle --------------------------------------------------------
     def close(self) -> None:
@@ -546,7 +588,9 @@ class Client:
         full_path = f"{API_V1_PREFIX}{path}" if direct else path
 
         body_bytes = b"" if body is None else json.dumps(body).encode()
-        headers: dict[str, str] = {}
+        # Seed from the defaults (User-Agent + X-Nexus-Api-Version) so both ride
+        # along on every request; copy so per-call headers stay local.
+        headers: dict[str, str] = dict(self._default_headers)
         if body is not None:
             headers["content-type"] = "application/json"
         if signed:

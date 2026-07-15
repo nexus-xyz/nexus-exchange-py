@@ -64,7 +64,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git switch -c "$branch"
-          git add .api-version README.md
+          git add .api-version README.md src/nexus_exchange/client.py
           git commit -m "chore: sync pinned API spec to ${new}"
           git push --set-upstream origin "$branch"
 
@@ -74,7 +74,8 @@ jobs:
             printf 'nexus-exchange-api released **%s**, newer than the pinned spec. Opened automatically by `api-version-sync`.\n\n' "$new"
             printf '### Applied\n'
             printf -- '- Bumped `.api-version` to `%s`.\n' "$new"
-            printf -- '- Updated the bot-managed "currently targets" line in the README.\n\n'
+            printf -- '- Updated the bot-managed "currently targets" line in the README.\n'
+            printf -- '- Bumped the baked `DEFAULT_API_VERSION` constant (the `X-Nexus-Api-Version` header) to match.\n\n'
             printf '### For the reviewer\n'
             printf -- '- [ ] Review what `%s` changes (the api repo CHANGELOG / the `drift` check on this PR) and make any SDK code changes it implies.\n' "$new"
             printf -- '- [ ] If `%s` is a **breaking** spec release, plan the SDK version bump and append a row to the README compatibility table (the bot intentionally does not edit that historical table).\n' "$new"

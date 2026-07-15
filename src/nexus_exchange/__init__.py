@@ -19,7 +19,13 @@ from .auth import (
     LoginRequest,
     LoginResponse,
 )
-from .client import DEFAULT_USER_AGENT, Client, Network
+from .client import (
+    DEFAULT_API_VERSION,
+    DEFAULT_USER_AGENT,
+    Client,
+    Network,
+    __version__,
+)
 from .errors import (
     ApiError,
     AuthError,
@@ -60,8 +66,6 @@ from .types import (
     Withdrawal,
     WsToken,
 )
-
-__version__ = "0.2.0"
 
 __all__ = [
     "Client",
@@ -109,5 +113,6 @@ __all__ = [
     "TransportError",
     "MissingCredentialsError",
     "DEFAULT_USER_AGENT",
+    "DEFAULT_API_VERSION",
     "__version__",
 ]

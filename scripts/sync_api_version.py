@@ -46,6 +46,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 API_VERSION_FILE = os.path.join(REPO, ".api-version")
 README = os.path.join(REPO, "README.md")
+# The package bakes the pinned tag into a constant (the wheel doesn't ship
+# `.api-version`), sent as the `X-Nexus-Api-Version` header. Keep it in lockstep
+# with the pin so the drift test in tests/test_headers.py stays green.
+CLIENT_PY = os.path.join(REPO, "src", "nexus_exchange", "client.py")
 
 # The spec repo whose releases drive the pin.
 SPEC_REPO = "nexus-xyz/nexus-exchange-api"
@@ -61,6 +65,10 @@ TAG_RE = re.compile(r"^v[0-9]+(\.[0-9]+){0,2}$")
 MARK_START = "<!-- api-version-sync:start -->"
 MARK_END = "<!-- api-version-sync:end -->"
 MANAGED_BLOCK_RE = re.compile(re.escape(MARK_START) + r".*?" + re.escape(MARK_END), re.DOTALL)
+
+# The baked-in constant to keep in lockstep with the pin. Matches only the tag
+# inside the double-quoted assignment so the surrounding docstring is untouched.
+DEFAULT_API_VERSION_RE = re.compile(r'(?m)^(DEFAULT_API_VERSION = ")v[0-9][^"\n]*(")')
 
 
 def fail(msg):
@@ -137,6 +145,29 @@ def update_readme(new_tag):
     return True
 
 
+def update_client_default(new_tag):
+    """Rewrite the baked `DEFAULT_API_VERSION` constant to new_tag. Returns True
+    if client.py changed. Fails loudly if the constant is missing — its absence
+    means the header contract moved, which a silent no-op would hide and let the
+    drift test fail on the bump PR instead."""
+    try:
+        with open(CLIENT_PY) as f:
+            text = f.read()
+    except OSError as e:
+        fail(f"cannot read {CLIENT_PY}: {e}")
+    if not DEFAULT_API_VERSION_RE.search(text):
+        fail(
+            f'{CLIENT_PY} is missing a DEFAULT_API_VERSION = "vX.Y.Z" line to update; '
+            f"keep the baked spec tag in sync with .api-version."
+        )
+    new_text = DEFAULT_API_VERSION_RE.sub(rf"\g<1>{new_tag}\g<2>", text, count=1)
+    if new_text == text:
+        return False
+    with open(CLIENT_PY, "w") as f:
+        f.write(new_text)
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__)
     mode = ap.add_mutually_exclusive_group(required=True)
@@ -182,8 +213,10 @@ def main():
     with open(API_VERSION_FILE, "w") as f:
         f.write(latest + "\n")
     readme_changed = update_readme(latest)
+    client_changed = update_client_default(latest)
     print(f"Wrote .api-version = {latest}")
     print(f"README managed line updated: {readme_changed}")
+    print(f"client DEFAULT_API_VERSION updated: {client_changed}")
 
 
 if __name__ == "__main__":
