@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Account cancel-on-disconnect methods (ENG-6132).** `fetch_cancel_on_disconnect`
+  (`GET /api/v1/account/cancel-on-disconnect`) and `set_cancel_on_disconnect`
+  (`PUT /api/v1/account/cancel-on-disconnect`, body `{"enabled": <bool>}`) wrap
+  the account COD endpoints added in Exchange API v0.7.1. Both are signed calls
+  on the direct `/api/v1` surface and return a new `CancelOnDisconnectStatus`,
+  which distinguishes the account's own opt-in (`enabled`) from whether COD will
+  actually fire (`active` — opt-in *and* the exchange-side feature switch) and
+  exposes the disconnect `grace_secs` window.
+
 ## [0.3.0] - 2026-07-16
 
 ### Added

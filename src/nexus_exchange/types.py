@@ -694,6 +694,34 @@ class LeverageUpdate:
 
 
 @dataclass(frozen=True)
+class CancelOnDisconnectStatus:
+    """Account cancel-on-disconnect (COD) state (``/account/cancel-on-disconnect``).
+
+    :attr:`enabled` is the account's own opt-in. :attr:`active` is whether COD
+    will actually fire — the account opt-in *and* the exchange-side feature
+    switch: if :attr:`enabled` is true but :attr:`active` is false, the exchange
+    has the feature switched off. :attr:`grace_secs` is how long the exchange
+    waits after the last ``/ws`` disconnect before cancelling (a reconnect
+    within the window disarms it); ``None`` when the feature is unavailable on
+    this deployment.
+    """
+
+    enabled: bool
+    active: bool
+    grace_secs: int | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> CancelOnDisconnectStatus:
+        return cls(
+            enabled=bool(d.get("enabled", False)),
+            active=bool(d.get("active", False)),
+            grace_secs=opt_int(d.get("grace_secs")),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
 class BatchOrderResult:
     """One entry in the array returned by ``POST /orders/batch``.
 
