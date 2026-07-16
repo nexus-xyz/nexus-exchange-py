@@ -499,6 +499,7 @@ class Order:
     created_at: int
     updated_at: int
     raw: dict[str, Any]
+    limit_offset_bps: int | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Order:
@@ -516,6 +517,7 @@ class Order:
             created_at=int(d.get("created_at", 0)),
             updated_at=int(d.get("updated_at", 0)),
             raw=d,
+            limit_offset_bps=opt_int(d.get("limit_offset_bps")),
         )
 
 
@@ -544,8 +546,9 @@ class OrderResponse:
 class OrderRequest:
     """A new-order request (``POST /orders``).
 
-    Build with :meth:`limit` or :meth:`market`. ``price`` / ``reduce_only`` are
-    omitted from the wire payload when ``None``.
+    Build with :meth:`limit`, :meth:`market`, or :meth:`trailing_limit`.
+    ``price`` / ``reduce_only`` / ``trailing_offset_bps`` / ``limit_offset_bps``
+    are omitted from the wire payload when ``None``.
 
     ``time_in_force`` is sent verbatim and the engine is case-sensitive:
     ``"GTC"``, ``"IOC"``, ``"FOK"`` (uppercase) or ``"PostOnly"`` (PascalCase —
@@ -562,6 +565,8 @@ class OrderRequest:
     time_in_force: str
     price: Decimal | None = None
     reduce_only: bool | None = None
+    trailing_offset_bps: int | None = None
+    limit_offset_bps: int | None = None
 
     @classmethod
     def limit(
@@ -606,9 +611,45 @@ class OrderRequest:
             reduce_only=reduce_only,
         )
 
+    @classmethod
+    def trailing_limit(
+        cls,
+        market_id: str,
+        side: str,
+        quantity: Decimal,
+        trailing_offset_bps: int,
+        limit_offset_bps: int,
+        time_in_force: str = "GTC",
+        *,
+        reduce_only: bool | None = None,
+    ) -> OrderRequest:
+        """A trailing-limit order. Carries no ``price``: the limit price is
+        computed server-side at fire time.
+
+        ``trailing_offset_bps`` is the trailing trigger distance and
+        ``limit_offset_bps`` the fire-time limit offset, both in basis points
+        (integers; 1 bp = 0.01%). Both must be integers > 0.
+        """
+        if not isinstance(trailing_offset_bps, int) or trailing_offset_bps <= 0:
+            raise ValueError("trailing_offset_bps must be a positive integer (basis points)")
+        if not isinstance(limit_offset_bps, int) or limit_offset_bps <= 0:
+            raise ValueError("limit_offset_bps must be a positive integer (basis points)")
+        return cls(
+            market_id=market_id,
+            side=side,
+            order_type="TrailingLimit",
+            quantity=quantity,
+            time_in_force=time_in_force,
+            price=None,
+            reduce_only=reduce_only,
+            trailing_offset_bps=trailing_offset_bps,
+            limit_offset_bps=limit_offset_bps,
+        )
+
     def to_payload(self) -> dict[str, Any]:
-        """Serialize to the JSON body the API expects. Money is sent as strings;
-        ``price`` / ``reduce_only`` are omitted when ``None``."""
+        """Serialize to the JSON body the API expects. Money is sent as strings
+        and basis-point offsets as integers; ``price`` / ``reduce_only`` /
+        ``trailing_offset_bps`` / ``limit_offset_bps`` are omitted when ``None``."""
         body: dict[str, Any] = {
             "market_id": self.market_id,
             "side": self.side,
@@ -620,6 +661,10 @@ class OrderRequest:
             body["price"] = str(self.price)
         if self.reduce_only is not None:
             body["reduce_only"] = self.reduce_only
+        if self.trailing_offset_bps is not None:
+            body["trailing_offset_bps"] = self.trailing_offset_bps
+        if self.limit_offset_bps is not None:
+            body["limit_offset_bps"] = self.limit_offset_bps
         return body
 
 
