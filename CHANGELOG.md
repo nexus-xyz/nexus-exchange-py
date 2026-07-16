@@ -19,6 +19,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Pinned the Exchange API spec to `v0.7.1` (was `v0.6.2`) (ENG-6037).** Bumps
+  `.api-version`, the bot-managed README line, and the baked `DEFAULT_API_VERSION`
+  constant (the `X-Nexus-Api-Version` header value) in lockstep, clearing spec
+  drift. `v0.7.1` adds surface — the `TrailingLimit` order type (ENG-6131),
+  account cancel-on-disconnect (ENG-6132), and `/v1/bridge` Phase A (#32) —
+  tracked as separate parity follow-ups (py drift treats uncovered routes as
+  informational).
+
 - **Typed `create_orders` return value (ENG-3976).** `Client.create_orders`
   (`POST /orders/batch`) now returns `list[BatchOrderResult]` — the spec's
   per-order tagged union (`outcome == "ok"` with `order`/`fills`, or

@@ -87,7 +87,7 @@ DEFAULT_USER_AGENT = f"nexus-exchange-py/{__version__}"
 #: contract version (ENG-5350). Mirrors the repo's source of truth in
 #: ``.api-version``; that file is not shipped in the wheel, so the tag is baked
 #: in here and ``tests/test_headers.py`` asserts the two never drift.
-DEFAULT_API_VERSION = "v0.6.2"
+DEFAULT_API_VERSION = "v0.7.1"
 
 DEFAULT_TIMEOUT = 30.0
 
