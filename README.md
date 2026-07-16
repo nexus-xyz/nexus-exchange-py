@@ -175,6 +175,11 @@ release to detect drift, and the scheduled `api-version-sync` workflow opens a P
 when a newer spec releases. The line above is bot-managed; the table below is
 maintained by hand when an SDK release ships a new pin.
 
+Every request advertises the pinned tag in an `X-Nexus-Api-Version` header (and
+identifies itself with a `User-Agent: nexus-exchange-py/<version>`). Override the
+advertised tag per client with `Client(api_version="vX.Y.Z")` if you need to
+target a specific contract version.
+
 | SDK version | API spec |
 |---|---|
 | `0.1.x` | `v0.4.0` |
