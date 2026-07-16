@@ -184,6 +184,7 @@ target a specific contract version.
 |---|---|
 | `0.1.x` | `v0.4.0` |
 | `0.2.x` | `v0.6.2` |
+| `0.3.x` | `v0.7.1` |
 
 ## Development
 

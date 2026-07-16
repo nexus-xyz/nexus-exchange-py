@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-07-16
+
 ### Added
 
 - **Request identity headers (ENG-5955).** Every REST request now sends
@@ -16,6 +18,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   request to a contract version and segment per-key usage metrics by client +
   version (ENG-5350 / ENG-4804). Both headers are also sent on a
   caller-supplied `http_client`. Adds `DEFAULT_API_VERSION` to the public API.
+
+- **Tier-3 trading methods (ENG-5296).** Brings the Python surface to parity
+  with the Rust SDK: `amend_order` (`PATCH /orders/{order_id}` on the `/api/v1`
+  surface — `market_id` rides as a signed query param and an empty amend is
+  rejected client-side), `adjust_margin` (`POST /account/margin`, add/remove
+  isolated margin), and `set_leverage` (`POST /account/leverage`).
+  `set_leverage` is a code-only op ahead of the pinned spec, so it is not
+  listed in `endpoints.txt`.
 
 ### Changed
 
@@ -42,6 +52,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attribute access (`fill.price`); the raw payload remains available via
   `OrderResponse.raw["fills"]`.
 
+## [0.2.0] - 2026-07-07
+
+### Changed
+
 - **`/api/v1` direct-service routing (ENG-4946).** As the REST gateway is
   retired (ENG-4740), the migrated market-data and account/trading routes now
   target each backend service directly under an `/api/v1` prefix at the host
@@ -53,6 +67,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the legacy gateway. See `endpoints.txt` for the per-route split.
 
   Pins the Exchange API spec to `v0.6.2` (was `v0.4.0`).
+
+## [0.1.0] - 2026-06-24
+
+### Changed
 
 - Pinned the Exchange API spec to `v0.4.0` (was `v0.3.5`).
 
