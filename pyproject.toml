@@ -7,7 +7,7 @@ name = "nexus-exchange"
 # Keep in sync with the `_resolve_version` fallback literal in
 # src/nexus_exchange/client.py (used only when running from an uninstalled
 # source tree).
-version = "0.2.0"
+version = "0.3.0"
 description = "Official Python SDK for the Nexus Exchange API (experimental)"
 readme = "README.md"
 requires-python = ">=3.10"
