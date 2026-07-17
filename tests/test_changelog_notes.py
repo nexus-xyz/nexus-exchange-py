@@ -99,9 +99,10 @@ def test_version_is_regex_escaped_not_interpreted():
 
 def test_real_changelog_has_notes_for_current_version():
     # Guard the actual repo file so a release of the current pin would succeed.
-    import tomllib
+    # Use the package's resolved version (from installed distribution metadata,
+    # i.e. pyproject.toml) rather than tomllib, which is stdlib only on 3.11+.
+    from nexus_exchange import __version__
 
-    version = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())["project"]["version"]
     text = (REPO_ROOT / "CHANGELOG.md").read_text()
-    notes = changelog_notes.extract_notes(text, version)
+    notes = changelog_notes.extract_notes(text, __version__)
     assert notes.strip()
