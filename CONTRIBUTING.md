@@ -96,3 +96,25 @@ spec release.
 
 `0.x` is for iteration. We'll commit to a stable public surface at `1.0`; after
 that, breaking changes require a deprecation window and a major bump.
+
+## Releasing
+
+Releases are cut by the `release` workflow (`.github/workflows/release.yml`) from
+a version tag. To ship `X.Y.Z`:
+
+1. On `main`, set `version = "X.Y.Z"` in `pyproject.toml` and move the
+   `CHANGELOG.md` `[Unreleased]` notes under a new `## [X.Y.Z] - <date>` section.
+   Merge that through a normal PR.
+2. Tag the merge commit and push the tag:
+   `git tag vX.Y.Z && git push origin vX.Y.Z`.
+
+The workflow then guards that the tag equals `pyproject.toml`'s version, runs the
+full check suite, builds the sdist + wheel, and publishes a GitHub release whose
+notes are the `CHANGELOG.md` section for `X.Y.Z`. The tag **must** have a
+matching, non-empty changelog section or the run fails. It can also be re-run via
+**Actions → Release → Run workflow** with an existing tag.
+
+PyPI publishing is wired (Trusted Publishing / OIDC) but off by default. To turn
+it on: register the project and a trusted publisher on pypi.org, create a `pypi`
+GitHub environment, set the repo variable `PYPI_ENABLED=true`, and then flip the
+README install line to `pip install nexus-exchange`.
