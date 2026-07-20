@@ -118,6 +118,15 @@ def test_trailing_limit_rejects_non_integer_offsets() -> None:
         OrderRequest.trailing_limit("BTC-USDX-PERP", "Buy", Decimal("1"), 100, "25")  # type: ignore[arg-type]
 
 
+def test_trailing_limit_rejects_bool_offsets() -> None:
+    # bool is an int subclass, so True/False would otherwise slip past the
+    # `isinstance(x, int)` / `x > 0` checks and serialize as a JSON boolean.
+    with pytest.raises(ValueError, match="trailing_offset_bps must be a positive integer"):
+        OrderRequest.trailing_limit("BTC-USDX-PERP", "Buy", Decimal("1"), True, 25)  # type: ignore[arg-type]
+    with pytest.raises(ValueError, match="limit_offset_bps must be a positive integer"):
+        OrderRequest.trailing_limit("BTC-USDX-PERP", "Buy", Decimal("1"), 100, False)  # type: ignore[arg-type]
+
+
 # -- Order round-trip --------------------------------------------------------
 
 

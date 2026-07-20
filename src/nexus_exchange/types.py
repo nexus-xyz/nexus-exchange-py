@@ -630,10 +630,15 @@ class OrderRequest:
         ``limit_offset_bps`` the fire-time limit offset, both in basis points
         (integers; 1 bp = 0.01%). Both must be integers > 0.
         """
-        if not isinstance(trailing_offset_bps, int) or trailing_offset_bps <= 0:
-            raise ValueError("trailing_offset_bps must be a positive integer (basis points)")
-        if not isinstance(limit_offset_bps, int) or limit_offset_bps <= 0:
-            raise ValueError("limit_offset_bps must be a positive integer (basis points)")
+
+        def _positive_bps(value: int, name: str) -> None:
+            # bool is an int subclass; reject it so we never serialize a JSON
+            # boolean (`true`) where the wire expects an integer offset.
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer (basis points)")
+
+        _positive_bps(trailing_offset_bps, "trailing_offset_bps")
+        _positive_bps(limit_offset_bps, "limit_offset_bps")
         return cls(
             market_id=market_id,
             side=side,
