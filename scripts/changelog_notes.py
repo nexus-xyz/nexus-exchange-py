@@ -37,9 +37,6 @@ DEFAULT_CHANGELOG = os.path.join(REPO, "CHANGELOG.md")
 # off a workflow input) cannot inject regex metacharacters.
 VERSION_RE = re.compile(r"^v?([0-9]+\.[0-9]+\.[0-9]+)$")
 
-# `Unreleased` is a staging area, never a release target.
-RESERVED = {"unreleased"}
-
 
 def fail(msg):
     print(f"ERROR: {msg}", file=sys.stderr)
@@ -47,14 +44,15 @@ def fail(msg):
 
 
 def normalize_version(raw):
-    """Return the bare `X.Y.Z` for a `X.Y.Z` or `vX.Y.Z` input, or fail."""
+    """Return the bare `X.Y.Z` for a `X.Y.Z` or `vX.Y.Z` input, or fail.
+
+    The `X.Y.Z` shape gate also rejects staging labels like `Unreleased`, which
+    are never releasable.
+    """
     m = VERSION_RE.match(raw.strip())
     if not m:
         fail(f"version must look like X.Y.Z or vX.Y.Z (got: {raw!r})")
-    version = m.group(1)
-    if version.lower() in RESERVED:
-        fail(f"{version!r} is not a releasable version")
-    return version
+    return m.group(1)
 
 
 def extract_notes(text, version):
@@ -68,8 +66,13 @@ def extract_notes(text, version):
     # allow anything after the bracket (e.g. ` - 2026-07-16`) on the same line.
     # `version` is already validated to bare digits+dots, so re.escape guards the
     # dots without any injection risk.
+    #
+    # The body runs to the next `## ` heading, a link-reference-definition line
+    # (`[id]: url`, which Keep a Changelog collects at the file's end), or EOF —
+    # whichever comes first. Stopping at link definitions keeps them out of the
+    # notes for the *last* section, which would otherwise absorb everything to EOF.
     pattern = re.compile(
-        r"^##\s*\[" + re.escape(version) + r"\][^\n]*\n(.*?)(?=^##\s|\Z)",
+        r"^##\s*\[" + re.escape(version) + r"\][^\n]*\n(.*?)(?=^##\s|^\[[^\]]+\]:|\Z)",
         re.DOTALL | re.MULTILINE,
     )
     m = pattern.search(text)

@@ -61,6 +61,21 @@ def test_extracts_last_section_at_end_of_file():
     assert "A shiny thing." not in notes
 
 
+def test_last_section_stops_before_link_reference_definitions():
+    # Keep a Changelog collects `[id]: url` link definitions at the end of the
+    # file. The last release section must stop before them, not swallow them.
+    text = (
+        "## [1.0.0] - 2026-01-01\n\n"
+        "- shipped it.\n\n"
+        "[1.0.0]: https://example.com/releases/1.0.0\n"
+        "[0.9.0]: https://example.com/releases/0.9.0\n"
+    )
+    notes = changelog_notes.extract_notes(text, "1.0.0")
+    assert "shipped it." in notes
+    assert "https://example.com" not in notes
+    assert "[1.0.0]:" not in notes
+
+
 @pytest.mark.parametrize("raw", ["0.3.0", "v0.3.0"])
 def test_normalize_accepts_bare_and_v_prefixed(raw):
     assert changelog_notes.normalize_version(raw) == "0.3.0"
