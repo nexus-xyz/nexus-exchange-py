@@ -24,6 +24,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   integers (basis points; 1 bp = 0.01%) and carries no `price` — the limit
   price is computed server-side at fire time. The `Order` model now also echoes
   the nullable `limit_offset_bps` integer.
+- **Release automation (ENG-6135).** A `release` workflow cuts a release from a
+  `vX.Y.Z` tag push (or manual `workflow_dispatch` on an existing tag): it guards
+  that the tag equals `pyproject.toml`'s version, runs the full check suite
+  (lint/types/tests) so a red tree is never shipped, builds the sdist + wheel
+  (`hatchling`), and attaches them to a GitHub release whose notes are the
+  matching `CHANGELOG.md` section (extracted by `scripts/changelog_notes.py`).
+  PyPI Trusted Publishing (OIDC) is wired but dormant — it activates only once a
+  maintainer sets the `PYPI_ENABLED` repo variable and configures the `pypi`
+  environment, so releases never fail on unconfigured PyPI. Distribution stays
+  git-source until PyPI is live; the README install line is unchanged.
 
 ## [0.3.0] - 2026-07-16
 

@@ -1,0 +1,193 @@
+name: Release
+
+# Cut a release in one action: push a `vX.Y.Z` tag (or run this manually with an
+# existing tag) and this builds the sdist/wheel, attaches them to a GitHub
+# release whose notes are the matching CHANGELOG section, and — once opted in —
+# publishes to PyPI via Trusted Publishing (OIDC).
+#
+# Safety model:
+#   * The tag version MUST equal pyproject.toml's version (guard below), so a
+#     release can never disagree with the code it ships.
+#   * The full check suite (ruff/mypy/pytest) runs before anything is built, so a
+#     red tree is never released. Tags fire no other workflow, so this is the
+#     only gate.
+#   * The CHANGELOG must contain a non-empty section for the version, or the run
+#     fails — no empty/placeholder release notes.
+#   * Least privilege: the default token is read-only; only the release job gets
+#     `contents: write` and only the publish job gets `id-token: write`.
+#   * PyPI publishing stays DORMANT until the maintainer sets the repo variable
+#     PYPI_ENABLED=true and configures the `pypi` environment with a trusted
+#     publisher on pypi.org. Until then that job is skipped and releases never
+#     fail on unconfigured PyPI.
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing vX.Y.Z tag to release (must already be pushed)"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+# One release per tag at a time. Not cancel-in-progress: a publish must never be
+# killed mid-upload.
+concurrency:
+  group: release-${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      tag: ${{ steps.resolve.outputs.tag }}
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - name: Resolve and validate the tag
+        id: resolve
+        # RAW_TAG is untrusted (a workflow_dispatch input); validate its shape
+        # strictly before it is used as a git ref or in any later step.
+        env:
+          RAW_TAG: ${{ github.event_name == 'workflow_dispatch' && inputs.tag || github.ref_name }}
+        run: |
+          set -euo pipefail
+          if ! printf '%s' "$RAW_TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::Release tag must look like vX.Y.Z (got: '$RAW_TAG')."
+            exit 1
+          fi
+          echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${RAW_TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ steps.resolve.outputs.tag }}
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Guard — tag version matches pyproject.toml
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          proj="$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")"
+          echo "pyproject.toml version: $proj"
+          echo "tag version:            $VERSION"
+          if [ "$proj" != "$VERSION" ]; then
+            echo "::error::Tag $TAG does not match pyproject.toml version ($proj). Bump pyproject.toml and the CHANGELOG, commit, then tag."
+            exit 1
+          fi
+
+      - run: pip install -e ".[dev]" build twine
+
+      - name: Verify the tree is releasable (lint, types, tests)
+        run: |
+          set -euo pipefail
+          ruff format --check .
+          ruff check .
+          mypy src
+          pytest -q
+
+      - name: Extract release notes from CHANGELOG
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          python scripts/changelog_notes.py "$VERSION" > release-notes.md
+          echo "---- release notes ----"
+          cat release-notes.md
+
+      - name: Build sdist and wheel
+        run: |
+          set -euo pipefail
+          rm -rf dist
+          python -m build
+
+      - name: Verify built artifacts match the tag
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          ls -la dist
+          test -f "dist/nexus_exchange-${VERSION}-py3-none-any.whl"
+          test -f "dist/nexus_exchange-${VERSION}.tar.gz"
+          # Exactly the two expected artifacts — nothing stale from a prior build.
+          count="$(find dist -maxdepth 1 -type f | wc -l)"
+          if [ "$count" -ne 2 ]; then
+            echo "::error::Expected exactly 2 files in dist/, found $count:"
+            find dist -maxdepth 1 -type f
+            exit 1
+          fi
+          # Metadata sanity (long-description render, etc.) before we ship it.
+          twine check dist/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-dist
+          path: |
+            dist/*
+            release-notes.md
+          if-no-files-found: error
+
+  github-release:
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: .
+
+      - name: Create or update the GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          TAG: ${{ needs.build.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
+            echo "Release $TAG already exists — refreshing notes and assets (re-run)."
+            gh release edit "$TAG" --repo "$REPO" --notes-file release-notes.md
+            gh release upload "$TAG" --repo "$REPO" --clobber dist/*
+          else
+            # --verify-tag: refuse to create a release for a tag that does not
+            # exist in the repo.
+            gh release create "$TAG" --repo "$REPO" \
+              --title "$TAG" \
+              --notes-file release-notes.md \
+              --verify-tag \
+              dist/*
+          fi
+
+  pypi-publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # Dormant until opted in — see the header. Skipped entirely when the repo
+    # variable is unset, so a normal release never touches PyPI.
+    if: ${{ vars.PYPI_ENABLED == 'true' }}
+    environment:
+      name: pypi
+      url: https://pypi.org/project/nexus-exchange/
+    permissions:
+      id-token: write # OIDC token for Trusted Publishing; no API token stored.
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-dist
+          path: .
+
+      - name: Publish to PyPI (Trusted Publishing / OIDC)
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: dist
+          # Idempotent: a re-run of an already-published version is a no-op
+          # rather than a hard failure.
+          skip-existing: true
