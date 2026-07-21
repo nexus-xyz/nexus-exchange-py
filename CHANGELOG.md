@@ -17,6 +17,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which distinguishes the account's own opt-in (`enabled`) from whether COD will
   actually fire (`active` — opt-in *and* the exchange-side feature switch) and
   exposes the disconnect `grace_secs` window.
+- **`TrailingLimit` order placement (ENG-6131).** `OrderRequest.trailing_limit(...)`
+  models the request side of the `TrailingLimit` order type (a variant of
+  `POST /api/v1/orders`). It requires both `trailing_offset_bps` (the trailing
+  trigger) and `limit_offset_bps` (the fire-time limit offset) as positive
+  integers (basis points; 1 bp = 0.01%) and carries no `price` — the limit
+  price is computed server-side at fire time. The `Order` model now also echoes
+  the nullable `limit_offset_bps` integer.
 
 ## [0.3.0] - 2026-07-16
 
