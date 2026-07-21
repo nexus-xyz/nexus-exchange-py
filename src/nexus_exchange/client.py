@@ -30,6 +30,7 @@ from .types import (
     AmendOrder,
     ApiKeyInfo,
     BatchOrderResult,
+    CancelOnDisconnectStatus,
     CreditResult,
     DepositResult,
     Fill,
@@ -362,6 +363,17 @@ class Client:
         data = self._request("GET", "/account/rate-limit", signed=True, direct=True)
         return RateLimitStatus.from_dict(data if isinstance(data, dict) else {})
 
+    def fetch_cancel_on_disconnect(self) -> CancelOnDisconnectStatus:
+        """``GET /account/cancel-on-disconnect`` — the account's COD state.
+
+        Requires credentials. ``enabled`` is the account's own opt-in, while
+        ``active`` is whether COD will actually fire (the opt-in *and* the
+        exchange-side feature switch): ``enabled`` true with ``active`` false
+        means the exchange has the feature switched off.
+        """
+        data = self._request("GET", "/account/cancel-on-disconnect", signed=True, direct=True)
+        return CancelOnDisconnectStatus.from_dict(data if isinstance(data, dict) else {})
+
     # -- account (signed writes) -----------------------------------------
     def deposit(self, amount: Decimal | str) -> DepositResult:
         """``POST /account/deposit`` — deposit USDX collateral. Requires credentials.
@@ -429,6 +441,22 @@ class Client:
             signed=True,
         )
         return LeverageUpdate.from_dict(data if isinstance(data, dict) else {})
+
+    def set_cancel_on_disconnect(self, enabled: bool) -> CancelOnDisconnectStatus:
+        """``PUT /account/cancel-on-disconnect`` — opt the account in/out of COD.
+
+        Requires credentials. Returns the updated status; note the returned
+        ``active`` may stay false even when ``enabled`` is true if the exchange
+        has the feature switched off (see :meth:`fetch_cancel_on_disconnect`).
+        """
+        data = self._request(
+            "PUT",
+            "/account/cancel-on-disconnect",
+            body={"enabled": enabled},
+            signed=True,
+            direct=True,
+        )
+        return CancelOnDisconnectStatus.from_dict(data if isinstance(data, dict) else {})
 
     # -- orders (signed) -------------------------------------------------
     def create_order(self, order: OrderRequest) -> OrderResponse:

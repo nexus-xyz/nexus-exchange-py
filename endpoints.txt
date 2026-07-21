@@ -21,6 +21,8 @@ GET /api/v1/account
 GET /api/v1/positions
 GET /api/v1/fills
 GET /api/v1/account/rate-limit
+GET /api/v1/account/cancel-on-disconnect
+PUT /api/v1/account/cancel-on-disconnect
 POST /api/v1/account/credit
 POST /api/v1/orders
 POST /api/v1/orders/batch
