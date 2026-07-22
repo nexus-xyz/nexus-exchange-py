@@ -26,7 +26,10 @@ def main() -> None:
     with Client(api_key=api_key, api_secret=api_secret) as client:
         # `_request` is the low-level escape hatch: pick a method, path, and any
         # query string, and set `signed=True` to attach HMAC auth headers.
-        result = client._request("GET", "/account", signed=True)
+        # `/account` is served by the direct /api/v1 service (ENG-4946), so pass
+        # `direct=True` — the client adds the /api/v1 prefix and signs over the
+        # full prefixed path, exactly as the server verifies it.
+        result = client._request("GET", "/account", signed=True, direct=True)
         print(result)
 
 

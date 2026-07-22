@@ -34,7 +34,9 @@ with Client() as client:                 # defaults to the public gateway
     print(ticker.last, ticker.mark_price)
 ```
 
-No credentials are needed for market data. See `examples/public_market_data.py`.
+No credentials are needed for market data. Runnable, copy-pasteable programs for
+the public and signed surface live in [`examples/`](./examples/) (config read
+from the environment — no secrets in source).
 
 ## What's supported
 
@@ -56,8 +58,9 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | Account reads — `GET /account`, `/positions`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
 | Trading — `POST /orders`, `/orders/batch`; `GET /orders`, `/orders/{id}`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
 | Funds — `POST /account/deposit`, `/account/credit` | ✅ implemented |
-| Keys / agents / WS token — `/keys`, `/agents`, `POST /ws-tokens` | ✅ implemented |
+| Keys / agents / WS token — `GET /keys`, `DELETE /keys/{id}`, `/agents`, `POST /ws-tokens` | ✅ implemented |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
+| Create API key — `POST /keys` | ❌ not yet (needs a `POST /auth/login` session token; `sign_in` is now available) |
 | WebSocket streaming | ❌ not yet |
 | Pagination helpers | ❌ not yet |
 | Rate-limit-aware retry (`429` / `Retry-After`, token bucket) | ❌ not yet |
