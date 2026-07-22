@@ -141,7 +141,7 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-dist
           path: .
@@ -179,7 +179,7 @@ jobs:
     permissions:
       id-token: write # OIDC token for Trusted Publishing; no API token stored.
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: release-dist
           path: .
