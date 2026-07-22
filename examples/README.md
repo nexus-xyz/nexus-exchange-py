@@ -36,5 +36,6 @@ The public gateway proxies signed calls to the *site* account; for per-account
 auth point `NEXUS_BASE_URL` at a direct gateway (e.g. `http://localhost:9090`).
 See the top-level README.
 
-Auth flows (`POST /auth/login`, `POST /agents/register`) and the WebSocket
-streaming client are not yet on `main`, so no examples cover them here.
+Auth flows (`POST /auth/login`, `POST /agents/register`) are covered by
+`wallet_auth.py` (`Client.sign_in` / `Client.register_agent`). The WebSocket
+streaming client is not built yet, so no streaming example is included here.
