@@ -56,6 +56,7 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | Account reads — `GET /account`, `/positions`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
 | Trading — `POST /orders`, `/orders/batch`; `GET /orders`, `/orders/{id}`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
 | Funds — `POST /account/deposit`, `/account/credit` | ✅ implemented |
+| Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses` | ✅ implemented |
 | Keys / agents / WS token — `/keys`, `/agents`, `POST /ws-tokens` | ✅ implemented |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
 | WebSocket streaming | ❌ not yet |
@@ -131,6 +132,24 @@ with Client() as client:
     registered = client.register_agent(registration)
     print(registered.agent_address, registered.expires_at)
 ```
+
+## Bridge
+
+Deposit funds across chains via the `/bridge` surface (USDC/USDX in Phase A).
+Get a deposit address (idempotent per account + chain), send funds, then poll a
+deposit until `status` is `credited`:
+
+```python
+assets = client.fetch_bridge_assets()
+addr = client.create_bridge_deposit_address(assets.chains[0].chain)
+print(f"send USDC/USDX to {addr.address} on {addr.chain}")
+
+deposits = client.fetch_bridge_deposits(limit=1, chain=addr.chain)
+# deposits[0].status: "detected" | "confirming" | "credited" | "failed"
+```
+
+See [`examples/bridge_deposit.py`](./examples/bridge_deposit.py).
+
 
 ## CCXT compatibility
 

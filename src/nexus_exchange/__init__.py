@@ -41,6 +41,11 @@ from .types import (
     AmendOrder,
     ApiKeyInfo,
     BatchOrderResult,
+    BridgeAsset,
+    BridgeAssetsResponse,
+    BridgeChainAssets,
+    BridgeDeposit,
+    BridgeDepositAddress,
     CancelOnDisconnectStatus,
     CreditResult,
     DepositResult,
@@ -69,6 +74,11 @@ from .types import (
 )
 
 __all__ = [
+    "BridgeAsset",
+    "BridgeAssetsResponse",
+    "BridgeChainAssets",
+    "BridgeDeposit",
+    "BridgeDepositAddress",
     "Client",
     "Network",
     "Market",
