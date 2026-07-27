@@ -54,6 +54,7 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | Error taxonomy (terminal vs transient) | ✅ implemented |
 | Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
 | Account reads — `GET /account`, `/positions`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
+| Portfolio — `GET /account/state` (summary + positions, incl. `withdrawable`), `/account/fees`, `/account/portfolio-history` | ✅ implemented |
 | Trading — `POST /orders`, `/orders/batch`; `GET /orders`, `/orders/{id}`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
 | Funds — `POST /account/deposit`, `/account/credit` | ✅ implemented |
 | Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses` | ✅ implemented |
@@ -150,6 +151,34 @@ deposits = client.fetch_bridge_deposits(limit=1, chain=addr.chain)
 
 See [`examples/bridge_deposit.py`](./examples/bridge_deposit.py).
 
+## Portfolio
+
+One signed call returns the whole account state — summary aggregates plus every
+open position, from a single coherent read:
+
+```python
+from nexus_exchange import PortfolioWindow
+
+state = client.fetch_account_state()
+print(state.summary.total_equity, state.summary.withdrawable)   # None if unreported
+for pos in state.positions:
+    # Enriched risk detail; None + a `*_error` reason when not derivable.
+    print(pos.market_id, pos.notional_value, pos.roe, pos.funding_paid)
+    print(pos.leverage, pos.leverage_error)   # None, "margin_state_not_mirrored"
+
+fees = client.fetch_account_fees()
+print(fees.maker_fee_bps, fees.taker_fee_bps)   # maker may be negative (a rebate)
+
+history = client.fetch_portfolio_history(PortfolioWindow.WEEK, limit=100)
+for point in history.points:                    # oldest first
+    print(point.timestamp_ms, point.equity, point.pnl, point.volume)
+```
+
+`withdrawable` is engine-authoritative free margin floored at zero. The
+endpoints serving it fail closed with `502 authoritative_margin_unavailable`
+(an `ApiError`) rather than returning a local estimate — that is transient, so
+retry rather than substituting a self-computed figure. Every money field is a
+`Decimal`; a figure the server did not report is `None`, never a defaulted `0`.
 
 ## CCXT compatibility
 
@@ -182,7 +211,7 @@ dependency. See `examples/ccxt_market_data.py`.
 
 <!-- api-version-sync:start -->
 
-Currently targets Exchange API spec **`v0.7.1`**.
+Currently targets Exchange API spec **`v0.7.2`**.
 
 <!-- api-version-sync:end -->
 

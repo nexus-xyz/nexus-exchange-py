@@ -49,6 +49,20 @@ def opt_decimal(value: Any) -> Decimal | None:
     return to_decimal(value)
 
 
+def to_int(value: Any) -> int:
+    """Coerce a *required* wire integer to ``int``.
+
+    The integer counterpart of :func:`to_decimal`: raises :class:`ValueError`
+    when ``value`` is ``None`` (missing or sent ``null``) rather than defaulting.
+    Used for spec-``required`` structural integers where a fabricated ``0``
+    would be nonsense downstream (a zero downsample cadence, a zero timestamp,
+    a zero fee rate). Use :func:`opt_int` for genuinely optional fields.
+    """
+    if value is None:
+        raise ValueError("required integer field is missing or null")
+    return int(value)
+
+
 def opt_int(value: Any) -> int | None:
     """Coerce an optional/nullable integer field; ``None`` (or missing) stays ``None``.
 

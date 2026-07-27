@@ -12,9 +12,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from decimal import Decimal
+from enum import Enum
 from typing import Any
 
-from ._parse import opt_decimal, opt_int, opt_str, to_decimal
+from ._parse import opt_decimal, opt_int, opt_str, to_decimal, to_int
 
 
 @dataclass(frozen=True)
@@ -395,7 +396,34 @@ class HealthStatus:
 
 @dataclass(frozen=True)
 class Position:
-    """An open position. All money fields are exact decimal strings."""
+    """An open position with per-position risk detail.
+
+    All money fields are exact decimal strings.
+
+    The enriched risk fields — :attr:`leverage`, :attr:`notional_value`,
+    :attr:`roe`, :attr:`margin_used`, :attr:`max_leverage`,
+    :attr:`funding_paid` — arrived in API spec v0.7.2 (ENG-6445) and are derived
+    strictly from indexer-mirrored state (no engine round-trip, to stay on the
+    low-latency read path). When an input is not mirrored the server sends
+    ``null`` and puts a machine-readable reason in the companion
+    ``<field>_error`` (e.g. ``"mark_price_unavailable"``) rather than a
+    fabricated number.
+
+    This decode preserves that distinction: each enriched field is ``None``
+    both when the server reports it ``null`` *and* when a deployment older than
+    v0.7.2 omits it entirely — never a defaulted ``0``, which would read as a
+    real "no leverage / no notional / no funding paid". Check the matching
+    ``*_error`` to tell a server-reported gap from an old deployment (the error
+    is ``None`` in both the populated and the omitted case).
+
+    :attr:`leverage` is currently always ``None`` server-side with
+    ``leverage_error == "margin_state_not_mirrored"``. Do not infer it from
+    :attr:`margin_used` — that collapses to ``1 / initial_margin_rate``, a
+    per-market constant, not the real leverage.
+
+    :attr:`funding_paid` is **paid-positive**: positive means this position has
+    paid funding, negative means it has received funding.
+    """
 
     market_id: str
     side: str
@@ -405,6 +433,21 @@ class Position:
     realized_pnl: Decimal
     liquidation_price: Decimal | None
     raw: dict[str, Any]
+    # Enriched risk detail (spec v0.7.2). Declared after `raw` with defaults so
+    # this stays a backwards-compatible extension of the previous field order.
+    # `leverage` is a JSON *number* on the wire (the rest are decimal strings);
+    # it decodes through `str` so no float re-rendering creeps in.
+    leverage: Decimal | None = None
+    leverage_error: str | None = None
+    notional_value: Decimal | None = None
+    notional_value_error: str | None = None
+    roe: Decimal | None = None
+    roe_error: str | None = None
+    margin_used: Decimal | None = None
+    margin_used_error: str | None = None
+    max_leverage: int | None = None
+    max_leverage_error: str | None = None
+    funding_paid: Decimal | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Position:
@@ -418,12 +461,28 @@ class Position:
             # Not `required` in the spec — absent in flat / cross-margin states.
             liquidation_price=opt_decimal(d.get("liquidation_price")),
             raw=d,
+            leverage=opt_decimal(d.get("leverage")),
+            leverage_error=opt_str(d.get("leverage_error")),
+            notional_value=opt_decimal(d.get("notional_value")),
+            notional_value_error=opt_str(d.get("notional_value_error")),
+            roe=opt_decimal(d.get("roe")),
+            roe_error=opt_str(d.get("roe_error")),
+            margin_used=opt_decimal(d.get("margin_used")),
+            margin_used_error=opt_str(d.get("margin_used_error")),
+            max_leverage=opt_int(d.get("max_leverage")),
+            max_leverage_error=opt_str(d.get("max_leverage_error")),
+            funding_paid=opt_decimal(d.get("funding_paid")),
         )
 
 
 @dataclass(frozen=True)
 class AccountSummary:
-    """Account balance and collateral summary (``GET /account``)."""
+    """Account balance and collateral summary (``GET /account``).
+
+    Distinct from :class:`AccountPortfolioSummary`, which is the aggregate
+    portfolio view (equity, PnL, volume, ``withdrawable``) served by
+    ``/account/summary`` and embedded in ``/account/state``.
+    """
 
     balance: Decimal
     collateral: Decimal
@@ -440,6 +499,243 @@ class AccountSummary:
             equity=to_decimal(d.get("equity", 0)),
             available_margin=to_decimal(d.get("available_margin", 0)),
             positions=[Position.from_dict(p) for p in d.get("positions", [])],
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class AccountPortfolioSummary:
+    """Aggregate portfolio view for the authenticated account (spec v0.7.2).
+
+    The ``summary`` half of ``GET /account/state`` — identical to the standalone
+    ``/account/summary`` response. Distinct from :class:`AccountSummary`, the
+    balance/collateral view of ``GET /account``.
+
+    The spec marks *every* field optional, and a deployment older than v0.7.2
+    does not report :attr:`withdrawable` at all, so each figure decodes to
+    ``None`` when absent rather than to ``Decimal(0)``: a fabricated zero
+    equity or zero withdrawable balance reads as a real (and materially wrong)
+    number, while ``None`` says plainly "this deployment did not report it".
+
+    :attr:`withdrawable` is the wallet-withdrawable balance — engine-authoritative
+    free margin floored at zero, already net of each position's initial margin
+    and pre-trade order reservations. It is never negative when present: an
+    underwater account is clamped to ``0``. The endpoints serving it fail closed
+    with HTTP 502 (``authoritative_margin_unavailable``, raised as
+    :class:`~nexus_exchange.ApiError`) rather than reporting a local estimate,
+    so a populated value is authoritative.
+
+    :attr:`early_access_allowed` is present only while the early-access gate is
+    active; ``None`` means the gate is not in play, not "denied".
+    """
+
+    collateral: Decimal | None
+    total_equity: Decimal | None
+    total_unrealized_pnl: Decimal | None
+    total_realized_pnl_24h: Decimal | None
+    total_volume_24h: Decimal | None
+    open_positions_count: int | None
+    open_orders_count: int | None
+    margin_used: Decimal | None
+    available_margin: Decimal | None
+    withdrawable: Decimal | None
+    early_access_allowed: bool | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> AccountPortfolioSummary:
+        early_access = d.get("early_access_allowed")
+        return cls(
+            collateral=opt_decimal(d.get("collateral")),
+            total_equity=opt_decimal(d.get("total_equity")),
+            total_unrealized_pnl=opt_decimal(d.get("total_unrealized_pnl")),
+            total_realized_pnl_24h=opt_decimal(d.get("total_realized_pnl_24h")),
+            total_volume_24h=opt_decimal(d.get("total_volume_24h")),
+            open_positions_count=opt_int(d.get("open_positions_count")),
+            open_orders_count=opt_int(d.get("open_orders_count")),
+            margin_used=opt_decimal(d.get("margin_used")),
+            available_margin=opt_decimal(d.get("available_margin")),
+            withdrawable=opt_decimal(d.get("withdrawable")),
+            early_access_allowed=None if early_access is None else bool(early_access),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class AccountState:
+    """Consolidated account snapshot (``GET /account/state``, spec v0.7.2).
+
+    One call for what used to take two (``/account/summary`` + ``/positions``),
+    matching Hyperliquid ``clearinghouseState`` ergonomics. Both halves come
+    from a single coherent read, so the server guarantees
+    ``summary.open_positions_count == len(positions)``. That invariant is
+    documented, not enforced here — a mismatch would mean a server bug, and
+    both halves are returned as received so a caller can see it rather than
+    have the SDK raise on live data.
+    """
+
+    summary: AccountPortfolioSummary
+    positions: list[Position]
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> AccountState:
+        summary = d.get("summary")
+        return cls(
+            summary=AccountPortfolioSummary.from_dict(summary if isinstance(summary, dict) else {}),
+            positions=[
+                Position.from_dict(p) for p in d.get("positions", []) if isinstance(p, dict)
+            ],
+            raw=d,
+        )
+
+
+class PortfolioWindow(str, Enum):
+    """Window selector for :meth:`~nexus_exchange.Client.fetch_portfolio_history`.
+
+    Also selects the server-side downsample cadence and point capacity:
+
+    ==========  =======  ==========  ======
+    window      cadence  max points  span
+    ==========  =======  ==========  ======
+    ``day``     5 min    288         24 h
+    ``week``    1 h      168         7 d
+    ``month``   6 h      120         30 d
+    ``all``     1 d      366         ~1 y
+    ==========  =======  ==========  ======
+
+    A value outside this set is rejected by the server with ``400``
+    (``invalid_window``); the client rejects it before sending. Pass a member or
+    its plain string value — note ``str()`` on a ``str``-mixin enum member
+    renders ``"PortfolioWindow.DAY"``, so the wire value is always taken from
+    ``.value``.
+    """
+
+    DAY = "day"
+    WEEK = "week"
+    MONTH = "month"
+    ALL = "all"
+
+
+@dataclass(frozen=True)
+class PortfolioPoint:
+    """One downsampled portfolio sample (spec v0.7.2).
+
+    Every field is spec-``required``, so a sample missing one raises
+    :class:`ValueError` rather than decoding to a nonsense zero — an absent
+    equity or timestamp means a malformed payload, not a real value.
+
+    :attr:`equity` is collateral + Σ unrealized PnL. :attr:`pnl` is *cumulative
+    trading* PnL (Σ realized on close, including liquidation and ADL closes, +
+    Σ signed funding + current unrealized) and is deposit-neutral: wallet
+    deposits and withdrawals never move it. :attr:`volume` is cumulative traded
+    notional and is monotonically non-decreasing.
+    """
+
+    timestamp_ms: int
+    equity: Decimal
+    pnl: Decimal
+    volume: Decimal
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> PortfolioPoint:
+        return cls(
+            timestamp_ms=to_int(d.get("timestamp_ms")),
+            equity=to_decimal(d.get("equity")),
+            pnl=to_decimal(d.get("pnl")),
+            volume=to_decimal(d.get("volume")),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class PortfolioHistory:
+    """Portfolio time-series for the account (``GET /account/portfolio-history``).
+
+    Equity, cumulative trading PnL, and cumulative traded volume over the
+    requested window, downsampled at a fixed per-window cadence,
+    :attr:`points` **oldest first**.
+
+    :attr:`window` echoes the served window (the ``window`` query parameter or
+    its ``day`` default) and is kept as a plain string so a window added later
+    still decodes; compare against :class:`PortfolioWindow` values.
+    :attr:`cadence_ms` is spec-``required`` and decodes strictly — a missing
+    cadence raises rather than yielding ``0``, which would divide by zero in
+    caller arithmetic.
+    """
+
+    window: str
+    cadence_ms: int
+    points: list[PortfolioPoint]
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> PortfolioHistory:
+        return cls(
+            # `or ""` also covers an explicit null, which `str(...)` would
+            # otherwise render as the string "None".
+            window=str(d.get("window") or ""),
+            cadence_ms=to_int(d.get("cadence_ms")),
+            points=[
+                PortfolioPoint.from_dict(p) for p in d.get("points", []) if isinstance(p, dict)
+            ],
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class AccountFees:
+    """The account's effective fee schedule (``GET /account/fees``, spec v0.7.2).
+
+    The forward-looking *schedule* rate scoped by :attr:`schedule`, not a
+    realized per-fill average. Rates are spec-``required`` and decode strictly:
+    a payload missing one raises :class:`ValueError` rather than reporting a
+    fabricated ``0`` bps, which would read as "trading is free".
+
+    :attr:`maker_fee_bps` may be **negative** — that is a rebate *paid to* the
+    maker (``-2`` is a 0.02% rebate), and the sign is preserved as sent.
+
+    :attr:`tier` (currently always ``"base"``) and :attr:`schedule` (currently
+    always ``"standard"``) are open strings: new values appear as the fee model
+    lands, so branch on them defensively. :attr:`schedule` scopes the rate — the
+    venue charges per-market schedules but this endpoint takes no market
+    parameter, so the reported rate is not a venue-wide guarantee.
+
+    :attr:`volume_30d_estimated` is ``True`` when :attr:`volume_30d` may
+    undercount (the source fill buffer was at capacity, so older in-window fills
+    may have been evicted). It defaults to ``True`` when absent: assuming full
+    30-day coverage the server never claimed is the unsafe direction.
+
+    :attr:`discounts` is currently always empty and its per-entry shape is
+    provisional in the spec (``additionalProperties``), so entries stay raw
+    dicts rather than a typed model that would have to break to grow.
+    """
+
+    maker_fee_bps: int
+    taker_fee_bps: int
+    tier: str
+    schedule: str
+    volume_30d: Decimal
+    volume_30d_estimated: bool
+    discounts: list[dict[str, Any]]
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> AccountFees:
+        estimated = d.get("volume_30d_estimated")
+        return cls(
+            maker_fee_bps=to_int(d.get("maker_fee_bps")),
+            taker_fee_bps=to_int(d.get("taker_fee_bps")),
+            # `or ""` also covers an explicit null, which `str(...)` would
+            # otherwise render as the string "None" and quietly match no branch.
+            tier=str(d.get("tier") or ""),
+            schedule=str(d.get("schedule") or ""),
+            volume_30d=to_decimal(d.get("volume_30d")),
+            # Absent *or* null → assume the figure may undercount (see the class
+            # docstring); only an explicit false claims full 30-day coverage.
+            volume_30d_estimated=True if estimated is None else bool(estimated),
+            discounts=[x for x in d.get("discounts", []) if isinstance(x, dict)],
             raw=d,
         )
 

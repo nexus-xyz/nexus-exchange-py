@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Portfolio-parity endpoints and fields (ENG-6459).** Surfaces the
+  portfolio-parity additions from Exchange API v0.7.2:
+  - `fetch_account_state` (`GET /api/v1/account/state`) — the consolidated
+    single-call snapshot (`AccountState`: summary aggregates + every open
+    position, from one coherent read), replacing an `/account/summary` +
+    `/positions` pair. The new `AccountPortfolioSummary` carries
+    **`withdrawable`** — engine-authoritative free margin floored at zero.
+  - `fetch_account_fees` (`GET /api/v1/account/fees`) — the effective fee
+    schedule (`AccountFees`: maker/taker bps, tier, rolling 30-day volume and
+    its `volume_30d_estimated` flag, discounts). `maker_fee_bps` may be
+    negative — a rebate paid to the maker.
+  - `fetch_portfolio_history` (`GET /api/v1/account/portfolio-history`) — the
+    equity / cumulative-PnL / cumulative-volume time series
+    (`PortfolioHistory` + `PortfolioPoint`) over a `PortfolioWindow`
+    (`day` | `week` | `month` | `all`, default `day`), oldest first. The
+    `window` and `limit` arguments are validated client-side, so a bad value
+    raises `ValueError` instead of spending a signed request on a `400`.
+  - `Position` gains the enriched risk detail — `leverage`, `notional_value`,
+    `roe`, `margin_used`, `max_leverage`, `funding_paid` (paid-positive) — each
+    with its machine-readable `*_error` companion. A field the server cannot
+    derive, or that an older deployment omits, is `None` rather than a
+    defaulted `0`, so a missing figure never reads as a real one. Added after
+    `raw` with defaults, so the existing field order is unchanged.
+
+  `withdrawable` and the consolidated state are derived from the
+  engine-authoritative margin view, which **fails closed**: HTTP 502
+  (`authoritative_margin_unavailable`) surfaces as `ApiError` rather than a
+  locally-estimated balance.
 - **Account cancel-on-disconnect methods (ENG-6132).** `fetch_cancel_on_disconnect`
   (`GET /api/v1/account/cancel-on-disconnect`) and `set_cancel_on_disconnect`
   (`PUT /api/v1/account/cancel-on-disconnect`, body `{"enabled": <bool>}`) wrap
@@ -34,6 +62,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   maintainer sets the `PYPI_ENABLED` repo variable and configures the `pypi`
   environment, so releases never fail on unconfigured PyPI. Distribution stays
   git-source until PyPI is live; the README install line is unchanged.
+
+### Changed
+
+- **Pinned the Exchange API spec to `v0.7.2` (was `v0.7.1`) (ENG-6459).** The
+  spec release that adds the portfolio-parity surface above. Bumps
+  `.api-version`, the baked `DEFAULT_API_VERSION` constant sent as
+  `X-Nexus-Api-Version`, and the bot-managed README line. v0.7.2 is purely
+  additive — no existing method or model changed shape. The README SDK↔spec
+  compatibility table records *shipped* SDK versions, so its row for this pin
+  lands with the release that ships it.
 
 ## [0.3.0] - 2026-07-16
 
