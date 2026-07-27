@@ -26,7 +26,7 @@ Requires Python **3.10+**. Depends only on [`httpx`](https://www.python-httpx.or
 ```python
 from nexus_exchange import Client
 
-with Client() as client:                 # defaults to the public gateway
+with Client() as client:  # defaults to the public gateway
     for market in client.fetch_markets():
         print(market.market_id)
 
@@ -58,6 +58,7 @@ from the environment — no secrets in source).
 | Account reads — `GET /account`, `/positions`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
 | Trading — `POST /orders`, `/orders/batch`; `GET /orders`, `/orders/{id}`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
 | Funds — `POST /account/deposit`, `/account/credit` | ✅ implemented |
+| Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses` | ✅ implemented |
 | Keys / agents / WS token — `GET /keys`, `DELETE /keys/{id}`, `/agents`, `POST /ws-tokens` | ✅ implemented |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
 | Create API key — `POST /keys` | ❌ not yet (needs a `POST /auth/login` session token; `sign_in` is now available) |
@@ -115,12 +116,12 @@ with the SDK.
 ```python
 from nexus_exchange import Client, EthSigner
 
-signer = EthSigner.from_hex("0x<wallet-private-key>")   # you own the key
+signer = EthSigner.from_hex("0x<wallet-private-key>")  # you own the key
 
 with Client() as client:
     # EIP-191 personal_sign → POST /auth/login → session token.
     session = client.sign_in(signer)
-    print(session.address, session.token)   # token is a secret
+    print(session.address, session.token)  # token is a secret
 
     # EIP-712 → POST /agents/register. expires_at_ms / nonce / chain_id are
     # caller-supplied; expiry must fall in [now + 1d, now + 90d].
@@ -134,6 +135,24 @@ with Client() as client:
     registered = client.register_agent(registration)
     print(registered.agent_address, registered.expires_at)
 ```
+
+## Bridge
+
+Deposit funds across chains via the `/bridge` surface (USDC/USDX in Phase A).
+Get a deposit address (idempotent per account + chain), send funds, then poll a
+deposit until `status` is `credited`:
+
+```python
+assets = client.fetch_bridge_assets()
+addr = client.create_bridge_deposit_address(assets.chains[0].chain)
+print(f"send USDC/USDX to {addr.address} on {addr.chain}")
+
+deposits = client.fetch_bridge_deposits(limit=1, chain=addr.chain)
+# deposits[0].status: "detected" | "confirming" | "credited" | "failed"
+```
+
+See [`examples/bridge_deposit.py`](./examples/bridge_deposit.py).
+
 
 ## CCXT compatibility
 
@@ -152,8 +171,8 @@ from nexus_exchange.ccxt_adapter import NexusExchange
 
 with NexusExchange() as ex:
     ex.load_markets()
-    ticker = ex.fetch_ticker("BTC-USDX-PERP")     # unified ticker dict
-    book = ex.fetch_order_book("BTC-USDX-PERP", limit=10)   # [price, amount] levels
+    ticker = ex.fetch_ticker("BTC-USDX-PERP")  # unified ticker dict
+    book = ex.fetch_order_book("BTC-USDX-PERP", limit=10)  # [price, amount] levels
     candles = ex.fetch_ohlcv("BTC-USDX-PERP", "1m", limit=100)  # [ts,o,h,l,c,v]
     trades = ex.fetch_trades("BTC-USDX-PERP", limit=50)
 ```
@@ -166,7 +185,7 @@ dependency. See `examples/ccxt_market_data.py`.
 
 <!-- api-version-sync:start -->
 
-Currently targets Exchange API spec **`v0.6.2`**.
+Currently targets Exchange API spec **`v0.7.1`**.
 
 <!-- api-version-sync:end -->
 
@@ -178,10 +197,16 @@ release to detect drift, and the scheduled `api-version-sync` workflow opens a P
 when a newer spec releases. The line above is bot-managed; the table below is
 maintained by hand when an SDK release ships a new pin.
 
+Every request advertises the pinned tag in an `X-Nexus-Api-Version` header (and
+identifies itself with a `User-Agent: nexus-exchange-py/<version>`). Override the
+advertised tag per client with `Client(api_version="vX.Y.Z")` if you need to
+target a specific contract version.
+
 | SDK version | API spec |
 |---|---|
 | `0.1.x` | `v0.4.0` |
 | `0.2.x` | `v0.6.2` |
+| `0.3.x` | `v0.7.1` |
 
 ## Development
 

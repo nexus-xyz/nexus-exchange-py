@@ -23,7 +23,7 @@ import pytest
 
 from nexus_exchange import ApiError, Client
 
-# Canned, spec-shaped (v0.6.2) response bodies, keyed by request path.
+# Canned, spec-shaped (v0.7.1) response bodies, keyed by request path.
 _MARKETS = [
     {
         "market_id": "BTC-USDX-PERP",

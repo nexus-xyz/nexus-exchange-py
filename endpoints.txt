@@ -21,6 +21,8 @@ GET /api/v1/account
 GET /api/v1/positions
 GET /api/v1/fills
 GET /api/v1/account/rate-limit
+GET /api/v1/account/cancel-on-disconnect
+PUT /api/v1/account/cancel-on-disconnect
 POST /api/v1/account/credit
 POST /api/v1/orders
 POST /api/v1/orders/batch
@@ -48,3 +50,8 @@ POST /ws-tokens
 PUT /admin/tiers
 GET /admin/tiers
 DELETE /admin/tiers/{address}
+POST /bridge/deposit-addresses
+GET /bridge/deposit-addresses
+GET /bridge/assets
+GET /bridge/deposits
+GET /bridge/deposits/{id}

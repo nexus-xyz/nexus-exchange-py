@@ -7,7 +7,63 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Account cancel-on-disconnect methods (ENG-6132).** `fetch_cancel_on_disconnect`
+  (`GET /api/v1/account/cancel-on-disconnect`) and `set_cancel_on_disconnect`
+  (`PUT /api/v1/account/cancel-on-disconnect`, body `{"enabled": <bool>}`) wrap
+  the account COD endpoints added in Exchange API v0.7.1. Both are signed calls
+  on the direct `/api/v1` surface and return a new `CancelOnDisconnectStatus`,
+  which distinguishes the account's own opt-in (`enabled`) from whether COD will
+  actually fire (`active` — opt-in *and* the exchange-side feature switch) and
+  exposes the disconnect `grace_secs` window.
+- **`TrailingLimit` order placement (ENG-6131).** `OrderRequest.trailing_limit(...)`
+  models the request side of the `TrailingLimit` order type (a variant of
+  `POST /api/v1/orders`). It requires both `trailing_offset_bps` (the trailing
+  trigger) and `limit_offset_bps` (the fire-time limit offset) as positive
+  integers (basis points; 1 bp = 0.01%) and carries no `price` — the limit
+  price is computed server-side at fire time. The `Order` model now also echoes
+  the nullable `limit_offset_bps` integer.
+- **Release automation (ENG-6135).** A `release` workflow cuts a release from a
+  `vX.Y.Z` tag push (or manual `workflow_dispatch` on an existing tag): it guards
+  that the tag equals `pyproject.toml`'s version, runs the full check suite
+  (lint/types/tests) so a red tree is never shipped, builds the sdist + wheel
+  (`hatchling`), and attaches them to a GitHub release whose notes are the
+  matching `CHANGELOG.md` section (extracted by `scripts/changelog_notes.py`).
+  PyPI Trusted Publishing (OIDC) is wired but dormant — it activates only once a
+  maintainer sets the `PYPI_ENABLED` repo variable and configures the `pypi`
+  environment, so releases never fail on unconfigured PyPI. Distribution stays
+  git-source until PyPI is live; the README install line is unchanged.
+
+## [0.3.0] - 2026-07-16
+
+### Added
+
+- **Request identity headers (ENG-5955).** Every REST request now sends
+  `X-Nexus-Api-Version: <spec tag>` (defaulting to the pinned `.api-version`,
+  overridable via `Client(api_version=…)`) and a normalized
+  `User-Agent: nexus-exchange-py/<package version>`, so the edge can pin the
+  request to a contract version and segment per-key usage metrics by client +
+  version (ENG-5350 / ENG-4804). Both headers are also sent on a
+  caller-supplied `http_client`. Adds `DEFAULT_API_VERSION` to the public API.
+
+- **Tier-3 trading methods (ENG-5296).** Brings the Python surface to parity
+  with the Rust SDK: `amend_order` (`PATCH /orders/{order_id}` on the `/api/v1`
+  surface — `market_id` rides as a signed query param and an empty amend is
+  rejected client-side), `adjust_margin` (`POST /account/margin`, add/remove
+  isolated margin), and `set_leverage` (`POST /account/leverage`).
+  `set_leverage` is a code-only op ahead of the pinned spec, so it is not
+  listed in `endpoints.txt`.
+
 ### Changed
+
+- **Pinned the Exchange API spec to `v0.7.1` (was `v0.6.2`) (ENG-6037).** Bumps
+  `.api-version`, the bot-managed README line, and the baked `DEFAULT_API_VERSION`
+  constant (the `X-Nexus-Api-Version` header value) in lockstep, clearing spec
+  drift. `v0.7.1` adds surface — the `TrailingLimit` order type (ENG-6131),
+  account cancel-on-disconnect (ENG-6132), and `/v1/bridge` Phase A (#32) —
+  tracked as separate parity follow-ups (py drift treats uncovered routes as
+  informational).
 
 - **Typed `create_orders` return value (ENG-3976).** `Client.create_orders`
   (`POST /orders/batch`) now returns `list[BatchOrderResult]` — the spec's
@@ -24,6 +80,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   attribute access (`fill.price`); the raw payload remains available via
   `OrderResponse.raw["fills"]`.
 
+## [0.2.0] - 2026-07-07
+
+### Changed
+
 - **`/api/v1` direct-service routing (ENG-4946).** As the REST gateway is
   retired (ENG-4740), the migrated market-data and account/trading routes now
   target each backend service directly under an `/api/v1` prefix at the host
@@ -35,6 +95,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the legacy gateway. See `endpoints.txt` for the per-route split.
 
   Pins the Exchange API spec to `v0.6.2` (was `v0.4.0`).
+
+## [0.1.0] - 2026-06-24
+
+### Changed
 
 - Pinned the Exchange API spec to `v0.4.0` (was `v0.3.5`).
 

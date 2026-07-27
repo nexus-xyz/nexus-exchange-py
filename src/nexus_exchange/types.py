@@ -499,6 +499,7 @@ class Order:
     created_at: int
     updated_at: int
     raw: dict[str, Any]
+    limit_offset_bps: int | None = None
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Order:
@@ -516,6 +517,7 @@ class Order:
             created_at=int(d.get("created_at", 0)),
             updated_at=int(d.get("updated_at", 0)),
             raw=d,
+            limit_offset_bps=opt_int(d.get("limit_offset_bps")),
         )
 
 
@@ -544,8 +546,9 @@ class OrderResponse:
 class OrderRequest:
     """A new-order request (``POST /orders``).
 
-    Build with :meth:`limit` or :meth:`market`. ``price`` / ``reduce_only`` are
-    omitted from the wire payload when ``None``.
+    Build with :meth:`limit`, :meth:`market`, or :meth:`trailing_limit`.
+    ``price`` / ``reduce_only`` / ``trailing_offset_bps`` / ``limit_offset_bps``
+    are omitted from the wire payload when ``None``.
 
     ``time_in_force`` is sent verbatim and the engine is case-sensitive:
     ``"GTC"``, ``"IOC"``, ``"FOK"`` (uppercase) or ``"PostOnly"`` (PascalCase —
@@ -562,6 +565,8 @@ class OrderRequest:
     time_in_force: str
     price: Decimal | None = None
     reduce_only: bool | None = None
+    trailing_offset_bps: int | None = None
+    limit_offset_bps: int | None = None
 
     @classmethod
     def limit(
@@ -606,9 +611,50 @@ class OrderRequest:
             reduce_only=reduce_only,
         )
 
+    @classmethod
+    def trailing_limit(
+        cls,
+        market_id: str,
+        side: str,
+        quantity: Decimal,
+        trailing_offset_bps: int,
+        limit_offset_bps: int,
+        time_in_force: str = "GTC",
+        *,
+        reduce_only: bool | None = None,
+    ) -> OrderRequest:
+        """A trailing-limit order. Carries no ``price``: the limit price is
+        computed server-side at fire time.
+
+        ``trailing_offset_bps`` is the trailing trigger distance and
+        ``limit_offset_bps`` the fire-time limit offset, both in basis points
+        (integers; 1 bp = 0.01%). Both must be integers > 0.
+        """
+
+        def _positive_bps(value: int, name: str) -> None:
+            # bool is an int subclass; reject it so we never serialize a JSON
+            # boolean (`true`) where the wire expects an integer offset.
+            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
+                raise ValueError(f"{name} must be a positive integer (basis points)")
+
+        _positive_bps(trailing_offset_bps, "trailing_offset_bps")
+        _positive_bps(limit_offset_bps, "limit_offset_bps")
+        return cls(
+            market_id=market_id,
+            side=side,
+            order_type="TrailingLimit",
+            quantity=quantity,
+            time_in_force=time_in_force,
+            price=None,
+            reduce_only=reduce_only,
+            trailing_offset_bps=trailing_offset_bps,
+            limit_offset_bps=limit_offset_bps,
+        )
+
     def to_payload(self) -> dict[str, Any]:
-        """Serialize to the JSON body the API expects. Money is sent as strings;
-        ``price`` / ``reduce_only`` are omitted when ``None``."""
+        """Serialize to the JSON body the API expects. Money is sent as strings
+        and basis-point offsets as integers; ``price`` / ``reduce_only`` /
+        ``trailing_offset_bps`` / ``limit_offset_bps`` are omitted when ``None``."""
         body: dict[str, Any] = {
             "market_id": self.market_id,
             "side": self.side,
@@ -620,6 +666,10 @@ class OrderRequest:
             body["price"] = str(self.price)
         if self.reduce_only is not None:
             body["reduce_only"] = self.reduce_only
+        if self.trailing_offset_bps is not None:
+            body["trailing_offset_bps"] = self.trailing_offset_bps
+        if self.limit_offset_bps is not None:
+            body["limit_offset_bps"] = self.limit_offset_bps
         return body
 
 
@@ -689,6 +739,34 @@ class LeverageUpdate:
         return cls(
             market_id=str(d.get("market_id", "")),
             leverage=int(d.get("leverage", 0)),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class CancelOnDisconnectStatus:
+    """Account cancel-on-disconnect (COD) state (``/account/cancel-on-disconnect``).
+
+    :attr:`enabled` is the account's own opt-in. :attr:`active` is whether COD
+    will actually fire — the account opt-in *and* the exchange-side feature
+    switch: if :attr:`enabled` is true but :attr:`active` is false, the exchange
+    has the feature switched off. :attr:`grace_secs` is how long the exchange
+    waits after the last ``/ws`` disconnect before cancelling (a reconnect
+    within the window disarms it); ``None`` when the feature is unavailable on
+    this deployment.
+    """
+
+    enabled: bool
+    active: bool
+    grace_secs: int | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> CancelOnDisconnectStatus:
+        return cls(
+            enabled=bool(d.get("enabled", False)),
+            active=bool(d.get("active", False)),
+            grace_secs=opt_int(d.get("grace_secs")),
             raw=d,
         )
 
@@ -898,3 +976,137 @@ class WsToken:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> WsToken:
         return cls(token=str(d.get("token", "")), raw=d)
+
+
+@dataclass(frozen=True)
+class BridgeAsset:
+    """A bridgeable asset on a specific chain (``/bridge/assets``)."""
+
+    symbol: str
+    decimals: int
+    min_amount: Decimal
+    confirmations: int
+    fee: Decimal | None
+    contract_address: str | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BridgeAsset:
+        return cls(
+            symbol=str(d.get("symbol", "")),
+            decimals=int(d.get("decimals", 0)),
+            min_amount=to_decimal(d.get("min_amount", 0)),
+            confirmations=int(d.get("confirmations", 0)),
+            fee=opt_decimal(d.get("fee")),
+            contract_address=opt_str(d.get("contract_address")),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class BridgeChainAssets:
+    """Bridgeable assets for one chain."""
+
+    chain: str
+    chain_id: int | None
+    deposit_assets: list[BridgeAsset]
+    withdraw_assets: list[BridgeAsset]
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BridgeChainAssets:
+        return cls(
+            chain=str(d.get("chain", "")),
+            chain_id=opt_int(d.get("chain_id")),
+            deposit_assets=[
+                BridgeAsset.from_dict(a) for a in d.get("deposit_assets", []) if isinstance(a, dict)
+            ],
+            withdraw_assets=[
+                BridgeAsset.from_dict(a)
+                for a in d.get("withdraw_assets", [])
+                if isinstance(a, dict)
+            ],
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class BridgeAssetsResponse:
+    """Supported bridge chains and their assets (``GET /bridge/assets``)."""
+
+    chains: list[BridgeChainAssets]
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BridgeAssetsResponse:
+        return cls(
+            chains=[
+                BridgeChainAssets.from_dict(c) for c in d.get("chains", []) if isinstance(c, dict)
+            ],
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class BridgeDepositAddress:
+    """A per-account deposit address on a specific chain."""
+
+    address: str
+    chain: str
+    accepts: list[str]
+    account_id: str
+    created_at: int
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BridgeDepositAddress:
+        return cls(
+            address=str(d.get("address", "")),
+            chain=str(d.get("chain", "")),
+            accepts=[str(a) for a in d.get("accepts", [])],
+            account_id=str(d.get("account_id", "")),
+            created_at=int(d.get("created_at", 0)),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class BridgeDeposit:
+    """A cross-chain deposit tracked by the watcher (read model).
+
+    ``status`` moves ``detected`` -> ``confirming`` -> ``credited`` | ``failed``.
+    """
+
+    id: str
+    account_id: str
+    chain: str
+    asset: str
+    amount: Decimal
+    address: str
+    status: str
+    confirmations: int | None
+    required_confirmations: int | None
+    tx_hash: str | None
+    credited_at: int | None
+    created_at: int
+    updated_at: int | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BridgeDeposit:
+        return cls(
+            id=str(d.get("id", "")),
+            account_id=str(d.get("account_id", "")),
+            chain=str(d.get("chain", "")),
+            asset=str(d.get("asset", "")),
+            amount=to_decimal(d.get("amount", 0)),
+            address=str(d.get("address", "")),
+            status=str(d.get("status", "")),
+            confirmations=opt_int(d.get("confirmations")),
+            required_confirmations=opt_int(d.get("required_confirmations")),
+            tx_hash=opt_str(d.get("tx_hash")),
+            credited_at=opt_int(d.get("credited_at")),
+            created_at=int(d.get("created_at", 0)),
+            updated_at=opt_int(d.get("updated_at")),
+            raw=d,
+        )

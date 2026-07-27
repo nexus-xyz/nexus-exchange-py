@@ -19,7 +19,13 @@ from .auth import (
     LoginRequest,
     LoginResponse,
 )
-from .client import DEFAULT_USER_AGENT, Client, Network
+from .client import (
+    DEFAULT_API_VERSION,
+    DEFAULT_USER_AGENT,
+    Client,
+    Network,
+    __version__,
+)
 from .errors import (
     ApiError,
     AuthError,
@@ -35,6 +41,12 @@ from .types import (
     AmendOrder,
     ApiKeyInfo,
     BatchOrderResult,
+    BridgeAsset,
+    BridgeAssetsResponse,
+    BridgeChainAssets,
+    BridgeDeposit,
+    BridgeDepositAddress,
+    CancelOnDisconnectStatus,
     CreditResult,
     DepositResult,
     Fill,
@@ -61,9 +73,12 @@ from .types import (
     WsToken,
 )
 
-__version__ = "0.2.0"
-
 __all__ = [
+    "BridgeAsset",
+    "BridgeAssetsResponse",
+    "BridgeChainAssets",
+    "BridgeDeposit",
+    "BridgeDepositAddress",
     "Client",
     "Network",
     "Market",
@@ -99,6 +114,7 @@ __all__ = [
     "CreditResult",
     "Withdrawal",
     "RateLimitStatus",
+    "CancelOnDisconnectStatus",
     "ApiKeyInfo",
     "AgentInfo",
     "TierOverride",
@@ -109,5 +125,6 @@ __all__ = [
     "TransportError",
     "MissingCredentialsError",
     "DEFAULT_USER_AGENT",
+    "DEFAULT_API_VERSION",
     "__version__",
 ]

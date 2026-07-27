@@ -15,6 +15,7 @@ import json
 import time
 from decimal import Decimal
 from enum import Enum
+from importlib import metadata
 from typing import Any
 from urllib.parse import quote, urlencode
 
@@ -29,6 +30,10 @@ from .types import (
     AmendOrder,
     ApiKeyInfo,
     BatchOrderResult,
+    BridgeAssetsResponse,
+    BridgeDeposit,
+    BridgeDepositAddress,
+    CancelOnDisconnectStatus,
     CreditResult,
     DepositResult,
     Fill,
@@ -54,10 +59,40 @@ from .types import (
     WsToken,
 )
 
-__all__ = ["Client", "Network", "DEFAULT_USER_AGENT"]
+__all__ = ["Client", "Network", "DEFAULT_USER_AGENT", "DEFAULT_API_VERSION"]
 
-#: Identifies Python-SDK traffic in the exchange's per-client usage metrics.
-DEFAULT_USER_AGENT = "nexus-exchange-py/0.2.0"
+_DISTRIBUTION_NAME = "nexus-exchange"
+
+
+def _resolve_version() -> str:
+    """Version of the installed ``nexus-exchange`` distribution.
+
+    Read from package metadata so the ``User-Agent`` always reflects the
+    actually-installed version — one source of truth (``pyproject.toml``) rather
+    than a hand-updated string that can drift. Falls back to a literal when
+    running from a source tree with no install, so import never fails.
+    """
+    try:
+        return metadata.version(_DISTRIBUTION_NAME)
+    except metadata.PackageNotFoundError:  # pragma: no cover - only without an install
+        return "0.3.0"
+
+
+#: Package version, resolved from installed distribution metadata.
+__version__ = _resolve_version()
+
+#: Identifies Python-SDK traffic in the exchange's per-client usage metrics
+#: (ENG-4804). Normalized to ``nexus-exchange-py/<package version>`` and sent as
+#: ``User-Agent`` on every request.
+DEFAULT_USER_AGENT = f"nexus-exchange-py/{__version__}"
+
+#: Exchange API spec tag this SDK is compiled against, sent as
+#: ``X-Nexus-Api-Version`` on every request so the edge can pin each request to a
+#: contract version (ENG-5350). Mirrors the repo's source of truth in
+#: ``.api-version``; that file is not shipped in the wheel, so the tag is baked
+#: in here and ``tests/test_headers.py`` asserts the two never drift.
+DEFAULT_API_VERSION = "v0.7.1"
+
 DEFAULT_TIMEOUT = 30.0
 
 #: Path prefix for the direct-service ("/api/v1") surface. Under the gateway
@@ -134,6 +169,7 @@ class Client:
         base_url: str | None = None,
         api_key: str | None = None,
         api_secret: str | None = None,
+        api_version: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.Client | None = None,
     ) -> None:
@@ -144,10 +180,20 @@ class Client:
         self._direct_base_url = (base_url or network.direct_base_url).rstrip("/")
         self._api_key = api_key
         self._api_secret = api_secret
+        # Spec tag advertised on every request. Defaults to the tag the package
+        # is pinned to; overridable so a caller can target a specific contract.
+        # A blank / whitespace-only override falls back to the default rather
+        # than sending an empty header.
+        self._api_version = (api_version or "").strip() or DEFAULT_API_VERSION
+        # Emitted on every request, whether the httpx client is owned or
+        # caller-supplied. Copied per request in ``_request`` so the per-call
+        # content-type / signing headers never mutate this shared dict.
+        self._default_headers = {
+            "user-agent": DEFAULT_USER_AGENT,
+            "x-nexus-api-version": self._api_version,
+        }
         self._owns_http = http_client is None
-        self._http = http_client or httpx.Client(
-            timeout=timeout, headers={"user-agent": DEFAULT_USER_AGENT}
-        )
+        self._http = http_client or httpx.Client(timeout=timeout)
 
     # -- lifecycle --------------------------------------------------------
     def close(self) -> None:
@@ -312,6 +358,56 @@ class Client:
         data = self._request("GET", "/withdrawals", signed=True)
         return [Withdrawal.from_dict(w) for w in (data if isinstance(data, list) else [])]
 
+    # -- bridge (deposits) ---------------------------------------------------
+
+    def fetch_bridge_assets(self) -> BridgeAssetsResponse:
+        """``GET /bridge/assets`` — bridgeable chains and assets. Requires credentials."""
+        data = self._request("GET", "/bridge/assets", signed=True, direct=True)
+        return BridgeAssetsResponse.from_dict(data if isinstance(data, dict) else {})
+
+    def create_bridge_deposit_address(self, chain: str) -> BridgeDepositAddress:
+        """``POST /bridge/deposit-addresses`` — get-or-create the account's deposit
+        address on ``chain`` (idempotent per account+chain). Requires credentials.
+        """
+        data = self._request(
+            "POST",
+            "/bridge/deposit-addresses",
+            body={"chain": chain},
+            signed=True,
+            direct=True,
+        )
+        return BridgeDepositAddress.from_dict(data if isinstance(data, dict) else {})
+
+    def list_bridge_deposit_addresses(self) -> list[BridgeDepositAddress]:
+        """``GET /bridge/deposit-addresses`` — list deposit addresses. Requires credentials."""
+        data = self._request("GET", "/bridge/deposit-addresses", signed=True, direct=True)
+        return [BridgeDepositAddress.from_dict(a) for a in (data if isinstance(data, list) else [])]
+
+    def fetch_bridge_deposits(
+        self,
+        limit: int | None = None,
+        chain: str | None = None,
+        asset: str | None = None,
+        status: str | None = None,
+    ) -> list[BridgeDeposit]:
+        """``GET /bridge/deposits`` — the account's bridge deposits; all filters
+        optional. Poll a deposit until its ``status`` reaches ``credited``.
+        Requires credentials.
+        """
+        query = _query(limit=limit, chain=chain, asset=asset, status=status)
+        data = self._request("GET", "/bridge/deposits", query=query, signed=True, direct=True)
+        return [BridgeDeposit.from_dict(x) for x in (data if isinstance(data, list) else [])]
+
+    def fetch_bridge_deposit(self, deposit_id: str) -> BridgeDeposit:
+        """``GET /bridge/deposits/{id}`` — a single bridge deposit. Requires credentials."""
+        data = self._request(
+            "GET",
+            f"/bridge/deposits/{quote(deposit_id, safe='')}",
+            signed=True,
+            direct=True,
+        )
+        return BridgeDeposit.from_dict(data if isinstance(data, dict) else {})
+
     def fetch_rate_limit_status(self) -> RateLimitStatus:
         """``GET /account/rate-limit`` — the caller's rate-limit status.
 
@@ -319,6 +415,17 @@ class Client:
         """
         data = self._request("GET", "/account/rate-limit", signed=True, direct=True)
         return RateLimitStatus.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_cancel_on_disconnect(self) -> CancelOnDisconnectStatus:
+        """``GET /account/cancel-on-disconnect`` — the account's COD state.
+
+        Requires credentials. ``enabled`` is the account's own opt-in, while
+        ``active`` is whether COD will actually fire (the opt-in *and* the
+        exchange-side feature switch): ``enabled`` true with ``active`` false
+        means the exchange has the feature switched off.
+        """
+        data = self._request("GET", "/account/cancel-on-disconnect", signed=True, direct=True)
+        return CancelOnDisconnectStatus.from_dict(data if isinstance(data, dict) else {})
 
     # -- account (signed writes) -----------------------------------------
     def deposit(self, amount: Decimal | str) -> DepositResult:
@@ -387,6 +494,22 @@ class Client:
             signed=True,
         )
         return LeverageUpdate.from_dict(data if isinstance(data, dict) else {})
+
+    def set_cancel_on_disconnect(self, enabled: bool) -> CancelOnDisconnectStatus:
+        """``PUT /account/cancel-on-disconnect`` — opt the account in/out of COD.
+
+        Requires credentials. Returns the updated status; note the returned
+        ``active`` may stay false even when ``enabled`` is true if the exchange
+        has the feature switched off (see :meth:`fetch_cancel_on_disconnect`).
+        """
+        data = self._request(
+            "PUT",
+            "/account/cancel-on-disconnect",
+            body={"enabled": enabled},
+            signed=True,
+            direct=True,
+        )
+        return CancelOnDisconnectStatus.from_dict(data if isinstance(data, dict) else {})
 
     # -- orders (signed) -------------------------------------------------
     def create_order(self, order: OrderRequest) -> OrderResponse:
@@ -546,7 +669,9 @@ class Client:
         full_path = f"{API_V1_PREFIX}{path}" if direct else path
 
         body_bytes = b"" if body is None else json.dumps(body).encode()
-        headers: dict[str, str] = {}
+        # Seed from the defaults (User-Agent + X-Nexus-Api-Version) so both ride
+        # along on every request; copy so per-call headers stay local.
+        headers: dict[str, str] = dict(self._default_headers)
         if body is not None:
             headers["content-type"] = "application/json"
         if signed:
