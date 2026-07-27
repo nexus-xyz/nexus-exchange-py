@@ -26,7 +26,7 @@ Requires Python **3.10+**. Depends only on [`httpx`](https://www.python-httpx.or
 ```python
 from nexus_exchange import Client
 
-with Client() as client:                 # defaults to the public gateway
+with Client() as client:  # defaults to the public gateway
     for market in client.fetch_markets():
         print(market.market_id)
 
@@ -114,12 +114,12 @@ with the SDK.
 ```python
 from nexus_exchange import Client, EthSigner
 
-signer = EthSigner.from_hex("0x<wallet-private-key>")   # you own the key
+signer = EthSigner.from_hex("0x<wallet-private-key>")  # you own the key
 
 with Client() as client:
     # EIP-191 personal_sign → POST /auth/login → session token.
     session = client.sign_in(signer)
-    print(session.address, session.token)   # token is a secret
+    print(session.address, session.token)  # token is a secret
 
     # EIP-712 → POST /agents/register. expires_at_ms / nonce / chain_id are
     # caller-supplied; expiry must fall in [now + 1d, now + 90d].
@@ -160,17 +160,17 @@ open position, from a single coherent read:
 from nexus_exchange import PortfolioWindow
 
 state = client.fetch_account_state()
-print(state.summary.total_equity, state.summary.withdrawable)   # None if unreported
+print(state.summary.total_equity, state.summary.withdrawable)  # None if unreported
 for pos in state.positions:
     # Enriched risk detail; None + a `*_error` reason when not derivable.
     print(pos.market_id, pos.notional_value, pos.roe, pos.funding_paid)
-    print(pos.leverage, pos.leverage_error)   # None, "margin_state_not_mirrored"
+    print(pos.leverage, pos.leverage_error)  # None, "margin_state_not_mirrored"
 
 fees = client.fetch_account_fees()
-print(fees.maker_fee_bps, fees.taker_fee_bps)   # maker may be negative (a rebate)
+print(fees.maker_fee_bps, fees.taker_fee_bps)  # maker may be negative (a rebate)
 
 history = client.fetch_portfolio_history(PortfolioWindow.WEEK, limit=100)
-for point in history.points:                    # oldest first
+for point in history.points:  # oldest first
     print(point.timestamp_ms, point.equity, point.pnl, point.volume)
 ```
 
@@ -197,8 +197,8 @@ from nexus_exchange.ccxt_adapter import NexusExchange
 
 with NexusExchange() as ex:
     ex.load_markets()
-    ticker = ex.fetch_ticker("BTC-USDX-PERP")     # unified ticker dict
-    book = ex.fetch_order_book("BTC-USDX-PERP", limit=10)   # [price, amount] levels
+    ticker = ex.fetch_ticker("BTC-USDX-PERP")  # unified ticker dict
+    book = ex.fetch_order_book("BTC-USDX-PERP", limit=10)  # [price, amount] levels
     candles = ex.fetch_ohlcv("BTC-USDX-PERP", "1m", limit=100)  # [ts,o,h,l,c,v]
     trades = ex.fetch_trades("BTC-USDX-PERP", limit=50)
 ```
