@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     position, from one coherent read), replacing an `/account/summary` +
     `/positions` pair. The new `AccountPortfolioSummary` carries
     **`withdrawable`** — engine-authoritative free margin floored at zero.
+  - `fetch_account_summary` (`GET /api/v1/account/summary`) — the same
+    `AccountPortfolioSummary` aggregates without the position list, for callers
+    that only need `withdrawable` / equity and not a full snapshot.
   - `fetch_account_fees` (`GET /api/v1/account/fees`) — the effective fee
     schedule (`AccountFees`: maker/taker bps, tier, rolling 30-day volume and
     its `volume_30d_estimated` flag, discounts). `maker_fee_bps` may be
@@ -37,6 +40,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   engine-authoritative margin view, which **fails closed**: HTTP 502
   (`authoritative_margin_unavailable`) surfaces as `ApiError` rather than a
   locally-estimated balance.
+- **`DecodeError` in the error taxonomy.** Raised when a 2xx body does not match
+  the contract — a spec-`required` field absent, `null`, non-finite or the wrong
+  shape. Subclasses both `NexusExchangeError` (so `except NexusExchangeError`
+  catches a malformed payload, which strict decoding previously escaped as a
+  bare `ValueError`) and `ValueError` (so existing handlers keep working). A
+  plain `ValueError` now means *caller* error — a bad `window` or `limit`,
+  raised before the request is signed — so the two are distinguishable by type.
 - **Account cancel-on-disconnect methods (ENG-6132).** `fetch_cancel_on_disconnect`
   (`GET /api/v1/account/cancel-on-disconnect`) and `set_cancel_on_disconnect`
   (`PUT /api/v1/account/cancel-on-disconnect`, body `{"enabled": <bool>}`) wrap
@@ -65,6 +75,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Decoding rejects values it previously coerced.** A non-finite money value
+  (`"NaN"`, `"Infinity"`) now raises `DecodeError` instead of producing a
+  `Decimal("NaN")` that silently poisons every comparison and sum it reaches; a
+  required integer that is fractional or a `bool` raises instead of truncating to
+  a fabricated figure; and a non-object element in a decoded list raises instead
+  of an `AttributeError` from library internals. Applies to all models, not just
+  the new ones. Optional and nullable fields still decode to `None` exactly as
+  before.
 - **Pinned the Exchange API spec to `v0.7.2` (was `v0.7.1`) (ENG-6459).** The
   spec release that adds the portfolio-parity surface above. Bumps
   `.api-version`, the baked `DEFAULT_API_VERSION` constant sent as

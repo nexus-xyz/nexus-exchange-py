@@ -54,7 +54,7 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | Error taxonomy (terminal vs transient) | ✅ implemented |
 | Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
 | Account reads — `GET /account`, `/positions`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
-| Portfolio — `GET /account/state` (summary + positions, incl. `withdrawable`), `/account/fees`, `/account/portfolio-history` | ✅ implemented |
+| Portfolio — `GET /account/state` (summary + positions, incl. `withdrawable`), `/account/summary`, `/account/fees`, `/account/portfolio-history` | ✅ implemented |
 | Trading — `POST /orders`, `/orders/batch`; `GET /orders`, `/orders/{id}`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
 | Funds — `POST /account/deposit`, `/account/credit` | ✅ implemented |
 | Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses` | ✅ implemented |
@@ -166,6 +166,9 @@ for pos in state.positions:
     print(pos.market_id, pos.notional_value, pos.roe, pos.funding_paid)
     print(pos.leverage, pos.leverage_error)  # None, "margin_state_not_mirrored"
 
+summary = client.fetch_account_summary()  # the aggregates alone, no positions
+print(summary.withdrawable)
+
 fees = client.fetch_account_fees()
 print(fees.maker_fee_bps, fees.taker_fee_bps)  # maker may be negative (a rebate)
 
@@ -177,8 +180,16 @@ for point in history.points:  # oldest first
 `withdrawable` is engine-authoritative free margin floored at zero. The
 endpoints serving it fail closed with `502 authoritative_margin_unavailable`
 (an `ApiError`) rather than returning a local estimate — that is transient, so
-retry rather than substituting a self-computed figure. Every money field is a
-`Decimal`; a figure the server did not report is `None`, never a defaulted `0`.
+retry rather than substituting a self-computed figure.
+
+Every money field is a `Decimal`, and decoding never invents one. A field the
+spec marks optional decodes to `None` when unreported, never a defaulted `0`
+that would read as a real balance — while a reported `"0"` stays `Decimal(0)`. A
+field the spec marks **required** decodes strictly: if it is absent, `null` or
+malformed, the call raises `DecodeError` (a `NexusExchangeError`, and a
+`ValueError`) rather than handing back a plausible figure the server never sent.
+That extends to lists — a malformed point or position raises instead of silently
+dropping out of the series.
 
 ## CCXT compatibility
 

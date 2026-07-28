@@ -21,10 +21,12 @@ from urllib.parse import quote, urlencode
 
 import httpx
 
+from ._parse import to_dict_list
 from .auth import AgentRegistered, AgentRegistration, EthSigner, LoginResponse
 from .errors import ApiError, MissingCredentialsError, TransportError
 from .types import (
     AccountFees,
+    AccountPortfolioSummary,
     AccountState,
     AccountSummary,
     AdlEvent,
@@ -138,6 +140,15 @@ def _portfolio_window(window: PortfolioWindow | str | None) -> str | None:
 
 def _portfolio_limit(limit: int | None) -> int | None:
     """Validate a portfolio-history ``limit`` against the spec's ``1..366`` range.
+
+    ``minimum: 1, maximum: 366`` on the parameter schema is a constraint on the
+    *request*, so a conforming client does not send outside it and this raises
+    :class:`ValueError` before signing. The parameter description's "a larger
+    value is clamped, not rejected" documents how the server *tolerates*
+    non-conforming input; it is not licence to send it. Note the effective cap is
+    per-window (``day`` 288, ``week`` 168, ``month`` 120, ``all`` 366), so a
+    value inside ``1..366`` may still be clamped — asking for more than the
+    window holds never returns more.
 
     Rejects ``bool`` explicitly — it is an ``int`` subclass, and letting it
     through would send ``limit=True``.
@@ -398,9 +409,14 @@ class Client:
         risk detail (notional value, ROE, margin used, max leverage, funding
         paid). Those fields are ``None`` when the server cannot derive them,
         with the reason in the companion ``*_error`` — see :class:`Position`.
+
+        A non-object in the list raises :class:`~nexus_exchange.DecodeError`
+        rather than being skipped, so this list, ``fetch_balance().positions``
+        and ``fetch_account_state().positions`` all fail the same way instead of
+        one of them silently understating exposure.
         """
         data = self._request("GET", "/positions", signed=True, direct=True)
-        return [Position.from_dict(p) for p in (data if isinstance(data, list) else [])]
+        return [Position.from_dict(p) for p in to_dict_list(data, "positions", required=False)]
 
     def fetch_account_state(self) -> AccountState:
         """``GET /account/state`` — consolidated account snapshot. Requires credentials.
@@ -416,9 +432,32 @@ class Client:
         (``authoritative_margin_unavailable``, raised as :class:`ApiError`)
         rather than a locally-estimated figure. That is transient — retry after
         a short delay rather than falling back to a self-computed number.
+
+        Use :meth:`fetch_account_summary` when only the aggregates are needed —
+        it returns the same ``summary`` without the position list.
         """
         data = self._request("GET", "/account/state", signed=True, direct=True)
         return AccountState.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_account_summary(self) -> AccountPortfolioSummary:
+        """``GET /account/summary`` — aggregate portfolio view. Requires credentials.
+
+        The summary-only half of :meth:`fetch_account_state`: equity, PnL,
+        volume, margin and ``withdrawable``, without the position list. Prefer it
+        when the aggregates are all you need; prefer
+        :meth:`fetch_account_state` when you also want positions, since that is
+        one coherent read rather than two calls that can straddle a fill.
+
+        Distinct from :meth:`fetch_balance` (``GET /account``), which is the
+        balance/collateral view — see :class:`AccountPortfolioSummary` versus
+        :class:`AccountSummary`.
+
+        Fails closed on the same HTTP 502 (``authoritative_margin_unavailable``,
+        raised as :class:`ApiError`) as :meth:`fetch_account_state`, for the same
+        reason: no locally-estimated ``withdrawable`` is ever substituted.
+        """
+        data = self._request("GET", "/account/summary", signed=True, direct=True)
+        return AccountPortfolioSummary.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_account_fees(self) -> AccountFees:
         """``GET /account/fees`` — the account's effective fee schedule.
@@ -452,6 +491,11 @@ class Client:
         (the server would answer ``400 invalid_window``). Each window has its
         own point capacity — ``limit`` above it is capped server-side, so asking
         for more never yields more.
+
+        A malformed *response* raises :class:`~nexus_exchange.DecodeError`
+        instead, so caller error and server-payload defects are distinguishable
+        by type; every field of this response is spec-``required`` and none is
+        defaulted. See :class:`PortfolioHistory`.
         """
         query = _query(
             window=_portfolio_window(window),

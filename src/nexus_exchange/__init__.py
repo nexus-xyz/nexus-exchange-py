@@ -29,6 +29,7 @@ from .client import (
 from .errors import (
     ApiError,
     AuthError,
+    DecodeError,
     MissingCredentialsError,
     NexusExchangeError,
     TransportError,
@@ -136,6 +137,7 @@ __all__ = [
     "AuthError",
     "TransportError",
     "MissingCredentialsError",
+    "DecodeError",
     "DEFAULT_USER_AGENT",
     "DEFAULT_API_VERSION",
     "__version__",

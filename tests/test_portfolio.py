@@ -1,15 +1,24 @@
 """Unit tests for the portfolio-parity surface (mocked httpx), ENG-6459.
 
-Covers the three new signed reads — ``fetch_account_state``,
-``fetch_account_fees``, ``fetch_portfolio_history`` — and the enriched
-``Position`` risk fields added in Exchange API spec v0.7.2.
+Covers the four new signed reads — ``fetch_account_state``,
+``fetch_account_summary``, ``fetch_account_fees``, ``fetch_portfolio_history`` —
+and the enriched ``Position`` risk fields added in Exchange API spec v0.7.2.
 
 The load-bearing guarantees asserted here:
 
 * every call signs (``x-api-key`` on the captured request) and hits the direct
   ``/api/v1`` surface;
-* a figure the server does not report decodes to ``None``, never a defaulted
-  ``0`` that would read as a real balance / fee / notional;
+* a figure the spec marks optional and the server does not report decodes to
+  ``None``, never a defaulted ``0`` that would read as a real balance / fee /
+  notional — while a *reported* zero stays zero;
+* a field the spec marks **required** decodes strictly: absent, ``null``,
+  non-finite or the wrong shape raises ``DecodeError`` rather than yielding a
+  plausible-looking figure the server never sent. That includes list elements —
+  a malformed point or position raises instead of silently shortening the list,
+  which would break the series cadence or understate exposure with no signal;
+* ``DecodeError`` is catchable through the documented ``NexusExchangeError``
+  taxonomy, and is distinguishable by type from the plain ``ValueError`` raised
+  for caller error;
 * the ``window`` enum reaches the wire as its *value* (``window=day``), not the
   ``str()`` repr of a ``str``-mixin enum member — which would also corrupt the
   signed canonical query;
@@ -26,10 +35,13 @@ import pytest
 
 from nexus_exchange import (
     AccountFees,
+    AccountPortfolioSummary,
     AccountState,
     ApiError,
     Client,
+    DecodeError,
     Network,
+    NexusExchangeError,
     PortfolioHistory,
     PortfolioWindow,
     Position,
@@ -38,6 +50,7 @@ from nexus_exchange import (
 _SECRET = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
 _BASE = "http://localhost:9090/api/v1"
 _STATE_URL = f"{_BASE}/account/state"
+_SUMMARY_URL = f"{_BASE}/account/summary"
 _FEES_URL = f"{_BASE}/account/fees"
 _HISTORY_URL = f"{_BASE}/account/portfolio-history"
 
@@ -212,14 +225,49 @@ def test_fetch_account_state_unreported_fields_stay_none(httpx_mock) -> None:
     assert state.positions == []
 
 
-def test_fetch_account_state_tolerates_missing_summary(httpx_mock) -> None:
-    # A re-shaped / empty payload still decodes rather than raising: the summary
-    # is all-optional in the spec.
-    httpx_mock.add_response(url=_STATE_URL, method="GET", json={})
+def test_fetch_account_state_empty_positions_decode(httpx_mock) -> None:
+    # A summary present but with every figure absent still decodes — the
+    # summary's *fields* are all-optional in the spec — and an explicitly empty
+    # position list is a real "no open positions".
+    httpx_mock.add_response(url=_STATE_URL, method="GET", json={"summary": {}, "positions": []})
     with _authed() as client:
         state = client.fetch_account_state()
     assert state.summary.withdrawable is None
     assert state.positions == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {},  # both halves absent
+        {"positions": []},  # summary absent
+        {"summary": {}},  # positions absent
+        {"summary": None, "positions": []},  # summary explicitly null
+        {"summary": "nope", "positions": []},  # summary not an object
+        {"summary": {}, "positions": None},  # positions explicitly null
+        {"summary": {}, "positions": {}},  # positions not an array
+    ],
+)
+def test_fetch_account_state_rejects_missing_halves(httpx_mock, body) -> None:
+    # `summary` and `positions` are both spec-required. An empty risk snapshot
+    # the server never sent understates exposure exactly like a fabricated zero,
+    # and there is no old-deployment case to tolerate: a deployment without this
+    # endpoint answers 404, not a partial body.
+    httpx_mock.add_response(url=_STATE_URL, method="GET", json=body)
+    with _authed() as client, pytest.raises(DecodeError):
+        client.fetch_account_state()
+
+
+def test_fetch_account_state_rejects_malformed_position(httpx_mock) -> None:
+    # A non-object in the position list must not vanish: silently returning a
+    # shorter list understates exposure with no signal to the caller.
+    httpx_mock.add_response(
+        url=_STATE_URL,
+        method="GET",
+        json={"summary": {}, "positions": [_ENRICHED_POSITION, "bogus"]},
+    )
+    with _authed() as client, pytest.raises(DecodeError, match=r"positions\[1\]"):
+        client.fetch_account_state()
 
 
 def test_fetch_account_state_zero_withdrawable_is_not_none(httpx_mock) -> None:
@@ -251,6 +299,69 @@ def test_fetch_account_state_fails_closed_on_502(httpx_mock) -> None:
         client.fetch_account_state()
     assert excinfo.value.status == 502
     assert excinfo.value.code == "authoritative_margin_unavailable"
+
+
+# -- fetch_account_summary ---------------------------------------------------
+
+
+def test_fetch_account_summary_signs_and_parses(httpx_mock) -> None:
+    httpx_mock.add_response(
+        url=_SUMMARY_URL,
+        method="GET",
+        json={
+            "collateral": "10000.00",
+            "total_equity": "10250.50",
+            "total_unrealized_pnl": "250.50",
+            "total_realized_pnl_24h": "125.00",
+            "total_volume_24h": "50000.00",
+            "open_positions_count": 1,
+            "open_orders_count": 2,
+            "margin_used": "1250.03",
+            "available_margin": "8749.97",
+            "withdrawable": "8749.97",
+            "early_access_allowed": True,
+        },
+    )
+    with _authed() as client:
+        summary = client.fetch_account_summary()
+
+    assert isinstance(summary, AccountPortfolioSummary)
+    assert summary.total_equity == Decimal("10250.50")
+    assert summary.withdrawable == Decimal("8749.97")
+    assert summary.open_positions_count == 1
+    assert summary.early_access_allowed is True
+    req = httpx_mock.get_request()
+    assert req.headers["x-api-key"] == "nx_test"
+    assert str(req.url) == _SUMMARY_URL
+
+
+def test_fetch_account_summary_unreported_fields_stay_none(httpx_mock) -> None:
+    # Every field is optional in the spec (the schema has no `required` array),
+    # so an absent figure is None rather than a fabricated Decimal(0).
+    httpx_mock.add_response(url=_SUMMARY_URL, method="GET", json={"total_equity": "100.00"})
+    with _authed() as client:
+        summary = client.fetch_account_summary()
+    assert summary.total_equity == Decimal("100.00")
+    assert summary.withdrawable is None
+    assert summary.collateral is None
+    assert summary.early_access_allowed is None
+
+
+def test_fetch_account_summary_fails_closed_on_502(httpx_mock) -> None:
+    # Same fail-closed contract as /account/state — no local estimate is ever
+    # substituted for `withdrawable`.
+    httpx_mock.add_response(
+        url=_SUMMARY_URL,
+        method="GET",
+        status_code=502,
+        json={"code": "authoritative_margin_unavailable"},
+    )
+    with _authed() as client, pytest.raises(ApiError) as excinfo:
+        client.fetch_account_summary()
+    assert excinfo.value.status == 502
+    assert excinfo.value.code == "authoritative_margin_unavailable"
+    # Transient: retry the read rather than treating balances as unknown.
+    assert excinfo.value.transient is True
 
 
 # -- fetch_account_fees ------------------------------------------------------
@@ -296,8 +407,8 @@ def test_fetch_account_fees_treats_null_estimated_as_true(httpx_mock) -> None:
         json={
             "maker_fee_bps": -2,
             "taker_fee_bps": 5,
-            "tier": None,
-            "schedule": None,
+            "tier": "base",
+            "schedule": "standard",
             "volume_30d": "1",
             "volume_30d_estimated": None,
         },
@@ -305,9 +416,29 @@ def test_fetch_account_fees_treats_null_estimated_as_true(httpx_mock) -> None:
     with _authed() as client:
         fees = client.fetch_account_fees()
     assert fees.volume_30d_estimated is True
-    # A null open string decodes to "", never the string "None".
-    assert fees.tier == ""
-    assert fees.schedule == ""
+
+
+@pytest.mark.parametrize("field", ["tier", "schedule"])
+@pytest.mark.parametrize("value", [None, "absent"])
+def test_fetch_account_fees_rejects_unreported_open_string(httpx_mock, field, value) -> None:
+    # `tier` and `schedule` are spec-required. Substituting "" would hand the
+    # caller a value that matches none of the branches the docstring tells them
+    # to write, and that is indistinguishable from a server that really sent "".
+    body = {
+        "maker_fee_bps": -2,
+        "taker_fee_bps": 5,
+        "tier": "base",
+        "schedule": "standard",
+        "volume_30d": "1",
+        "volume_30d_estimated": False,
+    }
+    if value is None:
+        body[field] = None
+    else:
+        del body[field]
+    httpx_mock.add_response(url=_FEES_URL, method="GET", json=body)
+    with _authed() as client, pytest.raises(DecodeError, match=field):
+        client.fetch_account_fees()
 
 
 def test_fetch_account_fees_defaults_estimated_to_true(httpx_mock) -> None:
@@ -450,18 +581,40 @@ def test_fetch_portfolio_history_accepts_limit_range_bounds(httpx_mock, limit) -
     assert httpx_mock.get_request().url.query.decode() == f"limit={limit}"
 
 
-def test_fetch_portfolio_history_null_window_decodes_to_empty_string(httpx_mock) -> None:
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"window": None, "cadence_ms": 300000, "points": []},
+        {"cadence_ms": 300000, "points": []},
+    ],
+)
+def test_fetch_portfolio_history_rejects_unreported_window(httpx_mock, body) -> None:
+    # `window` is spec-required, like the `cadence_ms` on the adjacent line, and
+    # decodes just as strictly. "" would be a value no PortfolioWindow comparison
+    # matches, failing far from the decode with the payload out of view.
+    httpx_mock.add_response(url=_HISTORY_URL, method="GET", json=body)
+    with _authed() as client, pytest.raises(DecodeError, match="window"):
+        client.fetch_portfolio_history()
+
+
+def test_fetch_portfolio_history_keeps_an_unknown_window_as_a_string(httpx_mock) -> None:
+    # `window` is typed `str`, not the enum, so a window added upstream later
+    # still decodes rather than failing the whole response.
     httpx_mock.add_response(
         url=_HISTORY_URL,
         method="GET",
-        json={"window": None, "cadence_ms": 300000, "points": []},
+        json={"window": "quarter", "cadence_ms": 300000, "points": []},
     )
     with _authed() as client:
         history = client.fetch_portfolio_history()
-    assert history.window == ""
+    assert history.window == "quarter"
+    assert history.window not in {w.value for w in PortfolioWindow}
 
 
-def test_fetch_portfolio_history_skips_malformed_points(httpx_mock) -> None:
+def test_fetch_portfolio_history_rejects_malformed_points(httpx_mock) -> None:
+    # A dropped sample would silently break the cadence contract between
+    # adjacent points and bend every curve and delta derived from the series —
+    # the same harm as a fabricated number, so it raises rather than shortening.
     httpx_mock.add_response(
         url=_HISTORY_URL,
         method="GET",
@@ -474,27 +627,77 @@ def test_fetch_portfolio_history_skips_malformed_points(httpx_mock) -> None:
             ],
         },
     )
-    with _authed() as client:
-        history = client.fetch_portfolio_history()
-    assert len(history.points) == 1
-    assert history.points[0].equity == Decimal("1")
-
-
-def test_fetch_portfolio_history_rejects_point_missing_a_required_field(httpx_mock) -> None:
-    # A point without equity is a malformed payload, not a zero-equity sample.
-    httpx_mock.add_response(
-        url=_HISTORY_URL,
-        method="GET",
-        json={"window": "day", "cadence_ms": 300000, "points": [{"timestamp_ms": 1, "pnl": "0"}]},
-    )
-    with _authed() as client, pytest.raises(ValueError):
+    with _authed() as client, pytest.raises(DecodeError, match=r"points\[0\]"):
         client.fetch_portfolio_history()
 
 
-def test_fetch_portfolio_history_rejects_missing_cadence(httpx_mock) -> None:
-    # A zero cadence would divide by zero in caller arithmetic.
-    httpx_mock.add_response(url=_HISTORY_URL, method="GET", json={"window": "day", "points": []})
-    with _authed() as client, pytest.raises(ValueError):
+@pytest.mark.parametrize(
+    "body",
+    [
+        # A point without equity is a malformed payload, not a zero-equity sample.
+        {"window": "day", "cadence_ms": 300000, "points": [{"timestamp_ms": 1, "pnl": "0"}]},
+        # A zero cadence would divide by zero in caller arithmetic.
+        {"window": "day", "points": []},
+        # `points` is spec-required; absent is not the same as an empty series.
+        {"window": "day", "cadence_ms": 300000},
+        {"window": "day", "cadence_ms": 300000, "points": None},
+    ],
+)
+def test_fetch_portfolio_history_rejects_missing_required_fields(httpx_mock, body) -> None:
+    httpx_mock.add_response(url=_HISTORY_URL, method="GET", json=body)
+    with _authed() as client, pytest.raises(DecodeError):
+        client.fetch_portfolio_history()
+
+
+def test_decode_error_is_catchable_as_the_sdk_base_error(httpx_mock) -> None:
+    # A malformed 2xx body must be reachable through the documented taxonomy, not
+    # escape as a bare ValueError from library internals.
+    httpx_mock.add_response(url=_HISTORY_URL, method="GET", json={"window": "day"})
+    with _authed() as client, pytest.raises(NexusExchangeError) as excinfo:
+        client.fetch_portfolio_history()
+    assert isinstance(excinfo.value, DecodeError)
+    # Terminal: the payload will not improve on retry.
+    assert excinfo.value.transient is False
+    # Still a ValueError, so callers written against the old behaviour keep working.
+    assert isinstance(excinfo.value, ValueError)
+
+
+def test_caller_error_is_not_a_decode_error(httpx_mock) -> None:
+    # The two situations are distinguishable by type: a bad argument is the
+    # caller's fault, a malformed body is the server's.
+    with _authed() as client, pytest.raises(ValueError) as excinfo:
+        client.fetch_portfolio_history(limit=0)
+    assert not isinstance(excinfo.value, DecodeError)
+    assert httpx_mock.get_requests() == []
+
+
+@pytest.mark.parametrize("equity", ["NaN", "Infinity", "-Infinity", "not-a-number"])
+def test_fetch_portfolio_history_rejects_non_finite_money(httpx_mock, equity) -> None:
+    # `Decimal("NaN")` parses happily and then poisons every comparison and sum
+    # it reaches (NaN != NaN), so it is a decode failure, not a number.
+    httpx_mock.add_response(
+        url=_HISTORY_URL,
+        method="GET",
+        json={
+            "window": "day",
+            "cadence_ms": 300000,
+            "points": [{"timestamp_ms": 1, "equity": equity, "pnl": "0", "volume": "0"}],
+        },
+    )
+    with _authed() as client, pytest.raises(DecodeError, match="equity"):
+        client.fetch_portfolio_history()
+
+
+@pytest.mark.parametrize("cadence", [True, 1.5, "soon"])
+def test_fetch_portfolio_history_rejects_non_integral_cadence(httpx_mock, cadence) -> None:
+    # Truncating 1.5 to 1 fabricates a cadence; `True` is an int subclass and
+    # would otherwise decode as a 1 ms cadence.
+    httpx_mock.add_response(
+        url=_HISTORY_URL,
+        method="GET",
+        json={"window": "day", "cadence_ms": cadence, "points": []},
+    )
+    with _authed() as client, pytest.raises(DecodeError, match="cadence_ms"):
         client.fetch_portfolio_history()
 
 
@@ -520,6 +723,7 @@ def test_fetch_portfolio_history_surfaces_invalid_window_error(httpx_mock) -> No
     "call",
     [
         lambda c: c.fetch_account_state(),
+        lambda c: c.fetch_account_summary(),
         lambda c: c.fetch_account_fees(),
         lambda c: c.fetch_portfolio_history(),
     ],

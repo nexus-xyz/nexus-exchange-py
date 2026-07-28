@@ -15,7 +15,8 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
-from ._parse import opt_decimal, opt_int, opt_str, to_decimal, to_int
+from ._parse import opt_decimal, opt_int, opt_str, to_decimal, to_dict_list, to_int, to_str
+from .errors import DecodeError
 
 
 @dataclass(frozen=True)
@@ -407,7 +408,9 @@ class Position:
     low-latency read path). When an input is not mirrored the server sends
     ``null`` and puts a machine-readable reason in the companion
     ``<field>_error`` (e.g. ``"mark_price_unavailable"``) rather than a
-    fabricated number.
+    fabricated number. Five of the six have such a companion; the spec defines
+    no ``funding_paid_error``, so a ``None`` :attr:`funding_paid` carries no
+    reason.
 
     This decode preserves that distinction: each enriched field is ``None``
     both when the server reports it ``null`` *and* when a deployment older than
@@ -494,11 +497,16 @@ class AccountSummary:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> AccountSummary:
         return cls(
-            balance=to_decimal(d.get("balance", 0)),
-            collateral=to_decimal(d.get("collateral", 0)),
-            equity=to_decimal(d.get("equity", 0)),
-            available_margin=to_decimal(d.get("available_margin", 0)),
-            positions=[Position.from_dict(p) for p in d.get("positions", [])],
+            balance=to_decimal(d.get("balance", 0), "balance"),
+            collateral=to_decimal(d.get("collateral", 0), "collateral"),
+            equity=to_decimal(d.get("equity", 0), "equity"),
+            available_margin=to_decimal(d.get("available_margin", 0), "available_margin"),
+            # Absent stays tolerated here (this endpoint predates the strict
+            # rule), but a malformed *element* raises rather than vanishing.
+            positions=[
+                Position.from_dict(p)
+                for p in to_dict_list(d.get("positions"), "positions", required=False)
+            ],
             raw=d,
         )
 
@@ -572,6 +580,15 @@ class AccountState:
     documented, not enforced here — a mismatch would mean a server bug, and
     both halves are returned as received so a caller can see it rather than
     have the SDK raise on live data.
+
+    Both halves are spec-``required`` and decode strictly: a payload missing
+    ``summary`` or ``positions``, or carrying a non-object in the position list,
+    raises :class:`~nexus_exchange.DecodeError` rather than yielding an empty
+    risk snapshot. Silently reporting "no open positions" understates exposure
+    just as badly as a fabricated zero — and unlike the enriched
+    :class:`Position` fields there is no old-deployment case to tolerate, since a
+    deployment without this endpoint answers ``404``. The summary's individual
+    *fields* stay all-optional, per the spec.
     """
 
     summary: AccountPortfolioSummary
@@ -581,10 +598,14 @@ class AccountState:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> AccountState:
         summary = d.get("summary")
+        if not isinstance(summary, dict):
+            raise DecodeError(
+                f"required object field 'summary' is missing or not an object: {summary!r}"
+            )
         return cls(
-            summary=AccountPortfolioSummary.from_dict(summary if isinstance(summary, dict) else {}),
+            summary=AccountPortfolioSummary.from_dict(summary),
             positions=[
-                Position.from_dict(p) for p in d.get("positions", []) if isinstance(p, dict)
+                Position.from_dict(p) for p in to_dict_list(d.get("positions"), "positions")
             ],
             raw=d,
         )
@@ -641,10 +662,10 @@ class PortfolioPoint:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> PortfolioPoint:
         return cls(
-            timestamp_ms=to_int(d.get("timestamp_ms")),
-            equity=to_decimal(d.get("equity")),
-            pnl=to_decimal(d.get("pnl")),
-            volume=to_decimal(d.get("volume")),
+            timestamp_ms=to_int(d.get("timestamp_ms"), "timestamp_ms"),
+            equity=to_decimal(d.get("equity"), "equity"),
+            pnl=to_decimal(d.get("pnl"), "pnl"),
+            volume=to_decimal(d.get("volume"), "volume"),
             raw=d,
         )
 
@@ -657,12 +678,20 @@ class PortfolioHistory:
     requested window, downsampled at a fixed per-window cadence,
     :attr:`points` **oldest first**.
 
+    All three fields are spec-``required``, and all three decode strictly: an
+    absent or ``null`` :attr:`window`, :attr:`cadence_ms` or :attr:`points`
+    raises :class:`~nexus_exchange.DecodeError`, as does a non-object element in
+    :attr:`points`. A missing cadence must not yield ``0`` (it would divide by
+    zero in caller arithmetic), and a dropped sample must not shorten the series
+    — the cadence between adjacent points is part of the contract, so a hole
+    silently bends every curve and delta derived from it.
+
     :attr:`window` echoes the served window (the ``window`` query parameter or
-    its ``day`` default) and is kept as a plain string so a window added later
-    still decodes; compare against :class:`PortfolioWindow` values.
-    :attr:`cadence_ms` is spec-``required`` and decodes strictly — a missing
-    cadence raises rather than yielding ``0``, which would divide by zero in
-    caller arithmetic.
+    its ``day`` default). It is typed as a plain ``str``, not
+    :class:`PortfolioWindow`, so a window added upstream later still decodes
+    instead of failing the whole response; compare against
+    :class:`PortfolioWindow` values, e.g.
+    ``history.window == PortfolioWindow.WEEK.value``.
     """
 
     window: str
@@ -673,13 +702,9 @@ class PortfolioHistory:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> PortfolioHistory:
         return cls(
-            # `or ""` also covers an explicit null, which `str(...)` would
-            # otherwise render as the string "None".
-            window=str(d.get("window") or ""),
-            cadence_ms=to_int(d.get("cadence_ms")),
-            points=[
-                PortfolioPoint.from_dict(p) for p in d.get("points", []) if isinstance(p, dict)
-            ],
+            window=to_str(d.get("window"), "window"),
+            cadence_ms=to_int(d.get("cadence_ms"), "cadence_ms"),
+            points=[PortfolioPoint.from_dict(p) for p in to_dict_list(d.get("points"), "points")],
             raw=d,
         )
 
@@ -697,19 +722,29 @@ class AccountFees:
     maker (``-2`` is a 0.02% rebate), and the sign is preserved as sent.
 
     :attr:`tier` (currently always ``"base"``) and :attr:`schedule` (currently
-    always ``"standard"``) are open strings: new values appear as the fee model
-    lands, so branch on them defensively. :attr:`schedule` scopes the rate — the
-    venue charges per-market schedules but this endpoint takes no market
-    parameter, so the reported rate is not a venue-wide guarantee.
+    always ``"standard"``) are open strings — typed ``str`` rather than an enum
+    so a value added as the fee model lands still decodes — so branch on them
+    defensively. Both are spec-``required`` and decode strictly: an absent one
+    raises rather than becoming ``""``, which is a value no defensive branch
+    will match and which cannot be told from a server that really sent ``""``.
+    :attr:`schedule` scopes the rate — the venue charges per-market schedules but
+    this endpoint takes no market parameter, so the reported rate is not a
+    venue-wide guarantee.
 
     :attr:`volume_30d_estimated` is ``True`` when :attr:`volume_30d` may
     undercount (the source fill buffer was at capacity, so older in-window fills
-    may have been evicted). It defaults to ``True`` when absent: assuming full
-    30-day coverage the server never claimed is the unsafe direction.
+    may have been evicted). It is the one deliberate exception to the strict
+    decode above: spec-``required``, but it defaults to ``True`` when absent
+    rather than raising, because the safe direction is to assume the figure may
+    undercount. Asserting full 30-day coverage the server never claimed is the
+    harmful reading, and there is no third state for a ``bool``.
 
     :attr:`discounts` is currently always empty and its per-entry shape is
     provisional in the spec (``additionalProperties``), so entries stay raw
-    dicts rather than a typed model that would have to break to grow.
+    dicts rather than a typed model that would have to break to grow. Non-object
+    entries are skipped rather than raising — the shape is not yet pinned down,
+    and unlike a time series or a position list a dropped discount cannot
+    silently distort a figure the caller computes.
     """
 
     maker_fee_bps: int
@@ -725,13 +760,11 @@ class AccountFees:
     def from_dict(cls, d: dict[str, Any]) -> AccountFees:
         estimated = d.get("volume_30d_estimated")
         return cls(
-            maker_fee_bps=to_int(d.get("maker_fee_bps")),
-            taker_fee_bps=to_int(d.get("taker_fee_bps")),
-            # `or ""` also covers an explicit null, which `str(...)` would
-            # otherwise render as the string "None" and quietly match no branch.
-            tier=str(d.get("tier") or ""),
-            schedule=str(d.get("schedule") or ""),
-            volume_30d=to_decimal(d.get("volume_30d")),
+            maker_fee_bps=to_int(d.get("maker_fee_bps"), "maker_fee_bps"),
+            taker_fee_bps=to_int(d.get("taker_fee_bps"), "taker_fee_bps"),
+            tier=to_str(d.get("tier"), "tier"),
+            schedule=to_str(d.get("schedule"), "schedule"),
+            volume_30d=to_decimal(d.get("volume_30d"), "volume_30d"),
             # Absent *or* null → assume the figure may undercount (see the class
             # docstring); only an explicit false claims full 30-day coverage.
             volume_30d_estimated=True if estimated is None else bool(estimated),
