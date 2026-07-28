@@ -182,7 +182,7 @@ dependency. See `examples/ccxt_market_data.py`.
 
 <!-- api-version-sync:start -->
 
-Currently targets Exchange API spec **`v0.7.1`**.
+Currently targets Exchange API spec **`v0.7.2`**.
 
 <!-- api-version-sync:end -->
 
