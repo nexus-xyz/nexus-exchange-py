@@ -20,12 +20,24 @@ python examples/public_market_data.py
 
 ## Programs
 
+Every program in this directory, not only the ones added most recently — a
+partial catalog reads as "these are the examples that exist" and sends people
+looking for a flow that is already here.
+
 | Example | Auth | Endpoints exercised |
 | --- | --- | --- |
+| `health_check.py` | none | `health` |
+| `single_ticker.py` | none | `ticker` (one market) |
 | `public_market_data.py` | none | `markets`, `ticker`, `orderbook`, `trades`, `candles` |
+| `ccxt_market_data.py` | none | CCXT adapter: `load_markets`, `fetch_ticker`, `fetch_order_book`, `fetch_trades`, `fetch_ohlcv` |
 | `account_and_positions.py` | HMAC | `account`, `positions`, `account/rate-limit` |
 | `place_and_cancel_order.py` | HMAC | `POST /orders`, `GET /orders/{id}`, `GET /orders`, `DELETE /orders/{id}` |
 | `fills_and_withdrawals.py` | HMAC | `fills`, `withdrawals` |
+| `bridge_deposit.py` | HMAC | `bridge/assets`, `bridge/deposit-addresses`, `bridge/deposits` |
+| `signed_request.py` | HMAC | low-level signed-request escape hatch (no typed method) |
+| `wallet_auth.py` | wallet signature | `POST /auth/login` (EIP-191), `POST /agents/register` (EIP-712) |
+
+`_shared.py` is a helper module, not a runnable program.
 
 Most of these routes are served by the direct `/api/v1` service (the gateway is
 being retired, ENG-4740); a few (`markets`, `withdrawals`, `GET /orders/{id}`)
@@ -36,6 +48,7 @@ The public gateway proxies signed calls to the *site* account; for per-account
 auth point `NEXUS_BASE_URL` at a direct gateway (e.g. `http://localhost:9090`).
 See the top-level README.
 
-Auth flows (`POST /auth/login`, `POST /agents/register`) are covered by
-`wallet_auth.py` (`Client.sign_in` / `Client.register_agent`). The WebSocket
-streaming client is not built yet, so no streaming example is included here.
+Wallet-signed auth (`wallet_auth.py`, above) uses `Client.sign_in` /
+`Client.register_agent` — a different credential model from the HMAC examples,
+which authenticate with a static api key/secret pair. The WebSocket streaming
+client is not built yet, so no streaming example is included here.
