@@ -18,6 +18,10 @@ GET /api/v1/markets/{market_id}/funding
 GET /api/v1/markets/{market_id}/mark-price
 GET /api/v1/markets/{market_id}/status
 GET /api/v1/account
+GET /api/v1/account/state
+GET /api/v1/account/summary
+GET /api/v1/account/fees
+GET /api/v1/account/portfolio-history
 GET /api/v1/positions
 GET /api/v1/fills
 GET /api/v1/account/rate-limit

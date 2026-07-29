@@ -26,7 +26,7 @@ Requires Python **3.10+**. Depends only on [`httpx`](https://www.python-httpx.or
 ```python
 from nexus_exchange import Client
 
-with Client() as client:                 # defaults to the public gateway
+with Client() as client:  # defaults to the public gateway
     for market in client.fetch_markets():
         print(market.market_id)
 
@@ -54,6 +54,7 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | Error taxonomy (terminal vs transient) | ✅ implemented |
 | Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
 | Account reads — `GET /account`, `/positions`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
+| Portfolio — `GET /account/state` (summary + positions, incl. `withdrawable`), `/account/summary`, `/account/fees`, `/account/portfolio-history` | ✅ implemented |
 | Trading — `POST /orders`, `/orders/batch`; `GET /orders`, `/orders/{id}`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
 | Funds — `POST /account/deposit`, `/account/credit` | ✅ implemented |
 | Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses` | ✅ implemented |
@@ -113,12 +114,12 @@ with the SDK.
 ```python
 from nexus_exchange import Client, EthSigner
 
-signer = EthSigner.from_hex("0x<wallet-private-key>")   # you own the key
+signer = EthSigner.from_hex("0x<wallet-private-key>")  # you own the key
 
 with Client() as client:
     # EIP-191 personal_sign → POST /auth/login → session token.
     session = client.sign_in(signer)
-    print(session.address, session.token)   # token is a secret
+    print(session.address, session.token)  # token is a secret
 
     # EIP-712 → POST /agents/register. expires_at_ms / nonce / chain_id are
     # caller-supplied; expiry must fall in [now + 1d, now + 90d].
@@ -150,6 +151,45 @@ deposits = client.fetch_bridge_deposits(limit=1, chain=addr.chain)
 
 See [`examples/bridge_deposit.py`](./examples/bridge_deposit.py).
 
+## Portfolio
+
+One signed call returns the whole account state — summary aggregates plus every
+open position, from a single coherent read:
+
+```python
+from nexus_exchange import PortfolioWindow
+
+state = client.fetch_account_state()
+print(state.summary.total_equity, state.summary.withdrawable)  # None if unreported
+for pos in state.positions:
+    # Enriched risk detail; None + a `*_error` reason when not derivable.
+    print(pos.market_id, pos.notional_value, pos.roe, pos.funding_paid)
+    print(pos.leverage, pos.leverage_error)  # None, "margin_state_not_mirrored"
+
+summary = client.fetch_account_summary()  # the aggregates alone, no positions
+print(summary.withdrawable)
+
+fees = client.fetch_account_fees()
+print(fees.maker_fee_bps, fees.taker_fee_bps)  # maker may be negative (a rebate)
+
+history = client.fetch_portfolio_history(PortfolioWindow.WEEK, limit=100)
+for point in history.points:  # oldest first
+    print(point.timestamp_ms, point.equity, point.pnl, point.volume)
+```
+
+`withdrawable` is engine-authoritative free margin floored at zero. The
+endpoints serving it fail closed with `502 authoritative_margin_unavailable`
+(an `ApiError`) rather than returning a local estimate — that is transient, so
+retry rather than substituting a self-computed figure.
+
+Every money field is a `Decimal`, and decoding never invents one. A field the
+spec marks optional decodes to `None` when unreported, never a defaulted `0`
+that would read as a real balance — while a reported `"0"` stays `Decimal(0)`. A
+field the spec marks **required** decodes strictly: if it is absent, `null` or
+malformed, the call raises `DecodeError` (a `NexusExchangeError`, and a
+`ValueError`) rather than handing back a plausible figure the server never sent.
+That extends to lists — a malformed point or position raises instead of silently
+dropping out of the series.
 
 ## CCXT compatibility
 
@@ -168,8 +208,8 @@ from nexus_exchange.ccxt_adapter import NexusExchange
 
 with NexusExchange() as ex:
     ex.load_markets()
-    ticker = ex.fetch_ticker("BTC-USDX-PERP")     # unified ticker dict
-    book = ex.fetch_order_book("BTC-USDX-PERP", limit=10)   # [price, amount] levels
+    ticker = ex.fetch_ticker("BTC-USDX-PERP")  # unified ticker dict
+    book = ex.fetch_order_book("BTC-USDX-PERP", limit=10)  # [price, amount] levels
     candles = ex.fetch_ohlcv("BTC-USDX-PERP", "1m", limit=100)  # [ts,o,h,l,c,v]
     trades = ex.fetch_trades("BTC-USDX-PERP", limit=50)
 ```
@@ -182,7 +222,7 @@ dependency. See `examples/ccxt_market_data.py`.
 
 <!-- api-version-sync:start -->
 
-Currently targets Exchange API spec **`v0.7.1`**.
+Currently targets Exchange API spec **`v0.7.2`**.
 
 <!-- api-version-sync:end -->
 

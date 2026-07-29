@@ -21,9 +21,13 @@ from urllib.parse import quote, urlencode
 
 import httpx
 
+from ._parse import to_dict_list
 from .auth import AgentRegistered, AgentRegistration, EthSigner, LoginResponse
 from .errors import ApiError, MissingCredentialsError, TransportError
 from .types import (
+    AccountFees,
+    AccountPortfolioSummary,
+    AccountState,
     AccountSummary,
     AdlEvent,
     AgentInfo,
@@ -50,6 +54,8 @@ from .types import (
     OrderBook,
     OrderRequest,
     OrderResponse,
+    PortfolioHistory,
+    PortfolioWindow,
     Position,
     RateLimitStatus,
     Ticker,
@@ -91,7 +97,7 @@ DEFAULT_USER_AGENT = f"nexus-exchange-py/{__version__}"
 #: contract version (ENG-5350). Mirrors the repo's source of truth in
 #: ``.api-version``; that file is not shipped in the wheel, so the tag is baked
 #: in here and ``tests/test_headers.py`` asserts the two never drift.
-DEFAULT_API_VERSION = "v0.7.1"
+DEFAULT_API_VERSION = "v0.7.2"
 
 DEFAULT_TIMEOUT = 30.0
 
@@ -101,6 +107,59 @@ DEFAULT_TIMEOUT = 30.0
 #: gateway base. The HMAC signature is computed over the full request path
 #: *including* this prefix (e.g. ``/api/v1/orders``), matching the server.
 API_V1_PREFIX = "/api/v1"
+
+
+#: Upper bound the spec puts on the portfolio-history ``limit`` parameter (the
+#: largest window's point capacity, ``all`` = 366). Validated client-side so an
+#: out-of-schema value fails fast instead of depending on server clamping.
+PORTFOLIO_LIMIT_MAX = 366
+
+
+def _portfolio_window(window: PortfolioWindow | str | None) -> str | None:
+    """Validate a portfolio ``window`` and return its wire string.
+
+    ``None`` means "omit the parameter" — the server defaults to ``day``. A
+    value outside :class:`PortfolioWindow` raises :class:`ValueError` here
+    rather than spending a signed request on a guaranteed ``400``
+    (``invalid_window``).
+
+    Always resolves through ``PortfolioWindow(...).value``: ``str()`` on a
+    ``str``-mixin enum member renders ``"PortfolioWindow.DAY"``, and
+    :func:`_query` stringifies whatever it is given — so passing a member
+    straight through would put the repr on the wire (and into the signed
+    canonical query).
+    """
+    if window is None:
+        return None
+    try:
+        return PortfolioWindow(window).value
+    except ValueError:
+        allowed = ", ".join(w.value for w in PortfolioWindow)
+        raise ValueError(f"window must be one of: {allowed} (got {window!r})") from None
+
+
+def _portfolio_limit(limit: int | None) -> int | None:
+    """Validate a portfolio-history ``limit`` against the spec's ``1..366`` range.
+
+    ``minimum: 1, maximum: 366`` on the parameter schema is a constraint on the
+    *request*, so a conforming client does not send outside it and this raises
+    :class:`ValueError` before signing. The parameter description's "a larger
+    value is clamped, not rejected" documents how the server *tolerates*
+    non-conforming input; it is not licence to send it. Note the effective cap is
+    per-window (``day`` 288, ``week`` 168, ``month`` 120, ``all`` 366), so a
+    value inside ``1..366`` may still be clamped — asking for more than the
+    window holds never returns more.
+
+    Rejects ``bool`` explicitly — it is an ``int`` subclass, and letting it
+    through would send ``limit=True``.
+    """
+    if limit is None:
+        return None
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("limit must be an integer")
+    if not 1 <= limit <= PORTFOLIO_LIMIT_MAX:
+        raise ValueError(f"limit must be between 1 and {PORTFOLIO_LIMIT_MAX} (got {limit})")
+    return limit
 
 
 def _query(**params: Any) -> str:
@@ -344,9 +403,108 @@ class Client:
         return AccountSummary.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_positions(self) -> list[Position]:
-        """``GET /positions`` — open positions. Requires credentials."""
+        """``GET /positions`` — open positions. Requires credentials.
+
+        As of API spec v0.7.2 each :class:`Position` also carries per-position
+        risk detail (notional value, ROE, margin used, max leverage, funding
+        paid). Those fields are ``None`` when the server cannot derive them,
+        with the reason in the companion ``*_error`` — see :class:`Position`.
+
+        A non-object in the list raises :class:`~nexus_exchange.DecodeError`
+        rather than being skipped, so this list, ``fetch_balance().positions``
+        and ``fetch_account_state().positions`` all fail the same way instead of
+        one of them silently understating exposure.
+        """
         data = self._request("GET", "/positions", signed=True, direct=True)
-        return [Position.from_dict(p) for p in (data if isinstance(data, list) else [])]
+        return [Position.from_dict(p) for p in to_dict_list(data, "positions", required=False)]
+
+    def fetch_account_state(self) -> AccountState:
+        """``GET /account/state`` — consolidated account snapshot. Requires credentials.
+
+        One signed call for the portfolio summary aggregates *and* every open
+        position, replacing a ``/account/summary`` + ``/positions`` pair. Both
+        halves come from one coherent server-side read, so
+        ``state.summary.open_positions_count == len(state.positions)``.
+
+        ``state.summary.withdrawable`` is the authoritative wallet-withdrawable
+        balance. This endpoint **fails closed**: when the engine-authoritative
+        margin view is unavailable it returns HTTP 502
+        (``authoritative_margin_unavailable``, raised as :class:`ApiError`)
+        rather than a locally-estimated figure. That is transient — retry after
+        a short delay rather than falling back to a self-computed number.
+
+        Use :meth:`fetch_account_summary` when only the aggregates are needed —
+        it returns the same ``summary`` without the position list.
+        """
+        data = self._request("GET", "/account/state", signed=True, direct=True)
+        return AccountState.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_account_summary(self) -> AccountPortfolioSummary:
+        """``GET /account/summary`` — aggregate portfolio view. Requires credentials.
+
+        The summary-only half of :meth:`fetch_account_state`: equity, PnL,
+        volume, margin and ``withdrawable``, without the position list. Prefer it
+        when the aggregates are all you need; prefer
+        :meth:`fetch_account_state` when you also want positions, since that is
+        one coherent read rather than two calls that can straddle a fill.
+
+        Distinct from :meth:`fetch_balance` (``GET /account``), which is the
+        balance/collateral view — see :class:`AccountPortfolioSummary` versus
+        :class:`AccountSummary`.
+
+        Fails closed on the same HTTP 502 (``authoritative_margin_unavailable``,
+        raised as :class:`ApiError`) as :meth:`fetch_account_state`, for the same
+        reason: no locally-estimated ``withdrawable`` is ever substituted.
+        """
+        data = self._request("GET", "/account/summary", signed=True, direct=True)
+        return AccountPortfolioSummary.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_account_fees(self) -> AccountFees:
+        """``GET /account/fees`` — the account's effective fee schedule.
+
+        Requires credentials; the account is taken from the signing credentials,
+        not a parameter. Returns the forward-looking *schedule* rate (maker /
+        taker bps, fee tier, rolling 30-day volume, active discounts), not a
+        realized per-fill average. ``maker_fee_bps`` may be negative — a rebate
+        paid to the maker. See :class:`AccountFees` for the ``schedule``
+        scoping caveat and the ``volume_30d_estimated`` flag.
+        """
+        data = self._request("GET", "/account/fees", signed=True, direct=True)
+        return AccountFees.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_portfolio_history(
+        self,
+        window: PortfolioWindow | str | None = None,
+        limit: int | None = None,
+    ) -> PortfolioHistory:
+        """``GET /account/portfolio-history`` — portfolio time series.
+
+        Requires credentials. Returns equity, cumulative trading PnL, and
+        cumulative traded volume over ``window``, downsampled at a fixed
+        per-window cadence, ``points`` **oldest first**.
+
+        ``window`` takes a :class:`PortfolioWindow` member or its string value
+        (``"day"`` / ``"week"`` / ``"month"`` / ``"all"``); omit it for the
+        server's ``day`` default. ``limit`` caps the returned points and must
+        fall in ``1..366``. Both are validated before the request, so a bad
+        value raises :class:`ValueError` instead of costing a signed round trip
+        (the server would answer ``400 invalid_window``). Each window has its
+        own point capacity — ``limit`` above it is capped server-side, so asking
+        for more never yields more.
+
+        A malformed *response* raises :class:`~nexus_exchange.DecodeError`
+        instead, so caller error and server-payload defects are distinguishable
+        by type; every field of this response is spec-``required`` and none is
+        defaulted. See :class:`PortfolioHistory`.
+        """
+        query = _query(
+            window=_portfolio_window(window),
+            limit=_portfolio_limit(limit),
+        )
+        data = self._request(
+            "GET", "/account/portfolio-history", query=query, signed=True, direct=True
+        )
+        return PortfolioHistory.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_my_trades(self) -> list[Fill]:
         """``GET /fills`` — recent fills (private executions). Requires credentials."""
