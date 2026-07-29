@@ -26,7 +26,7 @@ Requires Python **3.10+**. Depends only on [`httpx`](https://www.python-httpx.or
 ```python
 from nexus_exchange import Client
 
-with Client() as client:                 # defaults to the public gateway
+with Client() as client:  # defaults to the public gateway
     for market in client.fetch_markets():
         print(market.market_id)
 
@@ -113,12 +113,12 @@ with the SDK.
 ```python
 from nexus_exchange import Client, EthSigner
 
-signer = EthSigner.from_hex("0x<wallet-private-key>")   # you own the key
+signer = EthSigner.from_hex("0x<wallet-private-key>")  # you own the key
 
 with Client() as client:
     # EIP-191 personal_sign → POST /auth/login → session token.
     session = client.sign_in(signer)
-    print(session.address, session.token)   # token is a secret
+    print(session.address, session.token)  # token is a secret
 
     # EIP-712 → POST /agents/register. expires_at_ms / nonce / chain_id are
     # caller-supplied; expiry must fall in [now + 1d, now + 90d].
@@ -168,8 +168,8 @@ from nexus_exchange.ccxt_adapter import NexusExchange
 
 with NexusExchange() as ex:
     ex.load_markets()
-    ticker = ex.fetch_ticker("BTC-USDX-PERP")     # unified ticker dict
-    book = ex.fetch_order_book("BTC-USDX-PERP", limit=10)   # [price, amount] levels
+    ticker = ex.fetch_ticker("BTC-USDX-PERP")  # unified ticker dict
+    book = ex.fetch_order_book("BTC-USDX-PERP", limit=10)  # [price, amount] levels
     candles = ex.fetch_ohlcv("BTC-USDX-PERP", "1m", limit=100)  # [ts,o,h,l,c,v]
     trades = ex.fetch_trades("BTC-USDX-PERP", limit=50)
 ```
