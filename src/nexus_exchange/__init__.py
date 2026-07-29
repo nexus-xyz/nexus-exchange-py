@@ -22,6 +22,9 @@ from .auth import (
 from .client import (
     DEFAULT_API_VERSION,
     DEFAULT_USER_AGENT,
+    FILLS_LIMIT_MAX,
+    PORTFOLIO_LIMIT_MAX,
+    TRADES_LIMIT_MAX,
     Client,
     Network,
     __version__,
@@ -32,8 +35,10 @@ from .errors import (
     DecodeError,
     MissingCredentialsError,
     NexusExchangeError,
+    PaginationError,
     TransportError,
 )
+from .pagination import Page, iter_items, iter_pages
 from .types import (
     AccountFees,
     AccountPortfolioSummary,
@@ -138,6 +143,13 @@ __all__ = [
     "TransportError",
     "MissingCredentialsError",
     "DecodeError",
+    "PaginationError",
+    "Page",
+    "iter_pages",
+    "iter_items",
+    "FILLS_LIMIT_MAX",
+    "PORTFOLIO_LIMIT_MAX",
+    "TRADES_LIMIT_MAX",
     "DEFAULT_USER_AGENT",
     "DEFAULT_API_VERSION",
     "__version__",

@@ -66,6 +66,21 @@ class DecodeError(NexusExchangeError, ValueError):
     """
 
 
+class PaginationError(NexusExchangeError):
+    """Cursor pagination could not make progress.
+
+    Raised when a list endpoint hands back the same ``X-Next-Cursor`` it was
+    given: the cursor cannot advance, so continuing would re-request one page
+    forever. The SDK stops and says so instead of hanging, and instead of
+    returning quietly — a silent stop is indistinguishable from "that was the
+    last page", which would hand the caller a truncated history it believes is
+    complete.
+
+    Terminal: a server that cannot advance its own cursor will not advance it on
+    retry.
+    """
+
+
 class MissingCredentialsError(NexusExchangeError):
     """A signed request was attempted without ``api_key`` / ``api_secret``."""
 
