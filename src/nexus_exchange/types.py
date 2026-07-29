@@ -643,8 +643,9 @@ class PortfolioPoint:
     """One downsampled portfolio sample (spec v0.7.2).
 
     Every field is spec-``required``, so a sample missing one raises
-    :class:`ValueError` rather than decoding to a nonsense zero — an absent
-    equity or timestamp means a malformed payload, not a real value.
+    :class:`~nexus_exchange.DecodeError` rather than decoding to a nonsense
+    zero — an absent equity or timestamp means a malformed payload, not a real
+    value.
 
     :attr:`equity` is collateral + Σ unrealized PnL. :attr:`pnl` is *cumulative
     trading* PnL (Σ realized on close, including liquidation and ADL closes, +
@@ -715,8 +716,9 @@ class AccountFees:
 
     The forward-looking *schedule* rate scoped by :attr:`schedule`, not a
     realized per-fill average. Rates are spec-``required`` and decode strictly:
-    a payload missing one raises :class:`ValueError` rather than reporting a
-    fabricated ``0`` bps, which would read as "trading is free".
+    a payload missing one raises :class:`~nexus_exchange.DecodeError` rather
+    than reporting a fabricated ``0`` bps, which would read as "trading is
+    free".
 
     :attr:`maker_fee_bps` may be **negative** — that is a rebate *paid to* the
     maker (``-2`` is a 0.02% rebate), and the sign is preserved as sent.
@@ -744,7 +746,8 @@ class AccountFees:
     dicts rather than a typed model that would have to break to grow. Non-object
     entries are skipped rather than raising — the shape is not yet pinned down,
     and unlike a time series or a position list a dropped discount cannot
-    silently distort a figure the caller computes.
+    silently distort a figure the caller computes. An absent, ``null`` or
+    non-array ``discounts`` decodes to ``[]`` for the same reason.
     """
 
     maker_fee_bps: int
@@ -759,6 +762,11 @@ class AccountFees:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> AccountFees:
         estimated = d.get("volume_30d_estimated")
+        # Not `d.get("discounts", [])`: a `null` array would then reach the
+        # comprehension and raise `TypeError` from library internals — outside
+        # the error taxonomy, and the one failure mode this model is explicitly
+        # lenient about.
+        raw_discounts = d.get("discounts")
         return cls(
             maker_fee_bps=to_int(d.get("maker_fee_bps"), "maker_fee_bps"),
             taker_fee_bps=to_int(d.get("taker_fee_bps"), "taker_fee_bps"),
@@ -768,7 +776,9 @@ class AccountFees:
             # Absent *or* null → assume the figure may undercount (see the class
             # docstring); only an explicit false claims full 30-day coverage.
             volume_30d_estimated=True if estimated is None else bool(estimated),
-            discounts=[x for x in d.get("discounts", []) if isinstance(x, dict)],
+            discounts=[x for x in raw_discounts if isinstance(x, dict)]
+            if isinstance(raw_discounts, list)
+            else [],
             raw=d,
         )
 

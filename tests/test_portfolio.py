@@ -492,6 +492,39 @@ def test_fetch_account_fees_drops_non_object_discounts(httpx_mock) -> None:
     assert fees.raw["discounts"] == [{"kind": "promo"}, "bogus", None]
 
 
+@pytest.mark.parametrize("discounts", [None, "none", {"kind": "promo"}])
+def test_fetch_account_fees_null_or_non_array_discounts_decode_to_empty(
+    httpx_mock, discounts: object
+) -> None:
+    """A `null` or non-array `discounts` decodes to `[]`, not a `TypeError`.
+
+    `discounts` is the one field this model is deliberately lenient about, so a
+    malformed one must not escape as a bare `TypeError` from a comprehension —
+    that would be outside the error taxonomy entirely.
+    """
+    httpx_mock.add_response(
+        url=_FEES_URL,
+        method="GET",
+        json={
+            "maker_fee_bps": -2,
+            "taker_fee_bps": 5,
+            "tier": "base",
+            "schedule": "standard",
+            "volume_30d": "1",
+            "volume_30d_estimated": False,
+            "discounts": discounts,
+        },
+    )
+    with _authed() as client:
+        fees = client.fetch_account_fees()
+    assert fees.discounts == []
+    # Every strictly-decoded field still landed.
+    assert fees.maker_fee_bps == -2
+    assert fees.volume_30d == Decimal("1")
+    # The original value is still reachable for a caller that wants to see it.
+    assert fees.raw["discounts"] == discounts
+
+
 # -- fetch_portfolio_history -------------------------------------------------
 
 
