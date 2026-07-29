@@ -479,6 +479,46 @@ class Position:
 
 
 @dataclass(frozen=True)
+class ClosedPosition:
+    """A position that has been closed (``GET /positions/closed``, spec v0.7.2).
+
+    The realized counterpart of :class:`Position`: the size, entry and exit
+    prices at close, plus the PnL the close realized. All money fields are exact
+    decimal strings.
+
+    :attr:`side` is the side the position held **before** it closed (``"Long"`` /
+    ``"Short"`` — note the capitalization differs from the ``"buy"`` / ``"sell"``
+    used on orders and fills), and :attr:`size` is its absolute size at close.
+
+    The spec marks no field of this schema ``required``, so each decodes
+    leniently, matching :class:`Position` and :class:`Fill`. The full payload
+    stays on :attr:`raw`, which is how to tell an absent field from a real zero.
+    """
+
+    market_id: str
+    side: str
+    size: Decimal
+    entry_price: Decimal
+    exit_price: Decimal
+    realized_pnl: Decimal
+    closed_at_ms: int
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ClosedPosition:
+        return cls(
+            market_id=str(d.get("market_id", "")),
+            side=str(d.get("side", "")),
+            size=to_decimal(d.get("size", 0)),
+            entry_price=to_decimal(d.get("entry_price", 0)),
+            exit_price=to_decimal(d.get("exit_price", 0)),
+            realized_pnl=to_decimal(d.get("realized_pnl", 0)),
+            closed_at_ms=int(d.get("closed_at_ms", 0)),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
 class AccountSummary:
     """Account balance and collateral summary (``GET /account``).
 
@@ -711,6 +751,39 @@ class PortfolioHistory:
 
 
 @dataclass(frozen=True)
+class EquityPoint:
+    """One equity sample (``GET /account/equity-history``, spec v0.7.2).
+
+    A 5s-cadence, ~1h window of account equity, **oldest first** — the
+    high-resolution recent view, where :class:`PortfolioHistory` is the
+    downsampled long-window one.
+
+    Note the wire types differ between the two: :attr:`equity` here is a JSON
+    *number*, while :attr:`PortfolioPoint.equity` is a decimal *string*. It is
+    decoded through ``str`` so the value matches the JSON text that arrived
+    rather than a float re-rendering, but it is still a number field on the wire
+    — prefer the string-typed sources for anything authoritative.
+
+    The spec marks neither field ``required``, so both decode leniently (matching
+    :class:`Fill` and :class:`Position`, and unlike the strict
+    :class:`PortfolioPoint`, whose fields the spec does mark required). The full
+    payload stays on :attr:`raw` to tell an absent sample field from a real zero.
+    """
+
+    timestamp_ms: int
+    equity: Decimal
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> EquityPoint:
+        return cls(
+            timestamp_ms=int(d.get("timestamp_ms", 0)),
+            equity=to_decimal(d.get("equity", 0)),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
 class AccountFees:
     """The account's effective fee schedule (``GET /account/fees``, spec v0.7.2).
 
@@ -857,6 +930,60 @@ class Order:
             updated_at=int(d.get("updated_at", 0)),
             raw=d,
             limit_offset_bps=opt_int(d.get("limit_offset_bps")),
+        )
+
+
+@dataclass(frozen=True)
+class OrderHistoryEntry:
+    """A terminal-status order (``GET /orders/history``, spec v0.7.2).
+
+    Orders that have reached ``Filled`` / ``Cancelled`` / ``Rejected`` /
+    ``Expired``, newest first. Distinct from :class:`Order` (``GET /orders``,
+    which lists *open* orders): the history entry drops the live bookkeeping
+    fields and adds :attr:`completed_at_ms` and :attr:`cancellation_reason`.
+
+    :attr:`price` is ``None`` for market orders — the spec types it nullable, so
+    it decodes to ``None`` rather than a fabricated ``0`` that would read as a
+    real price of zero. :attr:`size` is the *original* quantity, not the
+    remaining one; compare it against :attr:`filled_qty` to see how much of a
+    cancelled order had executed.
+
+    :attr:`status` is typed as a plain ``str`` rather than an enum so a status
+    added upstream later still decodes.
+
+    The spec marks no field of this schema ``required``, so the rest decode
+    leniently, matching :class:`Order`. The full payload stays on :attr:`raw`.
+    """
+
+    id: str
+    market_id: str
+    side: str
+    order_type: str
+    price: Decimal | None
+    size: Decimal
+    filled_qty: Decimal
+    status: str
+    cancellation_reason: str | None
+    created_at_ms: int
+    completed_at_ms: int
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> OrderHistoryEntry:
+        return cls(
+            id=str(d.get("id", "")),
+            market_id=str(d.get("market_id", "")),
+            side=str(d.get("side", "")),
+            order_type=str(d.get("order_type", "")),
+            # Nullable in the spec: market orders carry no limit price.
+            price=opt_decimal(d.get("price")),
+            size=to_decimal(d.get("size", 0)),
+            filled_qty=to_decimal(d.get("filled_qty", 0)),
+            status=str(d.get("status", "")),
+            cancellation_reason=opt_str(d.get("cancellation_reason")),
+            created_at_ms=int(d.get("created_at_ms", 0)),
+            completed_at_ms=int(d.get("completed_at_ms", 0)),
+            raw=d,
         )
 
 

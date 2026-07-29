@@ -40,8 +40,10 @@ from .types import (
     BridgeDeposit,
     BridgeDepositAddress,
     CancelOnDisconnectStatus,
+    ClosedPosition,
     CreditResult,
     DepositResult,
+    EquityPoint,
     Fill,
     FundingSample,
     HealthStatus,
@@ -54,6 +56,7 @@ from .types import (
     Ohlcv,
     Order,
     OrderBook,
+    OrderHistoryEntry,
     OrderRequest,
     OrderResponse,
     PortfolioHistory,
@@ -72,7 +75,10 @@ __all__ = [
     "Network",
     "DEFAULT_USER_AGENT",
     "DEFAULT_API_VERSION",
+    "CLOSED_POSITIONS_LIMIT_MAX",
+    "EQUITY_HISTORY_LIMIT_MAX",
     "FILLS_LIMIT_MAX",
+    "ORDER_HISTORY_LIMIT_MAX",
     "PORTFOLIO_LIMIT_MAX",
     "TRADES_LIMIT_MAX",
 ]
@@ -136,6 +142,21 @@ TRADES_LIMIT_MAX = 1000
 #: Upper bound the spec puts on ``limit`` for ``GET /fills`` (``maximum: 1000``,
 #: default 100).
 FILLS_LIMIT_MAX = 1000
+
+#: Upper bound the spec puts on ``limit`` for ``GET /orders/history``
+#: (``maximum: 500``, default 100).
+ORDER_HISTORY_LIMIT_MAX = 500
+
+#: Upper bound the spec puts on ``limit`` for ``GET /positions/closed``
+#: (``maximum: 200``, default 100) — the smallest of the five paginated maxima.
+CLOSED_POSITIONS_LIMIT_MAX = 200
+
+#: Upper bound the spec puts on ``limit`` for ``GET /account/equity-history``
+#: (``maximum: 720``), which is also that endpoint's **default**: one page
+#: already covers the whole ~1h/5s window, so omitting ``limit`` asks for 720
+#: points, not 100. Clamping this endpoint at any smaller shared bound would
+#: reject a request the server accepts by default.
+EQUITY_HISTORY_LIMIT_MAX = 720
 
 
 def _portfolio_window(window: PortfolioWindow | str | None) -> str | None:
@@ -529,6 +550,63 @@ class Client:
         data = self._request("GET", "/positions", signed=True, direct=True)
         return [Position.from_dict(p) for p in to_dict_list(data, "positions", required=False)]
 
+    def fetch_closed_positions(self, limit: int | None = None) -> list[ClosedPosition]:
+        """``GET /positions/closed`` — closed positions, newest first.
+
+        The realized counterpart of :meth:`fetch_positions`. Requires
+        credentials.
+
+        Returns the first page only. ``limit`` bounds it and must fall in
+        ``1..200`` (:data:`CLOSED_POSITIONS_LIMIT_MAX` — the smallest of the
+        paginated maxima); omit it for the server's default of 100. For the whole
+        history use :meth:`iter_closed_positions`, or
+        :meth:`fetch_closed_positions_page` for one page plus its cursor.
+        """
+        return self.fetch_closed_positions_page(limit=limit).items
+
+    def fetch_closed_positions_page(
+        self,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[ClosedPosition]:
+        """``GET /positions/closed`` — one page of closed positions, plus its cursor.
+
+        The manual-paging form; see :meth:`fetch_trades_page`. Requires
+        credentials.
+        """
+        query = _query(
+            limit=_page_limit(limit, CLOSED_POSITIONS_LIMIT_MAX, "positions/closed"),
+            cursor=cursor,
+        )
+        data, next_cursor = self._request_page(
+            "/positions/closed", query=query, signed=True, direct=True
+        )
+        rows = data if isinstance(data, list) else []
+        return Page([ClosedPosition.from_dict(p) for p in rows], next_cursor)
+
+    def iter_closed_positions(
+        self,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        max_pages: int | None = None,
+    ) -> Iterator[ClosedPosition]:
+        """Every closed position on the account, paging by cursor as needed.
+
+        A generator; each page costs one signed request, issued lazily. ``limit``
+        sets the page size (max 200 here, so a long history takes proportionally
+        more pages than ``/fills`` would), ``cursor`` resumes from a saved
+        position, and ``max_pages`` bounds the walk.
+
+        See :mod:`nexus_exchange.pagination` for the termination rules.
+        """
+        return iter_items(
+            lambda c: self.fetch_closed_positions_page(limit=limit, cursor=c),
+            cursor=cursor,
+            max_pages=max_pages,
+        )
+
     def fetch_account_state(self) -> AccountState:
         """``GET /account/state`` — consolidated account snapshot. Requires credentials.
 
@@ -616,6 +694,64 @@ class Client:
             "GET", "/account/portfolio-history", query=query, signed=True, direct=True
         )
         return PortfolioHistory.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_equity_history(self, limit: int | None = None) -> list[EquityPoint]:
+        """``GET /account/equity-history`` — recent equity samples, oldest first.
+
+        A 5s-cadence, ~1h window of account equity: the high-resolution recent
+        view, where :meth:`fetch_portfolio_history` is the downsampled
+        long-window one. Requires credentials.
+
+        Returns the first page only. ``limit`` bounds it and must fall in
+        ``1..720`` (:data:`EQUITY_HISTORY_LIMIT_MAX`). Unlike the other paginated
+        endpoints, 720 is *also* the server's default here — the whole window fits
+        in one page — so omitting ``limit`` asks for the maximum, and one page is
+        usually the entire series. For a longer walk (or a resumable one) use
+        :meth:`iter_equity_history` or :meth:`fetch_equity_history_page`.
+        """
+        return self.fetch_equity_history_page(limit=limit).items
+
+    def fetch_equity_history_page(
+        self,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[EquityPoint]:
+        """``GET /account/equity-history`` — one page of samples, plus its cursor.
+
+        The manual-paging form; see :meth:`fetch_trades_page`. Requires
+        credentials.
+        """
+        query = _query(
+            limit=_page_limit(limit, EQUITY_HISTORY_LIMIT_MAX, "account/equity-history"),
+            cursor=cursor,
+        )
+        data, next_cursor = self._request_page(
+            "/account/equity-history", query=query, signed=True, direct=True
+        )
+        rows = data if isinstance(data, list) else []
+        return Page([EquityPoint.from_dict(p) for p in rows], next_cursor)
+
+    def iter_equity_history(
+        self,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        max_pages: int | None = None,
+    ) -> Iterator[EquityPoint]:
+        """Every available equity sample, paging by cursor as needed.
+
+        A generator; each page costs one signed request, issued lazily. ``limit``
+        sets the page size, ``cursor`` resumes from a saved position, and
+        ``max_pages`` bounds the walk.
+
+        See :mod:`nexus_exchange.pagination` for the termination rules.
+        """
+        return iter_items(
+            lambda c: self.fetch_equity_history_page(limit=limit, cursor=c),
+            cursor=cursor,
+            max_pages=max_pages,
+        )
 
     def fetch_my_trades(self, limit: int | None = None) -> list[Fill]:
         """``GET /fills`` — recent fills (private executions). Requires credentials.
@@ -862,6 +998,63 @@ class Client:
         """``GET /orders`` — open orders for the account. Requires credentials."""
         data = self._request("GET", "/orders", signed=True, direct=True)
         return [Order.from_dict(o) for o in (data if isinstance(data, list) else [])]
+
+    def fetch_order_history(self, limit: int | None = None) -> list[OrderHistoryEntry]:
+        """``GET /orders/history`` — terminal-status orders, newest first.
+
+        Filled / cancelled / rejected / expired orders for the account, the
+        history counterpart of :meth:`fetch_open_orders`. Requires credentials.
+
+        Returns the first page only. ``limit`` bounds it and must fall in
+        ``1..500`` (:data:`ORDER_HISTORY_LIMIT_MAX` — lower than the 1000 fills
+        and trades allow); omit it for the server's default of 100. For the whole
+        history use :meth:`iter_order_history`, or
+        :meth:`fetch_order_history_page` for one page plus its cursor.
+        """
+        return self.fetch_order_history_page(limit=limit).items
+
+    def fetch_order_history_page(
+        self,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[OrderHistoryEntry]:
+        """``GET /orders/history`` — one page of order history, plus its next cursor.
+
+        The manual-paging form; see :meth:`fetch_trades_page`. Requires
+        credentials.
+        """
+        query = _query(
+            limit=_page_limit(limit, ORDER_HISTORY_LIMIT_MAX, "orders/history"),
+            cursor=cursor,
+        )
+        data, next_cursor = self._request_page(
+            "/orders/history", query=query, signed=True, direct=True
+        )
+        rows = data if isinstance(data, list) else []
+        return Page([OrderHistoryEntry.from_dict(o) for o in rows], next_cursor)
+
+    def iter_order_history(
+        self,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        max_pages: int | None = None,
+    ) -> Iterator[OrderHistoryEntry]:
+        """Every terminal-status order on the account, paging by cursor as needed.
+
+        A generator; each page costs one signed request, issued lazily. ``limit``
+        sets the page size, ``cursor`` resumes from a saved position, and
+        ``max_pages`` bounds the walk — worth setting on an account with a long
+        trading history, since nothing else limits how far back this goes.
+
+        See :mod:`nexus_exchange.pagination` for the termination rules.
+        """
+        return iter_items(
+            lambda c: self.fetch_order_history_page(limit=limit, cursor=c),
+            cursor=cursor,
+            max_pages=max_pages,
+        )
 
     def fetch_order(self, order_id: str) -> Order:
         """``GET /orders/{order_id}`` — fetch a single order. Requires credentials.

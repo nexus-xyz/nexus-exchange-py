@@ -53,14 +53,14 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | CCXT-compatible adapter — public market data | ✅ implemented |
 | Error taxonomy (terminal vs transient) | ✅ implemented |
 | Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
-| Account reads — `GET /account`, `/positions`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
-| Portfolio — `GET /account/state` (summary + positions, incl. `withdrawable`), `/account/summary`, `/account/fees`, `/account/portfolio-history` | ✅ implemented |
-| Trading — `POST /orders`, `/orders/batch`; `GET /orders`, `/orders/{id}`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
+| Account reads — `GET /account`, `/positions`, `/positions/closed`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
+| Portfolio — `GET /account/state` (summary + positions, incl. `withdrawable`), `/account/summary`, `/account/fees`, `/account/portfolio-history`, `/account/equity-history` | ✅ implemented |
+| Trading — `POST /orders`, `/orders/batch`; `GET /orders`, `/orders/{id}`, `/orders/history`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
 | Funds — `POST /account/deposit`, `/account/credit` | ✅ implemented |
 | Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses` | ✅ implemented |
 | Keys / agents / WS token — `/keys`, `/agents`, `POST /ws-tokens` | ✅ implemented |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
-| Cursor pagination — `cursor` + `X-Next-Cursor` on `/markets/{id}/trades`, `/fills` | ✅ implemented |
+| Cursor pagination — `cursor` + `X-Next-Cursor` on all five paginated GETs | ✅ implemented |
 | WebSocket streaming | ❌ not yet |
 | Rate-limit-aware retry (`429` / `Retry-After`, token bucket) | ❌ not yet |
 | OAuth auth | ❌ not yet |
@@ -194,9 +194,17 @@ dropping out of the series.
 ## Pagination
 
 The list endpoints return a page of results plus an opaque cursor for the next
-page, carried in the **`X-Next-Cursor`** response header (spec v0.7.2). Of the
-five paginated endpoints this SDK wraps two: `GET /markets/{id}/trades` and
-`GET /fills`.
+page, carried in the **`X-Next-Cursor`** response header (spec v0.7.2). All five
+paginated endpoints are wrapped, each with a flat `fetch_*` (first page), an
+`iter_*` (every page) and a `fetch_*_page` (one page + its cursor):
+
+| endpoint | methods | `limit` max |
+| --- | --- | --- |
+| `GET /markets/{id}/trades` | `fetch_trades` / `iter_trades` / `fetch_trades_page` | 1000 |
+| `GET /fills` | `fetch_my_trades` / `iter_my_trades` / `fetch_my_trades_page` | 1000 |
+| `GET /orders/history` | `fetch_order_history` / `iter_order_history` / `fetch_order_history_page` | 500 |
+| `GET /positions/closed` | `fetch_closed_positions` / `iter_closed_positions` / `fetch_closed_positions_page` | 200 |
+| `GET /account/equity-history` | `fetch_equity_history` / `iter_equity_history` / `fetch_equity_history_page` | 720 (also the default) |
 
 `iter_*` walks every page for you, lazily — one request per page, driven by the
 cursor:
@@ -232,10 +240,17 @@ Cursors are opaque — never parse one. Termination rules:
   matters.
 
 `limit` sets the page size and is validated against **that endpoint's** spec
-maximum before the request — 1000 for both trades and fills
-(`TRADES_LIMIT_MAX` / `FILLS_LIMIT_MAX`). These are not interchangeable across
-endpoints, and in particular the `366` bound belongs only to
-`/account/portfolio-history` (`PORTFOLIO_LIMIT_MAX`), which is not paginated.
+maximum before the request (`TRADES_LIMIT_MAX`, `FILLS_LIMIT_MAX`,
+`ORDER_HISTORY_LIMIT_MAX`, `CLOSED_POSITIONS_LIMIT_MAX`,
+`EQUITY_HISTORY_LIMIT_MAX` — see the table above). They are **not**
+interchangeable: 500 is valid on `/orders/history` and out of range on
+`/positions/closed`. On `/account/equity-history` the maximum is also the
+server's default, so one page normally covers the whole ~1h window.
+
+In particular the `366` bound belongs only to `/account/portfolio-history`
+(`PORTFOLIO_LIMIT_MAX`), which has no `cursor` parameter at all — applying it to
+a paginated endpoint would reject valid requests, and on `/account/equity-history`
+it sits *below* the server's own default of 720.
 
 ## CCXT compatibility
 
