@@ -28,6 +28,33 @@ pytest -q               # tests (CI: test)
 `ruff check . --fix` applies safe autofixes. The test job runs across Python
 3.10–3.13; the SDK targets `requires-python >= 3.10`.
 
+## How a PR lands
+
+Squash-and-merge is the only method enabled, and the source branch is deleted on
+merge, so one PR is always exactly one commit on `main`. **That commit's subject
+is your PR title**, so write it as a
+[conventional commit](https://www.conventionalcommits.org/) — `feat:`, `fix:`,
+`docs:`, `chore:`, `ci:` — and declare a breaking change with `!` before the
+colon (`feat!:`, `feat(client)!: …`).
+
+Unlike the rest of the fleet, **nothing here parses that subject today**: this
+SDK's version is set by hand in `pyproject.toml` and the release notes come from
+`CHANGELOG.md` (see [Releasing](#releasing)), so the convention is currently about
+a readable history rather than a computed version.
+
+It is still worth following now, for two reasons. The obvious one is fleet
+consistency. The load-bearing one is that
+[ENG-7536](https://linear.app/nexus-labs/issue/ENG-7536) proposes adopting the
+same release-please config as `-ts`/`-cli`/`-mcp`, and release-please computes the
+next version from **merged commit history**. A history of unparseable subjects is
+not something that can be fixed after the fact, so every commit that lands
+between now and then either helps or hurts that first computed bump.
+
+When that lands, one asymmetry becomes a trap worth knowing in advance: a
+`BREAKING CHANGE:` footer counts only in a **commit** body, because the squash
+commit's body is assembled from the commit messages on the branch and never from
+the PR description. The `!` in the title is the reliable declaration.
+
 ## Compatibility & deprecations
 
 This SDK follows [semver](https://semver.org/) (version in `pyproject.toml`).
@@ -83,7 +110,12 @@ preserve the old (often wrong) behavior, so removal is correct there.
 - **Batch** breaking changes into a single planned minor bump rather than
   shipping them one-per-PR.
 - Call the break out explicitly in the PR description so it can be summarized
-  in the release notes.
+  in the release notes — the notes are hand-written here, so this is what
+  actually carries it today.
+- Also put a `!` in the PR title (`feat!:`). Redundant while the version is
+  hand-set, and the declaration that computes the bump once
+  [ENG-7536](https://linear.app/nexus-labs/issue/ENG-7536) lands — see
+  [How a PR lands](#how-a-pr-lands).
 
 ### API spec version
 
