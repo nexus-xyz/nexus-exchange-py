@@ -70,7 +70,11 @@ def synthetic_package(client_body="", manifest="", extra_modules=None, pinned="v
         with open(os.path.join(pkg, "client.py"), "w") as f:
             f.write(CLIENT_HEADER + textwrap.indent(textwrap.dedent(client_body), "    "))
         for name, source in (extra_modules or {}).items():
-            with open(os.path.join(pkg, name), "w") as f:
+            # `name` may carry a subpackage path (`ws/stream.py`), so the parent
+            # directory is created on demand — that shape is itself under test.
+            dest = os.path.join(pkg, name)
+            os.makedirs(os.path.dirname(dest), exist_ok=True)
+            with open(dest, "w") as f:
                 f.write(textwrap.dedent(source))
         endpoints = os.path.join(tmp, "endpoints.txt")
         with open(endpoints, "w") as f:
@@ -394,6 +398,74 @@ class TestUnattributableCalls(unittest.TestCase):
         with synthetic_package(client_body="def a(self):\n    return None\n", manifest="GET /x\n"):
             with self.assertRaises(SystemExit):
                 _quiet(csd.requested_ops, csd.package_modules(), "/api/v1")
+
+
+class TestModuleDiscovery(unittest.TestCase):
+    """The set of files the walk reads. Everything else here is only as good as
+    this: an operation in a module the checker never opens is not reported as
+    unattributable — it is not seen at all, and the run passes while the manifest
+    under-counts. That is the one failure mode with no loud symptom."""
+
+    def test_subpackage_module_is_discovered(self):
+        with synthetic_package(
+            client_body='def a(self):\n    self._request("GET", "/x")\n',
+            extra_modules={"ws/__init__.py": "", "ws/stream.py": ""},
+            manifest="GET /x\n",
+        ):
+            # Relative to the *patched* PACKAGE, so this must be read inside the
+            # fixture — it restores the real paths on exit.
+            found = {os.path.relpath(m, csd.PACKAGE) for m in csd.package_modules()}
+        self.assertIn(os.path.join("ws", "stream.py"), found)
+
+    def test_operation_requested_only_from_a_subpackage_is_attributed(self):
+        # The regression proper: a flat listing returns zero errors here, because
+        # the call is invisible rather than unlisted.
+        with synthetic_package(
+            client_body='def a(self):\n    self._request("GET", "/x")\n',
+            extra_modules={
+                "ws/__init__.py": "",
+                "ws/stream.py": (
+                    "class S:\n"
+                    "    def go(self):\n"
+                    '        self._request("GET", "/hidden", direct=True)\n'
+                ),
+            },
+            manifest="GET /x\n",
+        ):
+            requested = csd.requested_ops(csd.package_modules(), "/api/v1")
+            self.assertIn(("GET", "/api/v1/hidden"), requested)
+            with allowlists():
+                errors = _quiet(
+                    csd.check_code_vs_manifest,
+                    csd.load_manifest(csd.ENDPOINTS_TXT),
+                    csd.spec_ops(spec_of(("GET", "/x"), ("GET", "/api/v1/hidden"))),
+                )
+        self.assertEqual(errors, 1)
+
+    def test_httpx_bypass_in_a_subpackage_is_caught(self):
+        # check_single_entry_point reads the same module list, so the bypass guard
+        # inherits the same blind spot if the walk is flat.
+        with synthetic_package(
+            client_body='def a(self):\n    self._request("GET", "/x")\n',
+            extra_modules={
+                "ws/__init__.py": "",
+                "ws/stream.py": ("class S:\n    def go(self):\n        self._http.get('/raw')\n"),
+            },
+            manifest="GET /x\n",
+        ):
+            errors = _quiet(csd.check_single_entry_point, csd.package_modules())
+        self.assertEqual(errors, 1)
+
+    def test_pycache_is_not_walked(self):
+        # A stale generated copy would double-count the same operation and pin the
+        # error to a path nobody edits.
+        with synthetic_package(
+            client_body='def a(self):\n    self._request("GET", "/x")\n',
+            extra_modules={"__pycache__/client.py": 'X = "stale"\n'},
+            manifest="GET /x\n",
+        ):
+            found = csd.package_modules()
+        self.assertEqual([m for m in found if "__pycache__" in m], [])
 
 
 class TestPinMatchesSpec(unittest.TestCase):

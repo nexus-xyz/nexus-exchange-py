@@ -209,12 +209,24 @@ def read_api_v1_prefix(source):
 
 
 def package_modules():
-    mods = sorted(
-        os.path.join(PACKAGE, name) for name in os.listdir(PACKAGE) if name.endswith(".py")
-    )
+    """Every `.py` file in the package, subpackages included.
+
+    Recursive on purpose. The package is flat today, so a top-level listing would
+    return the same set — but a future subpackage (a `ws/` streaming client is the
+    obvious candidate) would be invisible to a flat scan, and invisible is the one
+    failure mode this checker must not have: its calls would go unattributed, the
+    manifest would never be asked to list them, and the run would still pass. That
+    is a silent undercount, not a loud one, so the recursion is what keeps every
+    other guarantee here honest."""
+    mods = []
+    for dirpath, dirnames, filenames in os.walk(PACKAGE):
+        # Generated trees hold stale copies of real modules; walking them would
+        # double-count operations and attribute them to paths nobody edits.
+        dirnames[:] = [d for d in dirnames if d != "__pycache__"]
+        mods.extend(os.path.join(dirpath, name) for name in filenames if name.endswith(".py"))
     if not mods:
         fail(f"no Python modules found under {PACKAGE}")
-    return mods
+    return sorted(mods)
 
 
 def literal_path(node):
