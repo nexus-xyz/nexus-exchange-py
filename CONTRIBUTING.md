@@ -87,10 +87,30 @@ preserve the old (often wrong) behavior, so removal is correct there.
 
 ### API spec version
 
-The SDK tracks a pinned Exchange API spec version in `.api-version`. The
-`drift` CI job fails if that pin isn't the latest release of the spec repo, so
-bump `.api-version` (and the README spec table) together when you target a new
-spec release.
+The SDK tracks a pinned Exchange API spec version in `.api-version`. The `drift`
+CI job fails if that pin isn't the latest release of the spec repo, so bump
+`.api-version` (and the README spec table) together when you target a new spec
+release. In practice `spec-autobump` opens that PR for you when the spec repo
+publishes a release.
+
+`endpoints.txt` lists the operations this SDK implements, and the `spec-drift` CI
+job enforces it in both directions on **every** PR: each line must exist in the
+pinned spec, and the operations the client code requests must be exactly that list.
+So adding a typed method means adding its line — CI fails otherwise, and equally
+fails on a line no method requests. To run it locally:
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/nexus-xyz/nexus-exchange-api/$(cat .api-version)/openapi.json" \
+  -o openapi.pinned.json
+python3 scripts/check_spec_drift.py openapi.pinned.json
+python3 scripts/test_check_spec_drift.py   # the checker's own tests
+```
+
+Two escape hatches exist for operations that legitimately can't be listed, both
+named and documented in `scripts/check_spec_drift.py` — `CODE_ONLY_OPS` (the
+client requests it but the pinned spec doesn't define it) and `NON_REST_TARGETS`
+(listed, but reached without a `_request` call). Both are checked for staleness, so
+an entry can't outlive its reason.
 
 ### Toward 1.0
 
