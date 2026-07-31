@@ -77,6 +77,66 @@ jobs:
           path: coverage.xml
           if-no-files-found: error
 
+  # Verification: does the SDK still match the spec it *pins*? Both directions —
+  # every endpoints.txt entry exists in the pinned spec, and the operations the
+  # client code requests are exactly that list (modulo two named allowlists in the
+  # checker). Distinct from the `drift` job below, which asks the *lag* question:
+  # is the pin the latest release?
+  #
+  # Deliberately NOT path-filtered. This has to run on the spec-autobump PR, where
+  # the pin itself is the change — a trigger gated on spec-file diffs would look
+  # correct and verify nothing. It is cheap: one cached fetch, no dependencies.
+  spec-drift:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Read the pinned spec version
+        id: pin
+        run: |
+          set -euo pipefail
+          tag="$(tr -d '[:space:]' < .api-version)"
+          # Validate before the value reaches a URL or a cache key: `.api-version`
+          # is attacker-controlled on a fork PR.
+          if [[ ! "$tag" =~ ^v[0-9]+(\.[0-9]+){0,2}$ ]]; then
+            echo "::error file=.api-version::.api-version must look like vX.Y.Z (got: '$tag')"
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Cache the pinned spec
+        id: cache
+        uses: actions/cache@v6
+        with:
+          path: openapi.pinned.json
+          key: spec-${{ steps.pin.outputs.tag }}
+
+      - name: Fetch the pinned spec (cache miss only)
+        if: steps.cache.outputs.cache-hit != 'true'
+        env:
+          # Passed as data, not interpolated into the script; validated above.
+          SPEC_TAG: ${{ steps.pin.outputs.tag }}
+        run: |
+          set -euo pipefail
+          # raw-at-tag, so the release asset download_count stays a clean external
+          # adoption signal.
+          curl -fsSL \
+            "https://raw.githubusercontent.com/nexus-xyz/nexus-exchange-api/${SPEC_TAG}/openapi.json" \
+            -o openapi.pinned.json
+
+      # Self-test first: a green drift run is only evidence if the checker can go
+      # red. This proves it does — including for the exact manifest bug it fixed.
+      - name: Self-test the drift checker
+        run: python3 scripts/test_check_spec_drift.py
+
+      # The checker re-derives the pinned tag itself and refuses to run if the spec
+      # file does not declare that version, so a stale cache entry cannot pass.
+      - name: Check spec drift
+        run: python3 scripts/check_spec_drift.py openapi.pinned.json
+
   drift:
     runs-on: ubuntu-latest
     steps:

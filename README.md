@@ -229,10 +229,22 @@ Currently targets Exchange API spec **`v0.7.2`**.
 The pinned version lives in [`.api-version`](./.api-version); the spec itself is
 published by
 [`nexus-xyz/nexus-exchange-api`](https://github.com/nexus-xyz/nexus-exchange-api).
-This repo does not vendor a copy — the `drift` CI check fetches the pinned
-release to detect drift, and the scheduled `api-version-sync` workflow opens a PR
-when a newer spec releases. The line above is bot-managed; the table below is
-maintained by hand when an SDK release ships a new pin.
+This repo does not vendor a copy. Two CI checks keep the pin honest, answering
+different questions:
+
+- **`spec-drift`** — does the SDK still match the spec it *pins*? It fetches the
+  pinned release and enforces, both ways, that every operation in
+  [`endpoints.txt`](./endpoints.txt) exists in that spec and that the operations
+  the client code requests are exactly that list.
+- **`drift`** — is the pin still the *latest* release? It compares `.api-version`
+  against the spec repo's newest tag.
+
+The `spec-autobump` workflow opens the bump PR when a newer spec releases,
+labelling it breaking or non-breaking from an
+[oasdiff](https://github.com/oasdiff/oasdiff) classification; `spec-drift` runs on
+that PR too, so a bump that would require SDK changes cannot land quietly. The
+line above is bot-managed; the table below is maintained by hand when an SDK
+release ships a new pin.
 
 Every request advertises the pinned tag in an `X-Nexus-Api-Version` header (and
 identifies itself with a `User-Agent: nexus-exchange-py/<version>`). Override the

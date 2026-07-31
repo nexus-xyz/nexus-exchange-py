@@ -11,3 +11,6 @@ venv/
 .ruff_cache/
 .coverage
 coverage.xml
+# The pinned spec, fetched on demand by the spec-drift check (CI and locally —
+# see CONTRIBUTING). Never vendored: .api-version is the single pin.
+openapi.pinned.json
