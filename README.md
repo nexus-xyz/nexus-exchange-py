@@ -84,9 +84,9 @@ semantics and the EIP-712 signing domain:
 ```python
 from nexus_exchange import Client, Network
 
-Network.TESTNET.ws_market_data_url    # 'wss://api.testnet.nexus.xyz/stream'
+Network.TESTNET.ws_market_data_url  # 'wss://api.testnet.nexus.xyz/stream'
 Network.TESTNET.ws_authenticated_url  # 'wss://api.testnet.nexus.xyz/ws'
-Network.MAINNET.real_funds            # True — branch on this, never on the host string
+Network.MAINNET.real_funds  # True — branch on this, never on the host string
 
 with Client(Network.TESTNET) as client:
     ...
