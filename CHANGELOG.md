@@ -83,6 +83,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of an `AttributeError` from library internals. Applies to all models, not just
   the new ones. Optional and nullable fields still decode to `None` exactly as
   before.
+- **Bounded `ruff` to one minor in the `dev` extra (ENG-7728).** `ruff>=0.6`
+  became `ruff>=0.16,<0.17`. CI installs the formatter only through this extra,
+  so an unbounded spec made a formatting change in any ruff release fail
+  whichever unrelated PR happened to open first after it — as 0.16.0 did by
+  formatting Python inside Markdown. Development-only: no runtime dependency and
+  no API change. Dependabot now opens ruff bumps individually rather than inside
+  the grouped minor PR, so the reformat one requires is the diff under review.
 - **Pinned the Exchange API spec to `v0.7.2` (was `v0.7.1`) (ENG-6459).** The
   spec release that adds the portfolio-parity surface above. Bumps
   `.api-version`, the baked `DEFAULT_API_VERSION` constant sent as

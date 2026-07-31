@@ -28,6 +28,12 @@ pytest -q               # tests (CI: test)
 `ruff check . --fix` applies safe autofixes. The test job runs across Python
 3.10–3.13; the SDK targets `requires-python >= 3.10`.
 
+Run these from the virtualenv you installed the `dev` extra into. CI installs
+`ruff` only from that extra, where it's bounded to one minor (`>=0.16,<0.17`)
+because a ruff minor can change formatting — a globally installed ruff of a
+different minor can leave the tree formatted in a way CI rejects. Widening the
+bound is its own PR, since the reformat it demands is the point of that diff.
+
 ## How a PR lands
 
 Squash-and-merge is the only method enabled, and the source branch is deleted on
