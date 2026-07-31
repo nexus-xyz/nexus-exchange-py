@@ -73,8 +73,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   environment, so releases never fail on unconfigured PyPI. Distribution stays
   git-source until PyPI is live; the README install line is unchanged.
 
+- **Spec-drift verification (ENG-7960).** `scripts/check_spec_drift.py`, wired as
+  the `spec-drift` CI job on **every** PR — including the pin-bump PR, where the
+  pin *is* the change and a trigger gated on spec-file diffs would verify nothing.
+  It enforces both directions against the pinned spec: every `endpoints.txt` entry
+  must exist in it (matched exactly, placeholder names included), and the
+  operations the client code requests must *equal* that list. The code side is read
+  with `ast` — every request goes through `Client._request`, and `direct=True`
+  calls are resolved through client.py's own `API_V1_PREFIX`, so an operation is
+  attributed to the path actually sent. Two named allowlists carry the by-design
+  exceptions (`CODE_ONLY_OPS`, `NON_REST_TARGETS`), and both fail when stale, so an
+  exemption can't outlive its reason. `scripts/test_check_spec_drift.py` (40 cases,
+  hermetic, run in the same job) proves the checker goes red when defeated — a
+  green run is only evidence if red is reachable.
+- **`spec-autobump` workflow (ENG-7960).** Replaces `api-version-sync` with the
+  design nexus-exchange-rs established (ENG-3563): dispatch from the api repo on
+  release, a daily poll as the self-healing fallback, and manual dispatch. It
+  classifies old-pin → new with a **pinned** oasdiff (`breaking --fail-on ERR`) and
+  labels the PR `spec-autobump` or `breaking · needs-SDK-update`, requesting review
+  on the latter. The PR still touches only the pin, the managed README line and the
+  baked `DEFAULT_API_VERSION`; `spec-drift` on that PR is the merge signal. Because
+  this repo has `allow_auto_merge` disabled, the workflow probes the setting and
+  says plainly in the PR that a human must merge, rather than arming auto-merge
+  into a silent no-op.
+
 ### Changed
 
+- **Corrected `endpoints.txt`: five bridge operations were listed without their
+  `/api/v1` prefix (ENG-7960).** `GET|POST /bridge/deposit-addresses`,
+  `GET /bridge/assets`, `GET /bridge/deposits` and `GET /bridge/deposits/{id}` are
+  requested with `direct=True`, so the client has always called them at
+  `/api/v1/bridge/...` — the paths the spec defines. The manifest claimed the bare
+  paths, which exist in no released spec. **The code was correct; the manifest was
+  wrong**, so this is a bookkeeping correction with no behavior change, and the
+  reported coverage rises from 43 to 48 of the 98 operations in `v0.7.2` — a
+  correction, not new delivery. `GET /health` also left the manifest: the client
+  probes it (`health_check`) but the spec dropped it in v0.7.1 in favour of
+  `GET /status`, so it now sits in `CODE_ONLY_OPS` and no longer inflates coverage
+  with an operation no released spec defines.
 - **Decoding rejects values it previously coerced.** A non-finite money value
   (`"NaN"`, `"Infinity"`) now raises `DecodeError` instead of producing a
   `Decimal("NaN")` that silently poisons every comparison and sum it reaches; a
