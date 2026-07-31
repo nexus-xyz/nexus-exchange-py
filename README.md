@@ -68,6 +68,55 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
 Anything not listed there is not wrapped yet — contributions welcome.
 
+### Networks
+
+`Network` is the **network** axis — which chain, and whose money:
+
+| `Network` | Funds | Faucet | Notes |
+| --- | --- | --- | --- |
+| `Network.TESTNET` | Play (synthetic USDX) | Yes | **Default.** The safe target for integration work and CI. |
+| `Network.MAINNET` | **Real** | No | Collateral is USDX bridged from Ethereum Mainnet. |
+| `Network.LOCAL` | Play | Yes | A locally run indexer. Not a public network. |
+
+Each member bundles its config — REST bases, both WebSocket bases, funds
+semantics and the EIP-712 signing domain:
+
+```python
+from nexus_exchange import Client, Network
+
+Network.TESTNET.ws_market_data_url    # 'wss://api.testnet.nexus.xyz/stream'
+Network.TESTNET.ws_authenticated_url  # 'wss://api.testnet.nexus.xyz/ws'
+Network.MAINNET.real_funds            # True — branch on this, never on the host string
+
+with Client(Network.TESTNET) as client:
+    ...
+```
+
+Three things worth knowing before you pick one:
+
+- **Mainnet has no default base URL yet.** Its host (`api.nexus.xyz`) is
+  published but DNS is not live, so `Client(Network.MAINNET)` raises rather than
+  guessing a real-funds target or quietly falling back to testnet. Pass
+  `base_url=…` explicitly to target it.
+- **Credentials never cross networks.** Session tokens, HMAC keys and agent keys
+  are minted per network and are invalid on any other. Switching network means a
+  new client *and* new credentials — never carry a signature, nonce or agent
+  registration across.
+- **The signing domain's `chain_id` is not published statically.** Read it from
+  the edge's `/metadata` for the network you are on. `register_agent` refuses to
+  sign without one rather than defaulting: a wrong domain either fails
+  verification or produces a signature valid on a *different* network.
+
+The retired `stable` / `beta` release channels were never networks. `stable`
+became `Network.TESTNET` (same target); `beta` is now an explicit override:
+
+```python
+Client(
+    base_url="https://beta.exchange.nexus.xyz/api/exchange",
+    direct_base_url="https://beta.exchange.nexus.xyz",
+)
+```
+
 ### Routing: direct `/api/v1` service vs. legacy gateway
 
 As the REST gateway is retired (ENG-4740), backend services expose their own
@@ -78,8 +127,9 @@ the HMAC signature covers the full path (e.g. `/api/v1/orders`). Routes with no
 `/api/v1` equivalent yet — `GET /markets`, `/health`, ADL history, `GET
 /orders/{id}`, deposits, keys/agents, WS tokens and admin tiers — stay on the
 legacy gateway. This split is internal; method names and signatures are
-unchanged. A custom `base_url` overrides both bases, so point it at the service
-root (e.g. `http://localhost:9090`), not a `/api/exchange` URL.
+unchanged. A custom `base_url` overrides both bases, so on its own point it at
+the service root (e.g. `http://localhost:9090`), not a `/api/exchange` URL. Pass
+`direct_base_url` alongside it to target a deploy that keeps the split.
 
 ## Authentication
 
@@ -277,8 +327,8 @@ For an opt-in round-trip against a **live** gateway (read-only, unauthenticated;
 not run in CI), use the smoke script:
 
 ```bash
-python scripts/smoke.py                  # stable public gateway
-python scripts/smoke.py --network beta
+python scripts/smoke.py                     # testnet (default; play funds)
+python scripts/smoke.py --network local
 python scripts/smoke.py --base-url http://localhost:9090
 ```
 

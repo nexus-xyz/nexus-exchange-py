@@ -84,12 +84,15 @@ class NexusExchange:
     def __init__(
         self,
         *,
-        network: Network = Network.STABLE,
+        network: Network = Network.TESTNET,
         base_url: str | None = None,
+        direct_base_url: str | None = None,
         client: Client | None = None,
     ) -> None:
         self._owns_client = client is None
-        self._client = client or Client(network=network, base_url=base_url)
+        self._client = client or Client(
+            network=network, base_url=base_url, direct_base_url=direct_base_url
+        )
         #: CCXT ``markets`` cache, keyed by symbol; populated by
         #: :meth:`load_markets` / :meth:`fetch_markets`.
         self.markets: dict[str, dict[str, Any]] = {}

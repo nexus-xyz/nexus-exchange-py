@@ -23,7 +23,6 @@ from .client import (
     DEFAULT_API_VERSION,
     DEFAULT_USER_AGENT,
     Client,
-    Network,
     __version__,
 )
 from .errors import (
@@ -33,6 +32,11 @@ from .errors import (
     MissingCredentialsError,
     NexusExchangeError,
     TransportError,
+)
+from .networks import (
+    Network,
+    NetworkConfig,
+    SigningDomain,
 )
 from .types import (
     AccountFees,
@@ -88,6 +92,8 @@ __all__ = [
     "BridgeDepositAddress",
     "Client",
     "Network",
+    "NetworkConfig",
+    "SigningDomain",
     "Market",
     "MarketSummary",
     "MarketStatus",
