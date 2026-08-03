@@ -92,6 +92,12 @@ with Client(Network.TESTNET) as client:
     ...
 ```
 
+The two WebSocket bases and `published_rest_base` are the spec's **durable**
+per-network values, recorded here so they live in one place. The hosted ones do
+not resolve yet (DNS is ENG-8155), and this SDK ships no WebSocket client, so
+treat them as published targets rather than something to connect to today. What
+the client actually sends to is `base_url` / `direct_base_url`.
+
 Three things worth knowing before you pick one:
 
 - **Mainnet has no default base URL yet.** Its host (`api.nexus.xyz`) is
@@ -128,8 +134,25 @@ the HMAC signature covers the full path (e.g. `/api/v1/orders`). Routes with no
 /orders/{id}`, deposits, keys/agents, WS tokens and admin tiers — stay on the
 legacy gateway. This split is internal; method names and signatures are
 unchanged. A custom `base_url` overrides both bases, so on its own point it at
-the service root (e.g. `http://localhost:9090`), not a `/api/exchange` URL. Pass
-`direct_base_url` alongside it to target a deploy that keeps the split.
+the service root (e.g. `http://localhost:9090`), not a `/api/exchange` URL — a
+gateway base reaching the direct surface is rejected at construction, since it
+would send *and HMAC-sign* `/api/exchange/api/v1/…`. Pass `direct_base_url`
+alongside it to target a deploy that keeps the split.
+
+#### If you are coming from another Nexus SDK
+
+The field names differ, so line them up before copying a base URL across — the
+two-URL split here is one field in the TypeScript client:
+
+| Surface | Python | TypeScript | Resolves to (testnet) |
+| --- | --- | --- | --- |
+| Direct `/api/v1` service | `direct_base_url` (host root; the `/api/v1` prefix is added per request) | `baseUrl` (prefix included in the base) | `https://exchange.nexus.xyz/api/v1` |
+| Legacy `/api/exchange` gateway | `base_url` | *not modelled* | `https://exchange.nexus.xyz/api/exchange` |
+
+So Python's `base_url` and TypeScript's `baseUrl` are **not** the same field
+despite the name, while `direct_base_url` plus the prefix and `baseUrl` are
+byte-identical. Copying a Python `base_url` into `baseUrl` is the mistake both
+SDKs now reject.
 
 ## Authentication
 

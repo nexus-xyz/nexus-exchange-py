@@ -22,6 +22,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`direct_base_url` on `Client`.** Targets a deploy that keeps the
   gateway/direct split, which a single `base_url` collapses. This is what the
   retired `beta` channel becomes.
+- **A `/api/exchange` base reaching the direct surface is now rejected at
+  construction.** The direct `/api/v1` service is served at the host root, so a
+  gateway base would send *and HMAC-sign* `/api/exchange/api/v1/orders` — a 404
+  that reads as an auth failure. Since `base_url` alone covers both surfaces,
+  the likeliest way in was copying the first line of the `beta` migration, or a
+  `baseUrl` from the TypeScript SDK, where that name means the *direct* base.
+  Pass `direct_base_url` alongside it; `base_url` itself may still be a gateway
+  URL, as the network defaults are.
 
 - **Portfolio-parity endpoints and fields (ENG-6459).** Surfaces the
   portfolio-parity additions from Exchange API v0.7.2:

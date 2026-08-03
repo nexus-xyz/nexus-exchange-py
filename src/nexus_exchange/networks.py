@@ -92,11 +92,21 @@ class NetworkConfig:
     #: published target is not lost; :attr:`base_url` is what actually gets used.
     published_rest_base: str
 
-    #: WebSocket base for public market data (``/stream``).
+    #: The spec's WebSocket base for public market data (``/stream``).
+    #:
+    #: Informational, on the same terms as :attr:`published_rest_base`: these are
+    #: the durable per-network hosts, and the hosted ones do **not resolve yet**
+    #: (ENG-8155). This SDK ships no WebSocket client, so nothing here is dialled
+    #: on your behalf — the value is published so it lives in one place, not
+    #: because it can be connected to today. Both hosted entries are unreachable,
+    #: mainnet included, which is why it is not ``None`` the way its REST bases
+    #: are: there is no reachable predecessor to prefer, so there is no choice
+    #: being hidden.
     ws_market_data_url: str
 
-    #: WebSocket base for the authenticated stream (``/ws``), which takes a token
-    #: minted over REST by ``POST /ws-tokens``.
+    #: The spec's WebSocket base for the authenticated stream (``/ws``), which
+    #: takes a token minted over REST by ``POST /ws-tokens``. Informational and
+    #: not yet resolvable — see :attr:`ws_market_data_url`.
     ws_authenticated_url: str
 
     #: EIP-712 domain for this network.
@@ -121,6 +131,10 @@ class NetworkConfig:
 # nexus.xyz` is testnet, so there is nothing to fall back to and nothing safe to
 # invent. Its bases are None, and the client says so plainly instead of
 # resolving to a host that would quietly be the wrong network.
+#
+# The WebSocket bases are the spec's values as published and are not reachable
+# yet either (there is no legacy WS base to keep using, and no WS client here to
+# use one). They are recorded, not dialled — see `NetworkConfig`.
 _CONFIGS: Mapping[str, NetworkConfig] = MappingProxyType(
     {
         "mainnet": NetworkConfig(

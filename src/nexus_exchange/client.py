@@ -16,7 +16,7 @@ import time
 from decimal import Decimal
 from importlib import metadata
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
 
@@ -202,8 +202,12 @@ class Client:
     the legacy ``/api/exchange`` gateway (:attr:`Network.base_url`). A custom
     ``base_url`` overrides *both* unless ``direct_base_url`` is also given, so on
     its own it must point at the service root (e.g. ``http://localhost:9090``),
-    not a ``/api/exchange`` gateway URL. Pass both to target a deploy that keeps
-    the split — this is how the retired ``beta`` channel is reached now::
+    not a ``/api/exchange`` gateway URL — that case is rejected at construction
+    rather than left to sign a wrong path. Note this makes ``base_url`` a
+    different field from the TypeScript SDK's similarly-named ``baseUrl``, which
+    is the *direct* base with the prefix already in it; ``direct_base_url`` is its
+    counterpart here. Pass both to target a deploy that keeps the split — this is
+    how the retired ``beta`` channel is reached now::
 
         Client(
             base_url="https://beta.exchange.nexus.xyz/api/exchange",
@@ -244,6 +248,9 @@ class Client:
             network.direct_base_url,
             "direct_base_url",
         )
+        # The direct surface is never under the gateway prefix, and getting it
+        # wrong is silent: the bad path would be signed as well as sent.
+        self._reject_gateway_direct_base(self._direct_base_url)
         self._api_key = api_key
         self._api_secret = api_secret
         # Spec tag advertised on every request. Defaults to the tag the package
@@ -290,6 +297,47 @@ class Client:
         if not base:
             raise ValueError(f"{param} must be a non-empty URL")
         return base
+
+    @staticmethod
+    def _reject_gateway_direct_base(base: str) -> None:
+        """Refuse a legacy ``/api/exchange`` base for the direct surface.
+
+        The direct service is served at the *host root* and this client appends
+        :data:`API_V1_PREFIX` itself, so a gateway base would produce
+        ``/api/exchange/api/v1/orders`` — a 404 whose HMAC signature is over that
+        same wrong path, which reads as an auth failure rather than a
+        misconfiguration. Nothing is served under both prefixes, so there is no
+        deploy for which this is right.
+
+        Worth a guard and not just the docs, because ``base_url`` alone falls
+        back to covering both surfaces, and the one value a caller is most likely
+        to have on hand *is* a gateway base: it is this SDK's own ``base_url``
+        default, and the first line of the retired-``beta`` migration. The sibling
+        SDKs meet the same paste from the other side — the TypeScript client
+        rejects a gateway base outright, and the MCP server strips the prefix
+        defensively — so it demonstrably happens.
+
+        Raises rather than stripping: this base is where signed requests go, and
+        silently retargeting them is not this SDK's call to make.
+        """
+        # Match the path segment pair `api/exchange` rather than a substring, so a
+        # host or a query happening to contain the words is not mistaken for it.
+        segments = [s for s in urlsplit(base).path.split("/") if s]
+        is_gateway = any(
+            seg == "exchange" and segments[i - 1] == "api"
+            for i, seg in enumerate(segments)
+            if i > 0
+        )
+        if not is_gateway:
+            return
+        host_root = base[: base.index("/api/exchange")] if "/api/exchange" in base else base
+        raise ValueError(
+            f"direct_base_url must not point at the legacy '/api/exchange' gateway "
+            f"(got {base!r}): the direct {API_V1_PREFIX} surface is served at the host "
+            f"root, so this would send — and sign — '{urlsplit(base).path}{API_V1_PREFIX}/…'. "
+            f"Pass direct_base_url={host_root!r} alongside base_url to target a deploy "
+            f"that keeps the gateway/direct split."
+        )
 
     # -- lifecycle --------------------------------------------------------
     def close(self) -> None:

@@ -53,6 +53,15 @@ class TestHostMap:
             assert network.ws_authenticated_url.endswith("/ws")
             assert network.ws_market_data_url.startswith(("wss://", "ws://"))
 
+    def test_ws_bases_are_the_spec_durable_hosts_not_the_legacy_one(self) -> None:
+        # These mirror `x-nexus-networks` verbatim rather than tracking whatever
+        # is reachable today: there is no legacy WS base to keep using, and no WS
+        # client here to dial one. Documented as informational for that reason.
+        assert Network.TESTNET.ws_market_data_url == "wss://api.testnet.nexus.xyz/stream"
+        assert Network.MAINNET.ws_authenticated_url == "wss://api.nexus.xyz/ws"
+        for network in Network:
+            assert "exchange.nexus.xyz" not in network.ws_market_data_url
+
     def test_funds_and_faucet_semantics(self) -> None:
         assert Network.MAINNET.real_funds is True
         assert Network.MAINNET.has_faucet is False
@@ -111,6 +120,40 @@ class TestClientTargeting:
         with Client(Network.LOCAL, base_url="http://127.0.0.1:8080/") as client:
             assert client._base_url == "http://127.0.0.1:8080"
             assert client._direct_base_url == "http://127.0.0.1:8080"
+
+    def test_a_lone_gateway_base_url_is_refused(self) -> None:
+        # The half-copied beta migration, and the value most likely to be on
+        # hand. Falling back to it for the direct surface would send *and sign*
+        # /api/exchange/api/v1/orders — a 404 that reads as an auth failure.
+        with pytest.raises(ValueError, match="must not point at the legacy"):
+            Client(base_url="https://beta.exchange.nexus.xyz/api/exchange")
+
+    def test_the_gateway_refusal_names_the_host_root_to_pass(self) -> None:
+        with pytest.raises(ValueError) as exc:
+            Client(base_url="https://beta.exchange.nexus.xyz/api/exchange")
+        assert "'https://beta.exchange.nexus.xyz'" in str(exc.value)
+
+    def test_an_explicit_gateway_direct_base_is_refused_too(self) -> None:
+        # Nothing serves /api/v1 under the gateway prefix, so there is no deploy
+        # for which this is the right value.
+        with pytest.raises(ValueError, match="must not point at the legacy"):
+            Client(
+                base_url="https://beta.exchange.nexus.xyz/api/exchange",
+                direct_base_url="https://beta.exchange.nexus.xyz/api/exchange/",
+            )
+
+    def test_the_default_gateway_base_url_is_not_caught_by_the_guard(self) -> None:
+        # The guard covers the direct surface only. Testnet's own base_url is a
+        # gateway URL, and must stay one.
+        with Client() as client:
+            assert client._base_url == "https://exchange.nexus.xyz/api/exchange"
+            assert client._direct_base_url == "https://exchange.nexus.xyz"
+
+    def test_a_host_containing_the_word_exchange_is_not_a_gateway(self) -> None:
+        # The check is on path segments, so `exchange.nexus.xyz` and a path like
+        # /exchange are both fine — only the `api/exchange` pair is refused.
+        with Client(base_url="https://exchange.nexus.xyz/exchange") as client:
+            assert client._direct_base_url == "https://exchange.nexus.xyz/exchange"
 
     def test_blank_override_falls_back_to_the_network_default(self) -> None:
         # Matches the old `base_url or network.base_url` behaviour, and how a
