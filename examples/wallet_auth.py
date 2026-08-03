@@ -19,6 +19,11 @@ from nexus_exchange import Client, EthSigner, Network
 # real key; load it from your own secret store.
 WALLET_PRIVATE_KEY = "0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 AGENT_ADDRESS = "0x1234567890abcdef1234567890abcdef12345678"
+# The EIP-712 domain chain id for the LOCAL network this example targets. Do not
+# copy this to a hosted network: the signing domain is per-network and
+# server-authoritative, so read `signing_domain.chain_id` from the edge's
+# /metadata for the network you are on. A wrong domain either fails verification
+# or produces a signature that is valid on a network you did not intend.
 CHAIN_ID = 393
 
 

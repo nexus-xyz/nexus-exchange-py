@@ -9,6 +9,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **The network axis `{Mainnet, Testnet, Local}` (ENG-6454).** `Network` now
+  names a *network* — which chain, and whose money — instead of a release
+  channel, and each member bundles its whole config in one frozen
+  `NetworkConfig`: both REST bases, the market-data and authenticated
+  **WebSocket bases** (previously unavailable for hosted environments at all),
+  whether the network has a faucet, whether it moves **real funds**, and its
+  EIP-712 `SigningDomain`. The host map is spelled out with mainnet as a named
+  case — `api.nexus.xyz`, never `api.mainnet.nexus.xyz` — because interpolating
+  the network name resolves for every environment that can be tested and breaks
+  only on real funds. Mirrors the spec's `x-nexus-networks` (ENG-6442).
+- **`direct_base_url` on `Client`.** Targets a deploy that keeps the
+  gateway/direct split, which a single `base_url` collapses. This is what the
+  retired `beta` channel becomes.
+- **A `/api/exchange` base reaching the direct surface is now rejected at
+  construction.** The direct `/api/v1` service is served at the host root, so a
+  gateway base would send *and HMAC-sign* `/api/exchange/api/v1/orders` — a 404
+  that reads as an auth failure. Since `base_url` alone covers both surfaces,
+  the likeliest way in was copying the first line of the `beta` migration, or a
+  `baseUrl` from the TypeScript SDK, where that name means the *direct* base.
+  Pass `direct_base_url` alongside it; `base_url` itself may still be a gateway
+  URL, as the network defaults are.
+
 - **Portfolio-parity endpoints and fields (ENG-6459).** Surfaces the
   portfolio-parity additions from Exchange API v0.7.2:
   - `fetch_account_state` (`GET /api/v1/account/state`) — the consolidated
@@ -99,6 +121,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `Network.STABLE` and `Network.BETA` are removed (ENG-6454).** They
+  were release channels, not networks, and the old enum had no way to name
+  mainnet at all.
+  - `Network.STABLE` → **`Network.TESTNET`**, which is also the new default for
+    `Client` and `NexusExchange`. The targets are byte-identical — the legacy
+    `https://exchange.nexus.xyz/api/exchange` gateway serves testnet — so code
+    that relied on the default keeps hitting exactly the same URLs. Defaulting
+    to play funds is deliberate: real funds should never be one keystroke away.
+  - `Network.BETA` → an explicit override,
+    `Client(base_url="https://beta.exchange.nexus.xyz/api/exchange",
+    direct_base_url="https://beta.exchange.nexus.xyz")`.
+  - Both retired names raise a `ValueError` carrying their migration, rather
+    than resolving to a network that merely looks right. Any other unrecognized
+    identifier is refused too: an unknown network is treated as real funds.
+- **`Client(Network.MAINNET)` raises without an explicit `base_url`.** The
+  mainnet host is published but not yet resolvable (DNS is separate infra), and
+  the SDK will neither invent a real-funds target nor fall back to another
+  network's. Failing at construction beats failing mid-order. Filling the
+  default in once DNS lands is additive.
+- **`register_agent` refuses to sign without a chain id.** The EIP-712 domain is
+  per-network and server-authoritative; `None`, `0` and `True` (an `int`
+  subclass that would otherwise sign under Ethereum Mainnet's chain id 1) now
+  raise `AuthError`. The static map publishes `chain_id=None`, meaning *not
+  published* — read the live value from the edge's `/metadata`. Signing under a
+  guessed domain either fails verification or, worse, yields a signature valid
+  on a different network.
+- **`claim_credit` refuses on a faucet-less network.** The spec marks
+  `POST /account/credit` testnet/local-only, so a mainnet call now fails locally
+  instead of spending a signed request against a real-funds host.
 - **Corrected `endpoints.txt`: five bridge operations were listed without their
   `/api/v1` prefix (ENG-7960).** `GET|POST /bridge/deposit-addresses`,
   `GET /bridge/assets`, `GET /bridge/deposits` and `GET /bridge/deposits/{id}` are

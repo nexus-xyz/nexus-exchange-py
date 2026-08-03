@@ -32,3 +32,17 @@ The Python SDK for the Nexus Exchange API.
   `direct=True` — the prefix is part of the operation, and the spec lists the two
   surfaces separately.
 - Pre-1.0: bump minor on breaking changes, patch on features and fixes.
+
+## Networks
+
+- `src/nexus_exchange/networks.py` is the **only** place hosts live. Add or
+  re-decide a target there, never inline in a client or a script.
+- **Never build a host by interpolating the network name.** Mainnet is
+  `api.nexus.xyz`, not `api.mainnet.nexus.xyz`; a template resolves everywhere
+  testable and breaks only on real funds.
+- Branch on `network.real_funds` / `network.has_faucet`, never on the host string.
+- Absence beats a guess: an unpublished target is `None` and the client refuses,
+  rather than defaulting to something that would silently be another network.
+- Credentials are per-network and never portable. One client, one network.
+- Never default a signing `chain_id`. It is server-authoritative (`/metadata`);
+  no value means refuse to sign.
