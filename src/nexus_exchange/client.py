@@ -15,16 +15,16 @@ import json
 import time
 from collections.abc import Iterator
 from decimal import Decimal
-from enum import Enum
 from importlib import metadata
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
 
 from ._parse import to_dict_list
 from .auth import AgentRegistered, AgentRegistration, EthSigner, LoginResponse
 from .errors import ApiError, MissingCredentialsError, TransportError
+from .networks import Network, NetworkConfig, SigningDomain
 from .pagination import NEXT_CURSOR_HEADER, Page, iter_items
 from .types import (
     AccountFees,
@@ -67,9 +67,14 @@ from .types import (
     WsToken,
 )
 
+# `Network` and friends live in networks.py (one place for the host map, per
+# ENG-6442) and are re-exported here so `from nexus_exchange.client import
+# Network` keeps working.
 __all__ = [
     "Client",
     "Network",
+    "NetworkConfig",
+    "SigningDomain",
     "DEFAULT_USER_AGENT",
     "DEFAULT_API_VERSION",
     "FILLS_LIMIT_MAX",
@@ -232,34 +237,6 @@ def _query(**params: Any) -> str:
     return urlencode(items)
 
 
-class Network(str, Enum):
-    """Which Nexus Exchange environment to target."""
-
-    STABLE = "stable"
-    BETA = "beta"
-    LOCAL = "local"
-
-    @property
-    def base_url(self) -> str:
-        """Legacy gateway base (``/api/exchange``) for routes not yet migrated
-        to the direct ``/api/v1`` service."""
-        return {
-            Network.STABLE: "https://exchange.nexus.xyz/api/exchange",
-            Network.BETA: "https://beta.exchange.nexus.xyz/api/exchange",
-            Network.LOCAL: "http://localhost:9090",
-        }[self]
-
-    @property
-    def direct_base_url(self) -> str:
-        """Direct-service base for the ``/api/v1`` surface — the host root, with
-        no ``/api/exchange`` gateway prefix (see :data:`API_V1_PREFIX`)."""
-        return {
-            Network.STABLE: "https://exchange.nexus.xyz",
-            Network.BETA: "https://beta.exchange.nexus.xyz",
-            Network.LOCAL: "http://localhost:9090",
-        }[self]
-
-
 class Client:
     """Client for the Nexus Exchange REST API.
 
@@ -268,12 +245,29 @@ class Client:
     signed calls to the *site* account; for per-account auth point ``base_url``
     at a direct gateway (e.g. ``Network.LOCAL``). See the README.
 
+    ``network`` selects which network — whose money — the client talks to, and
+    defaults to :attr:`Network.TESTNET` (play funds). One client targets exactly
+    one network: credentials are minted per network and are invalid on any
+    other, so never reuse a key, signature or agent registration across clients
+    pointing at different networks.
+
     Routing targets two bases. The migrated market-data and account/trading
     surface is served directly by its backend service under ``/api/v1`` at the
     host root (:attr:`Network.direct_base_url`); routes not yet migrated stay on
     the legacy ``/api/exchange`` gateway (:attr:`Network.base_url`). A custom
-    ``base_url`` overrides *both* and must therefore point at the service root
-    (e.g. ``http://localhost:9090``), not a ``/api/exchange`` gateway URL.
+    ``base_url`` overrides *both* unless ``direct_base_url`` is also given, so on
+    its own it must point at the service root (e.g. ``http://localhost:9090``),
+    not a ``/api/exchange`` gateway URL — that case is rejected at construction
+    rather than left to sign a wrong path. Note this makes ``base_url`` a
+    different field from the TypeScript SDK's similarly-named ``baseUrl``, which
+    is the *direct* base with the prefix already in it; ``direct_base_url`` is its
+    counterpart here. Pass both to target a deploy that keeps the split — this is
+    how the retired ``beta`` channel is reached now::
+
+        Client(
+            base_url="https://beta.exchange.nexus.xyz/api/exchange",
+            direct_base_url="https://beta.exchange.nexus.xyz",
+        )
 
     Usable as a context manager::
 
@@ -283,20 +277,35 @@ class Client:
 
     def __init__(
         self,
-        network: Network = Network.STABLE,
+        network: Network = Network.TESTNET,
         *,
         base_url: str | None = None,
+        direct_base_url: str | None = None,
         api_key: str | None = None,
         api_secret: str | None = None,
         api_version: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.Client | None = None,
     ) -> None:
-        self._base_url = (base_url or network.base_url).rstrip("/")
-        # Direct-service base for the /api/v1 surface. A caller-supplied base_url
-        # overrides both bases (the local/direct-gateway case); otherwise each
-        # network supplies its own gateway and direct roots.
-        self._direct_base_url = (base_url or network.direct_base_url).rstrip("/")
+        # Normalize through the enum so a bare string ("mainnet") is accepted and
+        # anything unrecognized — including the retired "stable"/"beta" channels
+        # — raises here rather than silently targeting the wrong network.
+        network = Network(network)
+        self._network = network
+        # A caller-supplied base_url overrides the network default; direct_base_url
+        # falls back to base_url so a single override still covers both surfaces
+        # (the local/direct-gateway case) while a deploy that keeps the gateway
+        # split can set them apart.
+        self._base_url = self._resolve_base(network, base_url, network.base_url, "base_url")
+        self._direct_base_url = self._resolve_base(
+            network,
+            direct_base_url or base_url,
+            network.direct_base_url,
+            "direct_base_url",
+        )
+        # The direct surface is never under the gateway prefix, and getting it
+        # wrong is silent: the bad path would be signed as well as sent.
+        self._reject_gateway_direct_base(self._direct_base_url)
         self._api_key = api_key
         self._api_secret = api_secret
         # Spec tag advertised on every request. Defaults to the tag the package
@@ -314,6 +323,77 @@ class Client:
         self._owns_http = http_client is None
         self._http = http_client or httpx.Client(timeout=timeout)
 
+    @staticmethod
+    def _resolve_base(
+        network: Network, override: str | None, default: str | None, param: str
+    ) -> str:
+        """Pick the base URL for one surface, or explain why there isn't one.
+
+        A network whose default is ``None`` has no published, reachable target
+        yet — mainnet today. Rather than invent a host, or fall back to another
+        network's (which for mainnet would mean sending real-funds traffic to
+        testnet), this refuses at construction time with the override to pass.
+        Failing here beats failing at request time, after an order is built.
+
+        A blank override falls back to the network default, matching how a blank
+        ``api_version`` is treated. An override that survives stripping but is
+        empty once trailing slashes go (``"/"``) is rejected outright: a client
+        with an empty base silently issues relative requests.
+        """
+        base = (override or "").strip() or default
+        if base is None:
+            raise ValueError(
+                f"{network.label} has no default {param} yet: its host "
+                f"({network.config.published_rest_base}) is published but not "
+                f"resolvable, so this SDK will not guess one for a real-funds "
+                f"network. Pass {param}=... explicitly to target it."
+            )
+        base = base.rstrip("/")
+        if not base:
+            raise ValueError(f"{param} must be a non-empty URL")
+        return base
+
+    @staticmethod
+    def _reject_gateway_direct_base(base: str) -> None:
+        """Refuse a legacy ``/api/exchange`` base for the direct surface.
+
+        The direct service is served at the *host root* and this client appends
+        :data:`API_V1_PREFIX` itself, so a gateway base would produce
+        ``/api/exchange/api/v1/orders`` — a 404 whose HMAC signature is over that
+        same wrong path, which reads as an auth failure rather than a
+        misconfiguration. Nothing is served under both prefixes, so there is no
+        deploy for which this is right.
+
+        Worth a guard and not just the docs, because ``base_url`` alone falls
+        back to covering both surfaces, and the one value a caller is most likely
+        to have on hand *is* a gateway base: it is this SDK's own ``base_url``
+        default, and the first line of the retired-``beta`` migration. The sibling
+        SDKs meet the same paste from the other side — the TypeScript client
+        rejects a gateway base outright, and the MCP server strips the prefix
+        defensively — so it demonstrably happens.
+
+        Raises rather than stripping: this base is where signed requests go, and
+        silently retargeting them is not this SDK's call to make.
+        """
+        # Match the path segment pair `api/exchange` rather than a substring, so a
+        # host or a query happening to contain the words is not mistaken for it.
+        segments = [s for s in urlsplit(base).path.split("/") if s]
+        is_gateway = any(
+            seg == "exchange" and segments[i - 1] == "api"
+            for i, seg in enumerate(segments)
+            if i > 0
+        )
+        if not is_gateway:
+            return
+        host_root = base[: base.index("/api/exchange")] if "/api/exchange" in base else base
+        raise ValueError(
+            f"direct_base_url must not point at the legacy '/api/exchange' gateway "
+            f"(got {base!r}): the direct {API_V1_PREFIX} surface is served at the host "
+            f"root, so this would send — and sign — '{urlsplit(base).path}{API_V1_PREFIX}/…'. "
+            f"Pass direct_base_url={host_root!r} alongside base_url to target a deploy "
+            f"that keeps the gateway/direct split."
+        )
+
     # -- lifecycle --------------------------------------------------------
     def close(self) -> None:
         if self._owns_http:
@@ -328,6 +408,12 @@ class Client:
     @property
     def has_credentials(self) -> bool:
         return bool(self._api_key and self._api_secret)
+
+    @property
+    def network(self) -> Network:
+        """The network this client targets. Fixed for the client's lifetime —
+        credentials are per-network, so switching means a new client."""
+        return self._network
 
     # -- public market data ----------------------------------------------
     # Most market-data reads are served by the direct /api/v1 service
@@ -755,7 +841,19 @@ class Client:
 
         Omit ``amount`` to claim the full remaining daily allowance. Requires
         credentials.
+
+        Testnet and local only — the spec marks this operation
+        ``x-nexus-network-availability: [testnet, local]``, and mainnet has no
+        faucet because its collateral is USDX bridged from Ethereum Mainnet.
+        Raises :class:`ValueError` on a faucet-less network rather than spending
+        a signed request against a real-funds host.
         """
+        if not self._network.has_faucet:
+            raise ValueError(
+                f"{self._network.label} has no faucet: `claim_credit` mints synthetic "
+                f"funds and is testnet/local only. Real collateral is bridged — see "
+                f"`deposit`."
+            )
         body = {} if amount is None else {"amount": str(amount)}
         data = self._request("POST", "/account/credit", body=body, signed=True, direct=True)
         return CreditResult.from_dict(data if isinstance(data, dict) else {})

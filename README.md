@@ -68,6 +68,61 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
 Anything not listed there is not wrapped yet — contributions welcome.
 
+### Networks
+
+`Network` is the **network** axis — which chain, and whose money:
+
+| `Network` | Funds | Faucet | Notes |
+| --- | --- | --- | --- |
+| `Network.TESTNET` | Play (synthetic USDX) | Yes | **Default.** The safe target for integration work and CI. |
+| `Network.MAINNET` | **Real** | No | Collateral is USDX bridged from Ethereum Mainnet. |
+| `Network.LOCAL` | Play | Yes | A locally run indexer. Not a public network. |
+
+Each member bundles its config — REST bases, both WebSocket bases, funds
+semantics and the EIP-712 signing domain:
+
+```python
+from nexus_exchange import Client, Network
+
+Network.TESTNET.ws_market_data_url  # 'wss://api.testnet.nexus.xyz/stream'
+Network.TESTNET.ws_authenticated_url  # 'wss://api.testnet.nexus.xyz/ws'
+Network.MAINNET.real_funds  # True — branch on this, never on the host string
+
+with Client(Network.TESTNET) as client:
+    ...
+```
+
+The two WebSocket bases and `published_rest_base` are the spec's **durable**
+per-network values, recorded here so they live in one place. The hosted ones do
+not resolve yet (DNS is ENG-8155), and this SDK ships no WebSocket client, so
+treat them as published targets rather than something to connect to today. What
+the client actually sends to is `base_url` / `direct_base_url`.
+
+Three things worth knowing before you pick one:
+
+- **Mainnet has no default base URL yet.** Its host (`api.nexus.xyz`) is
+  published but DNS is not live, so `Client(Network.MAINNET)` raises rather than
+  guessing a real-funds target or quietly falling back to testnet. Pass
+  `base_url=…` explicitly to target it.
+- **Credentials never cross networks.** Session tokens, HMAC keys and agent keys
+  are minted per network and are invalid on any other. Switching network means a
+  new client *and* new credentials — never carry a signature, nonce or agent
+  registration across.
+- **The signing domain's `chain_id` is not published statically.** Read it from
+  the edge's `/metadata` for the network you are on. `register_agent` refuses to
+  sign without one rather than defaulting: a wrong domain either fails
+  verification or produces a signature valid on a *different* network.
+
+The retired `stable` / `beta` release channels were never networks. `stable`
+became `Network.TESTNET` (same target); `beta` is now an explicit override:
+
+```python
+Client(
+    base_url="https://beta.exchange.nexus.xyz/api/exchange",
+    direct_base_url="https://beta.exchange.nexus.xyz",
+)
+```
+
 ### Routing: direct `/api/v1` service vs. legacy gateway
 
 As the REST gateway is retired (ENG-4740), backend services expose their own
@@ -78,8 +133,26 @@ the HMAC signature covers the full path (e.g. `/api/v1/orders`). Routes with no
 `/api/v1` equivalent yet — `GET /markets`, `/health`, ADL history, `GET
 /orders/{id}`, deposits, keys/agents, WS tokens and admin tiers — stay on the
 legacy gateway. This split is internal; method names and signatures are
-unchanged. A custom `base_url` overrides both bases, so point it at the service
-root (e.g. `http://localhost:9090`), not a `/api/exchange` URL.
+unchanged. A custom `base_url` overrides both bases, so on its own point it at
+the service root (e.g. `http://localhost:9090`), not a `/api/exchange` URL — a
+gateway base reaching the direct surface is rejected at construction, since it
+would send *and HMAC-sign* `/api/exchange/api/v1/…`. Pass `direct_base_url`
+alongside it to target a deploy that keeps the split.
+
+#### If you are coming from another Nexus SDK
+
+The field names differ, so line them up before copying a base URL across — the
+two-URL split here is one field in the TypeScript client:
+
+| Surface | Python | TypeScript | Resolves to (testnet) |
+| --- | --- | --- | --- |
+| Direct `/api/v1` service | `direct_base_url` (host root; the `/api/v1` prefix is added per request) | `baseUrl` (prefix included in the base) | `https://exchange.nexus.xyz/api/v1` |
+| Legacy `/api/exchange` gateway | `base_url` | *not modelled* | `https://exchange.nexus.xyz/api/exchange` |
+
+So Python's `base_url` and TypeScript's `baseUrl` are **not** the same field
+despite the name, while `direct_base_url` plus the prefix and `baseUrl` are
+byte-identical. Copying a Python `base_url` into `baseUrl` is the mistake both
+SDKs now reject.
 
 ## Authentication
 
@@ -275,10 +348,22 @@ Currently targets Exchange API spec **`v0.7.2`**.
 The pinned version lives in [`.api-version`](./.api-version); the spec itself is
 published by
 [`nexus-xyz/nexus-exchange-api`](https://github.com/nexus-xyz/nexus-exchange-api).
-This repo does not vendor a copy — the `drift` CI check fetches the pinned
-release to detect drift, and the scheduled `api-version-sync` workflow opens a PR
-when a newer spec releases. The line above is bot-managed; the table below is
-maintained by hand when an SDK release ships a new pin.
+This repo does not vendor a copy. Two CI checks keep the pin honest, answering
+different questions:
+
+- **`spec-drift`** — does the SDK still match the spec it *pins*? It fetches the
+  pinned release and enforces, both ways, that every operation in
+  [`endpoints.txt`](./endpoints.txt) exists in that spec and that the operations
+  the client code requests are exactly that list.
+- **`drift`** — is the pin still the *latest* release? It compares `.api-version`
+  against the spec repo's newest tag.
+
+The `spec-autobump` workflow opens the bump PR when a newer spec releases,
+labelling it breaking or non-breaking from an
+[oasdiff](https://github.com/oasdiff/oasdiff) classification; `spec-drift` runs on
+that PR too, so a bump that would require SDK changes cannot land quietly. The
+line above is bot-managed; the table below is maintained by hand when an SDK
+release ships a new pin.
 
 Every request advertises the pinned tag in an `X-Nexus-Api-Version` header (and
 identifies itself with a `User-Agent: nexus-exchange-py/<version>`). Override the
@@ -311,8 +396,8 @@ For an opt-in round-trip against a **live** gateway (read-only, unauthenticated;
 not run in CI), use the smoke script:
 
 ```bash
-python scripts/smoke.py                  # stable public gateway
-python scripts/smoke.py --network beta
+python scripts/smoke.py                     # testnet (default; play funds)
+python scripts/smoke.py --network local
 python scripts/smoke.py --base-url http://localhost:9090
 ```
 
