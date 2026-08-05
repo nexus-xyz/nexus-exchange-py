@@ -12,6 +12,13 @@ updates:
       # Collapse routine patch/minor bumps into one PR to cut review noise;
       # majors still open individually so breaking changes get scrutiny.
       pip-minor:
+        # `ruff` is excluded so its bump always arrives as its own PR: raising
+        # the bound in pyproject.toml's `dev` extra can require reformatting the
+        # tree, and that reformat has to be the diff under review rather than a
+        # surprise folded into a grouped bump. It matches no other group in this
+        # ecosystem, so dependabot opens it as an ungrouped PR.
+        exclude-patterns:
+          - "ruff"
         update-types:
           - minor
           - patch

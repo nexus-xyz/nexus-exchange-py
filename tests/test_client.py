@@ -7,11 +7,13 @@ from nexus_exchange import ApiError, Client, MissingCredentialsError, Network
 
 
 def test_network_base_urls() -> None:
-    assert Network.STABLE.base_url.startswith("https://")
-    assert Client(Network.LOCAL)._base_url == "http://localhost:9090"
+    # Testnet is the successor to the old `STABLE` channel and keeps its exact
+    # targets: the legacy gateway still serves testnet, and the hosted per-network
+    # host is not resolvable yet.
+    assert Network.TESTNET.base_url == "https://exchange.nexus.xyz/api/exchange"
     # The direct /api/v1 base is the host root — no /api/exchange gateway prefix.
-    assert Network.STABLE.base_url == "https://exchange.nexus.xyz/api/exchange"
-    assert Network.STABLE.direct_base_url == "https://exchange.nexus.xyz"
+    assert Network.TESTNET.direct_base_url == "https://exchange.nexus.xyz"
+    assert Client(Network.LOCAL)._base_url == "http://localhost:9090"
     assert Client(Network.LOCAL)._direct_base_url == "http://localhost:9090"
 
 

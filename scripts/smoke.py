@@ -26,7 +26,10 @@ from nexus_exchange import Client, Network
 
 def run(network: Network, base_url: str | None) -> int:
     target = base_url or network.base_url
-    print(f"smoke: hitting {target}")
+    print(
+        f"smoke: hitting {target} ({network.label}, "
+        f"{'REAL FUNDS' if network.real_funds else 'play funds'})"
+    )
     with Client(network=network, base_url=base_url) as client:
         markets = client.fetch_markets()
         print(f"  fetch_markets: {len(markets)} markets")
@@ -48,8 +51,8 @@ def main() -> int:
     parser.add_argument(
         "--network",
         choices=[n.value for n in Network],
-        default=Network.STABLE.value,
-        help="named environment to target (default: stable)",
+        default=Network.TESTNET.value,
+        help="network to target (default: testnet — play funds)",
     )
     parser.add_argument(
         "--base-url",
