@@ -29,7 +29,6 @@ from .client import (
     PORTFOLIO_LIMIT_MAX,
     TRADES_LIMIT_MAX,
     Client,
-    Network,
     __version__,
 )
 from .errors import (
@@ -40,6 +39,11 @@ from .errors import (
     NexusExchangeError,
     PaginationError,
     TransportError,
+)
+from .networks import (
+    Network,
+    NetworkConfig,
+    SigningDomain,
 )
 from .pagination import Page, iter_items, iter_pages
 from .types import (
@@ -99,6 +103,8 @@ __all__ = [
     "BridgeDepositAddress",
     "Client",
     "Network",
+    "NetworkConfig",
+    "SigningDomain",
     "Market",
     "MarketSummary",
     "MarketStatus",

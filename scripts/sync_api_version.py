@@ -5,11 +5,16 @@ spec.
 The SDK targets a specific released spec version, pinned in `.api-version`, and
 states it in a bot-managed line in README.md. Nothing previously advanced that
 pin when the api repo cut a new release, so the SDK silently fell behind. This
-script (driven by `.github/workflows/api-version-sync.yml`) is the forward
+script (driven by `.github/workflows/spec-autobump.yml`) is the forward
 counterpart to the drift check:
 
   * the drift check        — does the SDK still match the *pinned* spec? (drift)
   * sync_api_version.py    — has a *newer* spec released than we pin? (lag)
+
+Both halves now exist: `scripts/check_spec_drift.py` (run by the `spec-drift` job
+on every PR, including the one this script's caller opens) answers the first, and
+this script answers the second. For a long stretch only the second was built here,
+so the bot proposed pin advances that nothing verified — see ENG-7960.
 
 What it does NOT do: edit the historical SDK<->spec compatibility table in the
 README. That table records which *shipped* SDK versions targeted which spec, and

@@ -204,6 +204,32 @@ def _address_word(addr: bytes) -> bytes:
     return b"\x00" * 12 + addr
 
 
+def _require_chain_id(chain_id: object) -> None:
+    """Refuse to sign without a real, positive chain id.
+
+    Mandated by the spec's ``SigningDomain``: a null or absent ``chain_id``
+    means the server has not published one, *not* zero, and is not an invitation
+    to fall back to a default or to a value cached from another network. The
+    domain is the only thing making a signature network-specific, so signing
+    under a guessed one either fails verification or — the case worth blocking —
+    yields a signature that is valid somewhere it was never meant to be.
+
+    ``bool`` is rejected explicitly: it is an ``int`` subclass, so ``True``
+    would otherwise sign under chain id 1 (Ethereum Mainnet).
+    """
+    if chain_id is None:
+        raise AuthError(
+            "chain_id is required to sign: the signing domain is per-network and "
+            "server-authoritative. Read `signing_domain.chain_id` from the edge's "
+            "/metadata for the network you are on; do not guess or reuse another "
+            "network's value."
+        )
+    if isinstance(chain_id, bool) or not isinstance(chain_id, int):
+        raise AuthError("chain_id must be an integer")
+    if chain_id < 1:
+        raise AuthError(f"chain_id must be a positive integer (got {chain_id})")
+
+
 def _register_agent_digest(agent: bytes, expires_at: int, nonce: int, chain_id: int) -> bytes:
     """EIP-712 digest for ``RegisterAgent{agent, expiresAt, nonce}``.
 
@@ -309,7 +335,17 @@ class EthSigner:
         timestamp as a safe starting nonce. ``chain_id`` is the EIP-712 domain
         chain id (the exchange's chain id); it is part of the signed payload, so
         it must match what the server verifies against.
+
+        ``chain_id`` is **per network** and must be the live value for the
+        network you are connected to — read it from the edge's ``/metadata``
+        payload. :attr:`Network.signing_domain
+        <nexus_exchange.Network.signing_domain>` carries ``chain_id=None``
+        because the static map does not publish it, and ``None`` (or ``0``) is
+        refused here rather than signed: a wrong domain either fails
+        verification or produces a signature that is valid on a *different*
+        network. Never reuse a chain id observed on another network.
         """
+        _require_chain_id(chain_id)
         agent_addr = _parse_address(agent)
         digest = _register_agent_digest(agent_addr, expires_at_ms, nonce, chain_id)
         # ``unsafe_sign_hash`` signs a 32-byte prehash directly. It is "unsafe"
