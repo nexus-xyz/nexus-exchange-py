@@ -25,6 +25,7 @@ from nexus_exchange import (
     ORDER_HISTORY_LIMIT_MAX,
     PORTFOLIO_LIMIT_MAX,
     Client,
+    DecodeError,
     Network,
     PaginationError,
 )
@@ -159,7 +160,65 @@ def test_missing_fields_decode_leniently(httpx_mock) -> None:
     with _signed_client() as client:
         assert client.fetch_order_history()[0].id == ""
         assert client.fetch_closed_positions()[0].market_id == ""
-        assert client.fetch_equity_history()[0].timestamp_ms == 0
+        assert client.fetch_equity_history()[0].timestamp_ms is None
+
+
+def test_absent_money_and_timestamps_are_none_not_zero(httpx_mock) -> None:
+    """Absent is not zero, and this test used to assert the opposite.
+
+    It read ``timestamp_ms == 0`` — encoding the very defaulting
+    @Luc-Campos flagged on #47. A zeroed money field is a real, wrong number:
+    an absent ``realized_pnl`` decoding to ``Decimal('0')`` reads as "closed
+    flat", and an absent ``closed_at_ms`` of ``0`` plots at 1970, on the far
+    left of any chart. Neither is distinguishable from a genuine zero.
+    """
+    httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[{"market_id": "BTC-USDX-PERP"}])
+    httpx_mock.add_response(url=EQUITY_HISTORY_URL, json=[{}])
+    with _signed_client() as client:
+        pos = client.fetch_closed_positions()[0]
+        assert pos.realized_pnl is None
+        assert pos.entry_price is None
+        assert pos.size is None
+        assert pos.closed_at_ms is None
+        point = client.fetch_equity_history()[0]
+        assert point.equity is None
+        assert point.timestamp_ms is None
+
+
+def test_absent_and_null_agree(httpx_mock) -> None:
+    """The asymmetry that made the old shape indefensible.
+
+    ``{"realized_pnl": None}`` raised ``DecodeError`` while omitting the key
+    returned ``Decimal('0')`` — two opposite outcomes for the same semantic
+    content, with the loud one landing on the case the spec is most explicit
+    about permitting. Both are ``None`` now.
+    """
+    httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[{"realized_pnl": None}])
+    httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[{}])
+    with _signed_client() as client:
+        explicit_null = client.fetch_closed_positions()[0].realized_pnl
+        absent = client.fetch_closed_positions()[0].realized_pnl
+    assert explicit_null is None
+    assert absent is None
+
+
+def test_a_bool_is_not_a_timestamp(httpx_mock) -> None:
+    # `int(True)` is 1, so the bare `int()` this replaced decoded
+    # `{"closed_at_ms": True}` to a real millisecond value. `opt_int` rejects it
+    # — the trap it was added to close in #43.
+    httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[{"closed_at_ms": True}])
+    with _signed_client() as client:
+        with pytest.raises(DecodeError):
+            client.fetch_closed_positions()
+
+
+def test_a_malformed_money_value_names_its_field(httpx_mock) -> None:
+    # `to_decimal`'s `field` argument was omitted, so a bad value reported
+    # "a decimal field is not a decimal: 'abc'" with no way to tell which.
+    httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[{"realized_pnl": "abc"}])
+    with _signed_client() as client:
+        with pytest.raises(DecodeError, match="realized_pnl"):
+            client.fetch_closed_positions()
 
 
 # -- multi-page traversal ---------------------------------------------------

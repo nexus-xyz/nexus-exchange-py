@@ -497,23 +497,41 @@ class ClosedPosition:
 
     market_id: str
     side: str
-    size: Decimal
-    entry_price: Decimal
-    exit_price: Decimal
-    realized_pnl: Decimal
-    closed_at_ms: int
+    # Optional because the spec says so: `ClosedPosition` declares no `required`
+    # list in v0.7.2, so any of these may legitimately be absent. They were
+    # `Decimal` / `int` with a `.get(field, 0)` default, which fabricated a real
+    # and wrong number - an absent `realized_pnl` decoded to `Decimal('0')`,
+    # reading as "closed flat", and an absent `closed_at_ms` to `0`, which plots
+    # at 1970 on the far left of any chart (@Luc-Campos, review of #47).
+    size: Decimal | None
+    entry_price: Decimal | None
+    exit_price: Decimal | None
+    realized_pnl: Decimal | None
+    closed_at_ms: int | None
     raw: dict[str, Any]
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> ClosedPosition:
+        # `opt_decimal(d.get(k), k)` rather than `to_decimal(d.get(k, 0))`:
+        #   * substituting 0 at the call site routed around `to_decimal`'s own
+        #     guard, whose docstring says required money must not silently
+        #     default to Decimal(0) because that masks a malformed payload;
+        #   * absent and `null` used to disagree - `{"realized_pnl": None}`
+        #     raised while omitting the key returned 0, two opposite outcomes
+        #     for the same semantic content, and the loud one was the case the
+        #     spec is most explicit about permitting;
+        #   * `opt_int` also rejects `bool`, where the bare `int()` decoded
+        #     `{"closed_at_ms": True}` to 1 - the trap `opt_int` exists to close;
+        #   * passing the field name means a bad value reports which field,
+        #     matching `AccountSummary` two classes down.
         return cls(
             market_id=str(d.get("market_id", "")),
             side=str(d.get("side", "")),
-            size=to_decimal(d.get("size", 0)),
-            entry_price=to_decimal(d.get("entry_price", 0)),
-            exit_price=to_decimal(d.get("exit_price", 0)),
-            realized_pnl=to_decimal(d.get("realized_pnl", 0)),
-            closed_at_ms=int(d.get("closed_at_ms", 0)),
+            size=opt_decimal(d.get("size"), "size"),
+            entry_price=opt_decimal(d.get("entry_price"), "entry_price"),
+            exit_price=opt_decimal(d.get("exit_price"), "exit_price"),
+            realized_pnl=opt_decimal(d.get("realized_pnl"), "realized_pnl"),
+            closed_at_ms=opt_int(d.get("closed_at_ms"), "closed_at_ms"),
             raw=d,
         )
 
@@ -770,15 +788,18 @@ class EquityPoint:
     payload stays on :attr:`raw` to tell an absent sample field from a real zero.
     """
 
-    timestamp_ms: int
-    equity: Decimal
+    # Optional for the same reason as `ClosedPosition`: `EquityPoint` declares no
+    # `required` list in v0.7.2. A zeroed equity point is worse than an absent
+    # one - it plots.
+    timestamp_ms: int | None
+    equity: Decimal | None
     raw: dict[str, Any]
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> EquityPoint:
         return cls(
-            timestamp_ms=int(d.get("timestamp_ms", 0)),
-            equity=to_decimal(d.get("equity", 0)),
+            timestamp_ms=opt_int(d.get("timestamp_ms"), "timestamp_ms"),
+            equity=opt_decimal(d.get("equity"), "equity"),
             raw=d,
         )
 
