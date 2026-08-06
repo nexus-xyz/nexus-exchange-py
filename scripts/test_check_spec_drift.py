@@ -28,15 +28,23 @@ import unittest
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import check_spec_drift as csd  # noqa: E402
 
-# A minimal client module: the prefix constant the checker reads, plus a `_request`
-# method whose body holds the only httpx call. Test cases append call sites.
+# A minimal client module: the prefix constant the checker reads, plus the real
+# shape of the request path since ENG-8081 — `_send` holds the only httpx call,
+# and `_request` / `_request_page` are the two entry points that funnel into it.
+# Test cases append call sites.
 CLIENT_HEADER = """\
 API_V1_PREFIX = "/api/v1"
 
 
 class Client:
-    def _request(self, method, path, *, query="", body=None, signed=False, direct=False):
+    def _send(self, method, path, *, query="", body=None, signed=False, direct=False):
         return self._http.request(method, f"{path}{query}")
+
+    def _request(self, method, path, *, query="", body=None, signed=False, direct=False):
+        return self._send(method, path, query=query, body=body, signed=signed, direct=direct)
+
+    def _request_page(self, path, *, query="", signed=False, direct=False):
+        return self._send("GET", path, query=query, signed=signed, direct=direct)
 """
 
 
@@ -330,6 +338,51 @@ class TestCodeVersusManifest(unittest.TestCase):
         # `/keys` is fetched straight off the transport, so no `_request` call
         # names it: the bypass is reported, and the manifest line it was meant to
         # satisfy still reads as uncalled.
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/markets")\n'
+                'def sneaky(self):\n    return self._http.get("/keys")\n',
+                "GET /markets\nGET /keys\n",
+                spec_of(("GET", "/markets"), ("GET", "/keys")),
+            ),
+            2,
+        )
+
+    def test_a_page_request_only_endpoint_stays_visible(self):
+        """The regression @Luc-Campos asked for (#46).
+
+        `_request_page` is the second entry point (ENG-8081). Before the checker
+        knew about it, an endpoint reached ONLY through it was invisible to the
+        AST walk: the manifest line read as never-requested, and the operation
+        vanished from the code side of the comparison while still being served.
+        Four of the five paginated endpoints were in that state.
+        """
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request_page("/fills", signed=True)\n',
+                "GET /fills\n",
+                spec_of(("GET", "/fills")),
+            ),
+            0,
+        )
+
+    def test_page_request_resolves_direct_to_the_api_v1_operation(self):
+        # `direct=True` decides the /api/v1 prefix on this entry point too, so a
+        # paginated direct call must resolve the same way `_request` does.
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request_page("/fills", direct=True)\n',
+                "GET /api/v1/fills\n",
+                spec_of(("GET", "/api/v1/fills")),
+            ),
+            0,
+        )
+
+    def test_httpx_call_outside_send_fails_even_inside_request(self):
+        # The sending site is `_send`, not the entry point. A transport call
+        # placed inside `_request` itself is still a bypass now, and saying so
+        # is what keeps "one sender" from decaying into "any entry point may
+        # send".
         self.assertEqual(
             self._errors(
                 'def a(self):\n    self._request("GET", "/markets")\n'

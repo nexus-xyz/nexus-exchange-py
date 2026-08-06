@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Cursor pagination on the five paginated list endpoints (ENG-8081).** Spec
+  v0.7.2 added a `cursor` query parameter and an `X-Next-Cursor` response header
+  to trades, fills, order history, closed positions and equity history. The SDK
+  now threads them: `iter_trades` / `iter_my_trades` and the other `iter_*`
+  helpers walk every page rather than returning the first one and reporting
+  completion. New public surface: `Page`, `iter_pages`, `iter_items` and
+  `NEXT_CURSOR_HEADER` from `nexus_exchange.pagination`, plus `*_page` methods
+  that return one page and its next cursor.
+- **`PaginationError`.** Raised when an endpoint hands back the same
+  `X-Next-Cursor` it was given, so the walk cannot advance. The SDK stops and
+  says so rather than hanging, and rather than stopping quietly — a silent stop
+  is indistinguishable from "that was the last page", which would hand the
+  caller a truncated history it believes is complete.
 - **`/orders/history`, `/positions/closed` and `/account/equity-history`
   (ENG-8082).** Three endpoints the SDK did not reach. Each has a
   `fetch_*` (one page), a `*_page` (page plus next cursor) and an `iter_*`
