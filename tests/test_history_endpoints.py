@@ -362,7 +362,10 @@ def test_repeated_cursor_raises_instead_of_looping(httpx_mock, url: str, walk: s
         url=f"{url}?cursor=stuck", json=[{}], headers={"x-next-cursor": "stuck"}
     )
     with _signed_client() as client:
-        with pytest.raises(PaginationError, match="same pagination cursor"):
+        # Matches the immediate-echo clause specifically, not just any cycle
+        # message, so a guard that degraded to the generic longer-cycle
+        # diagnosis would still fail here.
+        with pytest.raises(PaginationError, match="the same cursor it was just given"):
             list(getattr(client, walk)())
     assert len(httpx_mock.get_requests()) == 2
 

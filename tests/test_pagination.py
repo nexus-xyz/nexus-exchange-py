@@ -66,6 +66,11 @@ def _signed_client() -> Client:
     return Client(Network.LOCAL, api_key="nx_test", api_secret=_SECRET)
 
 
+def _client() -> Client:
+    """Unsigned client, for the public paginated routes."""
+    return Client(Network.LOCAL)
+
+
 # -- multi-page traversal ---------------------------------------------------
 
 
@@ -186,8 +191,12 @@ def test_repeated_cursor_raises_instead_of_looping(httpx_mock) -> None:
         walk = client.iter_my_trades()
         assert next(walk).id == "f1"
         assert next(walk).id == "f2"
-        with pytest.raises(PaginationError, match="same pagination cursor"):
+        with pytest.raises(PaginationError, match="already issued") as exc:
             next(walk)
+    # The immediate-repeat case still says so explicitly: same guard, but the
+    # message distinguishes "handed back what I just gave you" from "sent me
+    # somewhere I had already been", because the server bugs differ in obviousness.
+    assert "the same cursor it was just given" in str(exc.value)
 
     # Bounded: the guard fired on the page whose cursor did not advance, so the
     # identical request was never re-issued a third time.
@@ -367,3 +376,121 @@ def test_page_query_omits_absent_params(httpx_mock) -> None:
     with _signed_client() as client:
         client.fetch_my_trades_page()
     assert httpx_mock.get_requests()[0].url.query == b""
+
+
+def test_two_cycle_cursor_terminates_instead_of_paging_forever(httpx_mock) -> None:
+    """A cycle longer than one hop must still terminate (ENG-8081 review).
+
+    The guard used to compare only against the *immediately preceding* cursor, so
+    a server rotating ``None -> "A"``, ``"A" -> "B"``, ``"B" -> "A"`` never
+    repeated consecutively and slipped through. With ``max_pages`` defaulting to
+    ``None``, `list(client.iter_my_trades())` then paged without end — measured at
+    202 requests before this fix, growing without bound.
+
+    Only three responses are registered and the first is not reusable, so a build
+    that regresses to the consecutive-only check cannot hang the suite: the fourth
+    request finds no mock and fails loudly instead.
+    """
+    httpx_mock.add_response(
+        url=FILLS_URL,
+        json=[_fill("f1")],
+        headers={"x-next-cursor": "A"},
+    )
+    httpx_mock.add_response(
+        url=f"{FILLS_URL}?cursor=A",
+        json=[_fill("f2")],
+        headers={"x-next-cursor": "B"},
+    )
+    httpx_mock.add_response(
+        url=f"{FILLS_URL}?cursor=B",
+        json=[_fill("f3")],
+        headers={"x-next-cursor": "A"},  # back to a cursor already issued
+    )
+    with _signed_client() as client:
+        with pytest.raises(PaginationError, match="already issued") as exc:
+            list(client.iter_my_trades())
+
+    # "A" was seen on hop 1, so returning it on hop 3 is the cycle. Three pages
+    # were read before the guard fired.
+    assert "'A'" in str(exc.value)
+    assert "3 page(s) were read" in str(exc.value)
+    # And it is NOT reported as an immediate repeat — the previous cursor was "B".
+    assert "the same cursor it was just given" not in str(exc.value)
+    assert len(httpx_mock.get_requests()) == 3
+
+
+def test_resume_cursor_is_remembered_so_a_server_cannot_send_you_straight_back(
+    httpx_mock,
+) -> None:
+    """Resuming from ``X`` and being handed ``X`` back is a cycle on hop one.
+
+    Documents the seeding of `seen` with the resume cursor. Being precise about
+    what this does and does not prove: the *consecutive* check would also catch
+    this exact case, so this is not a regression guard for the seen-set — it pins
+    that resuming does not start the walk with an empty history. The case only
+    the seen-set catches is resume-``X`` -> ``Y`` -> ``X``, which is the general
+    property `test_two_cycle_cursor_terminates_instead_of_paging_forever` covers.
+    """
+    httpx_mock.add_response(
+        url=f"{FILLS_URL}?cursor=resume-here",
+        json=[_fill("f1")],
+        headers={"x-next-cursor": "resume-here"},
+    )
+    with _signed_client() as client:
+        with pytest.raises(PaginationError, match="already issued"):
+            list(client.iter_my_trades(cursor="resume-here"))
+    assert len(httpx_mock.get_requests()) == 1
+
+
+# ---------------------------------------------------------------------------
+# Eager validation of the caller's own arguments (ENG-8081 review)
+# ---------------------------------------------------------------------------
+
+
+def test_iter_trades_rejects_a_bad_limit_at_call_time() -> None:
+    """Not at the first ``next()``. The paired methods must agree on when.
+
+    `iter_*` returns the generator `iter_items` builds, and a generator function
+    defers its body — so every check inside it was deferred too, and a plainly
+    invalid argument came back as a healthy-looking generator that raised later,
+    somewhere unrelated to the mistake.
+    """
+    with _client() as client:
+        with pytest.raises(ValueError, match="trades limit must be between 1 and 1000"):
+            client.iter_trades("BTC-USDX-PERP", limit=999_999)
+
+
+def test_iter_my_trades_rejects_a_negative_max_pages_at_call_time() -> None:
+    with _signed_client() as client:
+        with pytest.raises(ValueError, match="max_pages must be non-negative"):
+            client.iter_my_trades(max_pages=-5)
+
+
+def test_iter_and_fetch_page_agree_on_limit_validation() -> None:
+    """The property the review actually asked for, asserted directly.
+
+    Both forms of the same call must reject the same argument at the same moment,
+    so a caller cannot learn about their own mistake at two different times
+    depending on which method they reached for.
+    """
+    with _client() as client:
+        with pytest.raises(ValueError) as eager:
+            client.iter_trades("BTC-USDX-PERP", limit=0)
+        with pytest.raises(ValueError) as direct:
+            client.fetch_trades_page("BTC-USDX-PERP", limit=0)
+    assert str(eager.value) == str(direct.value)
+
+
+def test_a_valid_iter_call_still_issues_no_request_until_iterated(httpx_mock) -> None:
+    """Eager *validation* must not become eager *fetching*.
+
+    The laziness is the feature — a caller that breaks out early stops the
+    requests — so this pins that adding the argument checks did not also pull the
+    first page forward.
+    """
+    httpx_mock.add_response(url=f"{FILLS_URL}?limit=100", json=[_fill("f1")], headers={})
+    with _signed_client() as client:
+        walk = client.iter_my_trades(limit=100)
+        assert httpx_mock.get_requests() == []  # nothing sent yet
+        assert next(walk).id == "f1"
+    assert len(httpx_mock.get_requests()) == 1
