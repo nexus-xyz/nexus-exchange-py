@@ -62,9 +62,9 @@ from the environment — no secrets in source).
 | Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses` | ✅ implemented |
 | Keys / agents / WS token — `GET /keys`, `DELETE /keys/{id}`, `/agents`, `POST /ws-tokens` | ✅ implemented |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
+| Cursor pagination — `cursor` + `X-Next-Cursor` on `/markets/{id}/trades`, `/fills` | ✅ implemented |
 | Create API key — `POST /keys` | ❌ not yet (needs a `POST /auth/login` session token; `sign_in` is now available) |
 | WebSocket streaming | ❌ not yet |
-| Pagination helpers | ❌ not yet |
 | Rate-limit-aware retry (`429` / `Retry-After`, token bucket) | ❌ not yet |
 | OAuth auth | ❌ not yet |
 
@@ -266,6 +266,52 @@ malformed, the call raises `DecodeError` (a `NexusExchangeError`, and a
 `ValueError`) rather than handing back a plausible figure the server never sent.
 That extends to lists — a malformed point or position raises instead of silently
 dropping out of the series.
+
+## Pagination
+
+The list endpoints return a page of results plus an opaque cursor for the next
+page, carried in the **`X-Next-Cursor`** response header (spec v0.7.2). Of the
+five paginated endpoints this SDK wraps two: `GET /markets/{id}/trades` and
+`GET /fills`.
+
+`iter_*` walks every page for you, lazily — one request per page, driven by the
+cursor:
+
+```python
+for fill in client.iter_my_trades(limit=500):  # limit = page size, not a total
+    print(fill.id, fill.price, fill.size)
+
+# Stop early and the requests stop with you.
+for trade in client.iter_trades("BTC-USDX-PERP", limit=100, max_pages=5):
+    ...
+```
+
+`fetch_*_page` is the manual form, for when the cursor has to outlive the
+process (a resumable backfill):
+
+```python
+page = client.fetch_my_trades_page(limit=500)
+save_checkpoint(page.next_cursor)  # None once page.is_last
+page = client.fetch_my_trades_page(limit=500, cursor=load_checkpoint())
+```
+
+Cursors are opaque — never parse one. Termination rules:
+
+- **No `X-Next-Cursor` header ⇒ the last page.** Not an error, and not a reason
+  to retry.
+- An **empty page that still carries a cursor is not the end** — a sparse window
+  keeps paging.
+- A server that hands back the **same** cursor it was given cannot advance, so
+  the walk raises `PaginationError` instead of re-requesting one page forever. A
+  silent stop would report a truncated history as complete.
+- Nothing else bounds how far back a walk goes; pass `max_pages` when that
+  matters.
+
+`limit` sets the page size and is validated against **that endpoint's** spec
+maximum before the request — 1000 for both trades and fills
+(`TRADES_LIMIT_MAX` / `FILLS_LIMIT_MAX`). These are not interchangeable across
+endpoints, and in particular the `366` bound belongs only to
+`/account/portfolio-history` (`PORTFOLIO_LIMIT_MAX`), which is not paginated.
 
 ## CCXT compatibility
 

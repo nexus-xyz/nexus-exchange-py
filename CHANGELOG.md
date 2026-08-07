@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Cursor pagination on the five paginated list endpoints (ENG-8081).** Spec
+  v0.7.2 added a `cursor` query parameter and an `X-Next-Cursor` response header
+  to trades, fills, order history, closed positions and equity history. The SDK
+  now threads them: `iter_trades` / `iter_my_trades` and the other `iter_*`
+  helpers walk every page rather than returning the first one and reporting
+  completion. New public surface: `Page`, `iter_pages`, `iter_items` and
+  `NEXT_CURSOR_HEADER` from `nexus_exchange.pagination`, plus `*_page` methods
+  that return one page and its next cursor.
+- **`PaginationError`.** Raised when an endpoint hands back the same
+  `X-Next-Cursor` it was given, so the walk cannot advance. The SDK stops and
+  says so rather than hanging, and rather than stopping quietly — a silent stop
+  is indistinguishable from "that was the last page", which would hand the
+  caller a truncated history it believes is complete.
+
 - **The network axis `{Mainnet, Testnet, Local}` (ENG-6454).** `Network` now
   names a *network* — which chain, and whose money — instead of a release
   channel, and each member bundles its whole config in one frozen
@@ -120,6 +134,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   into a silent no-op.
 
 ### Changed
+
+- **BREAKING: `fetch_trades` and `fetch_my_trades` now reject an out-of-range
+  `limit` locally instead of forwarding it (ENG-8081).** The paginated endpoints
+  declare a `maximum` (1000 for trades and fills), and the SDK now validates
+  against it before the request — and, on a signed route, before signing —
+  raising `ValueError`. Previously the value went to the server, which clamped
+  it: `fetch_trades(market_id, limit=5000)` used to succeed and return 1000 rows,
+  and now raises.
+
+  This can break a working caller, which is why it is here rather than only in
+  `Added`. A caller passing a limit above the maximum was already not getting
+  what they asked for; the change makes that visible at the call site instead of
+  silently downgrading it. Pass `limit=1000` (or omit it) for the previous
+  behaviour, or use `iter_trades` / `iter_my_trades` to walk past one page's
+  worth — which is what a caller reaching for `limit=5000` usually wanted.
+
+  The `iter_*` forms validate the same bound **at call time** rather than at the
+  first `next()`, so both forms of the same call now report a caller's own
+  mistake at the same moment.
 
 - **BREAKING: `Network.STABLE` and `Network.BETA` are removed (ENG-6454).** They
   were release channels, not networks, and the old enum had no way to name

@@ -13,6 +13,7 @@ import hashlib
 import hmac
 import json
 import time
+from collections.abc import Iterator
 from decimal import Decimal
 from importlib import metadata
 from typing import Any
@@ -24,6 +25,7 @@ from ._parse import to_dict_list
 from .auth import AgentRegistered, AgentRegistration, EthSigner, LoginResponse
 from .errors import ApiError, MissingCredentialsError, TransportError
 from .networks import Network, NetworkConfig, SigningDomain
+from .pagination import NEXT_CURSOR_HEADER, Page, iter_items
 from .types import (
     AccountFees,
     AccountPortfolioSummary,
@@ -75,6 +77,9 @@ __all__ = [
     "SigningDomain",
     "DEFAULT_USER_AGENT",
     "DEFAULT_API_VERSION",
+    "FILLS_LIMIT_MAX",
+    "PORTFOLIO_LIMIT_MAX",
+    "TRADES_LIMIT_MAX",
 ]
 
 _DISTRIBUTION_NAME = "nexus-exchange"
@@ -122,7 +127,20 @@ API_V1_PREFIX = "/api/v1"
 #: Upper bound the spec puts on the portfolio-history ``limit`` parameter (the
 #: largest window's point capacity, ``all`` = 366). Validated client-side so an
 #: out-of-schema value fails fast instead of depending on server clamping.
+#:
+#: This bound belongs to ``/account/portfolio-history`` **only** — it is not a
+#: fleet-wide list-endpoint cap, and that endpoint is not cursor-paginated. The
+#: paginated endpoints carry their own, larger maxima; see
+#: :data:`TRADES_LIMIT_MAX` / :data:`FILLS_LIMIT_MAX`.
 PORTFOLIO_LIMIT_MAX = 366
+
+#: Upper bound the spec puts on ``limit`` for ``GET /markets/{id}/trades``
+#: (``maximum: 1000``, default 100).
+TRADES_LIMIT_MAX = 1000
+
+#: Upper bound the spec puts on ``limit`` for ``GET /fills`` (``maximum: 1000``,
+#: default 100).
+FILLS_LIMIT_MAX = 1000
 
 
 def _portfolio_window(window: PortfolioWindow | str | None) -> str | None:
@@ -170,6 +188,72 @@ def _portfolio_limit(limit: int | None) -> int | None:
     if not 1 <= limit <= PORTFOLIO_LIMIT_MAX:
         raise ValueError(f"limit must be between 1 and {PORTFOLIO_LIMIT_MAX} (got {limit})")
     return limit
+
+
+def _decode_body(resp: httpx.Response) -> Any:
+    """Decode a 2xx response body: parsed JSON, raw text, or ``None`` if empty."""
+    if not resp.content:
+        return None
+    try:
+        return resp.json()
+    except ValueError:
+        return resp.text
+
+
+def _page_limit(limit: int | None, maximum: int, endpoint: str) -> int | None:
+    """Validate a paginated list endpoint's ``limit`` against its spec maximum.
+
+    ``maximum`` is a constraint on the *request*, so a conforming client does not
+    send past it: this raises :class:`ValueError` before the request (and, on a
+    signed route, before signing) rather than relying on the server to clamp.
+    Each endpoint has its own maximum — they are **not** interchangeable (trades
+    and fills 1000, orders/history 500, positions/closed 200, equity-history
+    720) — so the bound is passed in per call site rather than shared.
+
+    The lower bound is the SDK's own: the paginated endpoints declare no
+    ``minimum``, but ``limit=0`` would return an empty page, which for a
+    cursor-paginated endpoint reads as "no more results" and would silently end a
+    walk at zero items. Rejecting it is friendlier than that.
+
+    Rejects ``bool`` explicitly — it is an ``int`` subclass, and letting it
+    through would send ``limit=True``.
+    """
+    if limit is None:
+        return None
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("limit must be an integer")
+    if not 1 <= limit <= maximum:
+        raise ValueError(f"{endpoint} limit must be between 1 and {maximum} (got {limit})")
+    return limit
+
+
+def _check_iter_args(limit: int | None, maximum: int, endpoint: str, max_pages: int | None) -> None:
+    """Validate an ``iter_*`` call's own arguments **eagerly**, at call time.
+
+    ``iter_*`` returns the generator built by :func:`iter_items`, and a generator
+    function does not execute its body until the first ``next()``. So every
+    caller-error check inside it — ``_page_limit`` via the ``fetch_page`` lambda,
+    and ``iter_pages``' own ``max_pages`` bound — was deferred: an outright bad
+    argument came back as a healthy-looking generator and only raised later, at a
+    place in the caller's code that had nothing to do with the mistake.
+
+    That also made the paired methods disagree about when a caller's own error
+    surfaces, which is the part worth fixing (@Luc-Campos in review)::
+
+        fetch_trades_page("BTC-USDX-PERP", limit=999_999)  # ValueError, at once
+        iter_trades("BTC-USDX-PERP", limit=999_999)        # generator, no error
+
+    A caller mistake is not a paging outcome, so it should not wait for paging to
+    start. Server-side failures stay lazy — they belong to the request.
+
+    Re-validating ``limit`` here means ``_page_limit`` runs twice per walk (once
+    now, once inside the first ``fetch_page``). It is pure and cheap, and the
+    alternative is threading a pre-validated value through the lambda, which
+    would put the check somewhere a reader of ``fetch_*_page`` would not find it.
+    """
+    _page_limit(limit, maximum, endpoint)
+    if max_pages is not None and max_pages < 0:
+        raise ValueError(f"max_pages must be non-negative (got {max_pages})")
 
 
 def _query(**params: Any) -> str:
@@ -403,13 +487,65 @@ class Client:
         return OrderBook.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_trades(self, market_id: str, limit: int | None = None) -> list[Trade]:
-        """``GET /markets/{market_id}/trades`` — recent public trades (newest first)."""
-        query = _query(limit=limit)
-        data = self._request(
-            "GET", f"/markets/{quote(market_id, safe='')}/trades", query=query, direct=True
+        """``GET /markets/{market_id}/trades`` — recent public trades (newest first).
+
+        Returns the first page only. ``limit`` bounds it and must fall in
+        ``1..1000`` (:data:`TRADES_LIMIT_MAX`); omit it for the server's default
+        of 100. For more than one page use :meth:`iter_trades` (every trade) or
+        :meth:`fetch_trades_page` (one page plus its cursor).
+        """
+        return self.fetch_trades_page(market_id, limit=limit).items
+
+    def fetch_trades_page(
+        self,
+        market_id: str,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[Trade]:
+        """``GET /markets/{market_id}/trades`` — one page, plus its next cursor.
+
+        The manual-paging form: :attr:`Page.next_cursor` is the value to pass
+        back as ``cursor`` for the following page, and is ``None`` on the last
+        page. Use this when the cursor must outlive the process (a resumable
+        backfill); use :meth:`iter_trades` to just walk everything.
+        """
+        query = _query(
+            limit=_page_limit(limit, TRADES_LIMIT_MAX, "trades"),
+            cursor=cursor,
+        )
+        data, next_cursor = self._request_page(
+            f"/markets/{quote(market_id, safe='')}/trades", query=query, direct=True
         )
         rows = data if isinstance(data, list) else []
-        return [Trade.from_dict(t) for t in rows]
+        return Page([Trade.from_dict(t) for t in rows], next_cursor)
+
+    def iter_trades(
+        self,
+        market_id: str,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        max_pages: int | None = None,
+    ) -> Iterator[Trade]:
+        """Every public trade for ``market_id``, paging by cursor as needed.
+
+        A generator: pages are fetched lazily, one request at a time, so breaking
+        out of the loop stops the requests. ``limit`` sets the *page* size (not a
+        total), ``cursor`` resumes from a saved position, and ``max_pages`` bounds
+        the walk — worth setting on a market with a long trade history, since
+        nothing else limits how far back this goes.
+
+        See :mod:`nexus_exchange.pagination` for the termination rules (absent
+        ``X-Next-Cursor`` ends the walk; a non-advancing cursor raises
+        :class:`~nexus_exchange.PaginationError`).
+        """
+        _check_iter_args(limit, TRADES_LIMIT_MAX, "trades", max_pages)
+        return iter_items(
+            lambda c: self.fetch_trades_page(market_id, limit=limit, cursor=c),
+            cursor=cursor,
+            max_pages=max_pages,
+        )
 
     def fetch_ohlcv(
         self,
@@ -597,10 +733,56 @@ class Client:
         )
         return PortfolioHistory.from_dict(data if isinstance(data, dict) else {})
 
-    def fetch_my_trades(self) -> list[Fill]:
-        """``GET /fills`` — recent fills (private executions). Requires credentials."""
-        data = self._request("GET", "/fills", signed=True, direct=True)
-        return [Fill.from_dict(f) for f in (data if isinstance(data, list) else [])]
+    def fetch_my_trades(self, limit: int | None = None) -> list[Fill]:
+        """``GET /fills`` — recent fills (private executions). Requires credentials.
+
+        Returns the first page only. ``limit`` bounds it and must fall in
+        ``1..1000`` (:data:`FILLS_LIMIT_MAX`); omit it for the server's default of
+        100. For the full history use :meth:`iter_my_trades` (every fill) or
+        :meth:`fetch_my_trades_page` (one page plus its cursor).
+        """
+        return self.fetch_my_trades_page(limit=limit).items
+
+    def fetch_my_trades_page(
+        self,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[Fill]:
+        """``GET /fills`` — one page of fills, plus its next cursor.
+
+        The manual-paging form; see :meth:`fetch_trades_page`. Requires
+        credentials.
+        """
+        query = _query(
+            limit=_page_limit(limit, FILLS_LIMIT_MAX, "fills"),
+            cursor=cursor,
+        )
+        data, next_cursor = self._request_page("/fills", query=query, signed=True, direct=True)
+        rows = data if isinstance(data, list) else []
+        return Page([Fill.from_dict(f) for f in rows], next_cursor)
+
+    def iter_my_trades(
+        self,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        max_pages: int | None = None,
+    ) -> Iterator[Fill]:
+        """Every fill on the account, paging by cursor as needed.
+
+        A generator; each page costs one signed request, issued lazily. ``limit``
+        sets the page size, ``cursor`` resumes from a saved position, and
+        ``max_pages`` bounds the walk. Requires credentials.
+
+        See :mod:`nexus_exchange.pagination` for the termination rules.
+        """
+        _check_iter_args(limit, FILLS_LIMIT_MAX, "fills", max_pages)
+        return iter_items(
+            lambda c: self.fetch_my_trades_page(limit=limit, cursor=c),
+            cursor=cursor,
+            max_pages=max_pages,
+        )
 
     def fetch_withdrawals(self) -> list[Withdrawal]:
         """``GET /withdrawals`` — withdrawal history. Requires credentials."""
@@ -912,7 +1094,7 @@ class Client:
         ).hexdigest()
         return {"x-api-key": self._api_key, "x-timestamp": ts, "x-signature": signature}
 
-    def _request(
+    def _send(
         self,
         method: str,
         path: str,
@@ -921,7 +1103,13 @@ class Client:
         body: Any | None = None,
         signed: bool = False,
         direct: bool = False,
-    ) -> Any:
+    ) -> httpx.Response:
+        """Issue one request and return the raw 2xx response.
+
+        Split out of :meth:`_request` so the paginated readers can see the
+        ``X-Next-Cursor`` *header* as well as the body — signing, routing, and
+        error mapping stay in one place for every caller.
+        """
         # `direct` routes target the /api/v1 backend service at the host root;
         # everything else stays on the legacy gateway base. The /api/v1 prefix
         # is part of the signed canonical path, so resolve the full path *once*
@@ -966,9 +1154,37 @@ class Client:
                 pass
             raise ApiError(resp.status_code, resp.text[:2000], code=code, message=message)
 
-        if not resp.content:
-            return None
-        try:
-            return resp.json()
-        except ValueError:
-            return resp.text
+        return resp
+
+    def _request(
+        self,
+        method: str,
+        path: str,
+        *,
+        query: str = "",
+        body: Any | None = None,
+        signed: bool = False,
+        direct: bool = False,
+    ) -> Any:
+        resp = self._send(method, path, query=query, body=body, signed=signed, direct=direct)
+        return _decode_body(resp)
+
+    def _request_page(
+        self,
+        path: str,
+        *,
+        query: str = "",
+        signed: bool = False,
+        direct: bool = False,
+    ) -> tuple[Any, str | None]:
+        """``GET`` one page of a cursor-paginated list endpoint.
+
+        Returns the decoded body alongside the ``X-Next-Cursor`` header, or
+        ``None`` for that cursor when the header is absent — which per the spec
+        means "this was the last page", not a failure. A present-but-empty header
+        is treated as absent: an empty cursor cannot be sent back, so passing it
+        on would re-request the first page forever.
+        """
+        resp = self._send("GET", path, query=query, signed=signed, direct=direct)
+        cursor = (resp.headers.get(NEXT_CURSOR_HEADER) or "").strip() or None
+        return _decode_body(resp), cursor
