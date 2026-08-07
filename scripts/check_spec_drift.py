@@ -70,6 +70,20 @@ HTTP_METHODS = ("GET", "POST", "PUT", "PATCH", "DELETE")
 # undercount this checker exists to prevent. Lifecycle calls on the same handle
 # (`close`, and anything else that sends nothing) are not requests and are ignored.
 REQUEST_FUNC = "_request"
+# The paginating entry point (ENG-8081). It funnels into the same sender, but it
+# takes the path FIRST and no method - every paginated read is a GET - so the
+# walk below has to know both shapes. Without this the five paginated endpoints
+# are invisible to the AST walk and go dark in the manifest comparison while
+# still being served, which is the exact under-count this checker exists to
+# prevent (@Luc-Campos, review of #46).
+PAGE_REQUEST_FUNC = "_request_page"
+PAGE_REQUEST_METHOD = "GET"
+REQUEST_FUNCS = (REQUEST_FUNC, PAGE_REQUEST_FUNC)
+# The ONE function permitted to touch `_http`. It used to be `_request` itself;
+# ENG-8081 split the sending half out so `_request` and `_request_page` could
+# share it. The invariant is unchanged - exactly one sending site - so the check
+# below now names that site rather than assuming it is the entry point.
+SENDING_FUNC = "_send"
 HTTP_HANDLE = "_http"
 HTTP_SENDING_CALLS = frozenset(
     {
@@ -269,21 +283,38 @@ def requested_ops(modules, api_v1_prefix):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
-                and node.func.attr == REQUEST_FUNC
+                and node.func.attr in REQUEST_FUNCS
             ):
                 continue
             where = f"{rel}:{node.lineno}"
-            if len(node.args) < 2:
-                fail(
-                    f"{where}: {REQUEST_FUNC}() called with fewer than two positional "
-                    f"arguments; the checker reads (method, path) positionally."
-                )
-            method_node, path_node = node.args[0], node.args[1]
-            if not (isinstance(method_node, ast.Constant) and isinstance(method_node.value, str)):
-                fail(f"{where}: HTTP method is not a string literal; cannot attribute the call.")
-            method = method_node.value.upper()
-            if method not in HTTP_METHODS:
-                fail(f"{where}: unknown HTTP method {method_node.value!r}")
+            called = node.func.attr
+            if called == PAGE_REQUEST_FUNC:
+                # `_request_page(path, ...)` - path first, method implicit. Every
+                # paginated read is a GET; `_request_page` hard-codes it when it
+                # calls the sender, so reading it from the call site would be
+                # inventing a degree of freedom the code does not have.
+                if len(node.args) < 1:
+                    fail(
+                        f"{where}: {PAGE_REQUEST_FUNC}() called with no positional "
+                        f"argument; the checker reads (path) positionally."
+                    )
+                method, path_node = PAGE_REQUEST_METHOD, node.args[0]
+            else:
+                if len(node.args) < 2:
+                    fail(
+                        f"{where}: {REQUEST_FUNC}() called with fewer than two positional "
+                        f"arguments; the checker reads (method, path) positionally."
+                    )
+                method_node, path_node = node.args[0], node.args[1]
+                if not (
+                    isinstance(method_node, ast.Constant) and isinstance(method_node.value, str)
+                ):
+                    fail(
+                        f"{where}: HTTP method is not a string literal; cannot attribute the call."
+                    )
+                method = method_node.value.upper()
+                if method not in HTTP_METHODS:
+                    fail(f"{where}: unknown HTTP method {method_node.value!r}")
             literal = literal_path(path_node)
             if literal is None:
                 fail(
@@ -294,7 +325,7 @@ def requested_ops(modules, api_v1_prefix):
             for kw in node.keywords:
                 if kw.arg is None:
                     fail(
-                        f"{where}: {REQUEST_FUNC}() called with **kwargs; the checker "
+                        f"{where}: {called}() called with **kwargs; the checker "
                         f"cannot tell whether `direct` is set."
                     )
                 if kw.arg == "direct":
@@ -310,16 +341,21 @@ def requested_ops(modules, api_v1_prefix):
             ops.setdefault((method, normalize_path(resolved)), []).append(where)
     if not ops:
         fail(
-            f"parsed zero {REQUEST_FUNC}() calls from the package; the call shape may "
+            f"parsed zero {'/'.join(REQUEST_FUNCS)}() calls from the package; the call shape may "
             f"have changed — update this checker before trusting a green run."
         )
     return ops
 
 
 def check_single_entry_point(modules):
-    """Every httpx call must sit inside `_request`. A method that reached the
-    transport directly would target an operation no AST walk over `_request` calls
-    can see, so the code<->manifest equality would pass while under-counting."""
+    """Every httpx call must sit inside `_send`, the single sending site. A method
+    that reached the transport directly would target an operation no AST walk over
+    the entry points can see, so the code<->manifest equality would pass while
+    under-counting.
+
+    `_send` rather than `_request` since ENG-8081: the sending half was split out
+    so `_request` and `_request_page` could share it. One sender, two entry points
+    - the invariant this guards is unchanged."""
     errors = 0
     for path in modules:
         rel = os.path.relpath(path, REPO)
@@ -339,12 +375,13 @@ def check_single_entry_point(modules):
                 continue
             if node.func.attr not in HTTP_SENDING_CALLS:
                 continue  # lifecycle (e.g. `close`), not a request
-            if enclosing.get(node) != REQUEST_FUNC:
+            if enclosing.get(node) != SENDING_FUNC:
                 errors += 1
                 print(
                     f"\nERROR: {rel}:{node.lineno}: `self.{HTTP_HANDLE}."
-                    f"{node.func.attr}()` is called outside {REQUEST_FUNC}(); route it "
-                    f"through {REQUEST_FUNC}() so the operation stays visible to the "
+                    f"{node.func.attr}()` is called outside {SENDING_FUNC}(); route it "
+                    f"through {SENDING_FUNC}() (reached via {REQUEST_FUNC}() or "
+                    f"{PAGE_REQUEST_FUNC}()) so the operation stays visible to the "
                     f"drift check."
                 )
     return errors
