@@ -8,9 +8,14 @@ its configuration from the environment — no secrets in source.
 | Variable | Purpose |
 | --- | --- |
 | `NEXUS_BASE_URL` | Explicit base URL; overrides `NEXUS_NETWORK` (e.g. `http://localhost:9090`). |
-| `NEXUS_NETWORK` | Named environment: `stable` (default) \| `beta` \| `local`. |
+| `NEXUS_NETWORK` | Named network: `mainnet` \| `testnet` (default) \| `local`. Signed examples default to `local` and **refuse** `mainnet` outright — it moves real funds. |
 | `NEXUS_API_KEY` | HMAC key id (signed examples only). |
 | `NEXUS_API_SECRET` | HMAC secret, hex (signed examples only). |
+
+> `beta` is no longer a value here. It named a release *channel*, and ENG-6454
+> replaced that axis with a network axis — which chain, and whose money. What
+> `beta` meant is now an explicit base URL:
+> `NEXUS_BASE_URL=https://beta.exchange.nexus.xyz/api/exchange`.
 
 Run from the repo root so each program can import its sibling `_shared.py`:
 
