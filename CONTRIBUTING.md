@@ -28,6 +28,39 @@ pytest -q               # tests (CI: test)
 `ruff check . --fix` applies safe autofixes. The test job runs across Python
 3.10–3.13; the SDK targets `requires-python >= 3.10`.
 
+Run these from the virtualenv you installed the `dev` extra into. CI installs
+`ruff` only from that extra, where it's bounded to one minor (`>=0.16,<0.17`)
+because a ruff minor can change formatting — a globally installed ruff of a
+different minor can leave the tree formatted in a way CI rejects. Widening the
+bound is its own PR, since the reformat it demands is the point of that diff.
+
+## How a PR lands
+
+Squash-and-merge is the only method enabled, and the source branch is deleted on
+merge, so one PR is always exactly one commit on `main`. **That commit's subject
+is your PR title**, so write it as a
+[conventional commit](https://www.conventionalcommits.org/) — `feat:`, `fix:`,
+`docs:`, `chore:`, `ci:` — and declare a breaking change with `!` before the
+colon (`feat!:`, `feat(client)!: …`).
+
+Unlike the rest of the fleet, **nothing here parses that subject today**: this
+SDK's version is set by hand in `pyproject.toml` and the release notes come from
+`CHANGELOG.md` (see [Releasing](#releasing)), so the convention is currently about
+a readable history rather than a computed version.
+
+It is still worth following now, for two reasons. The obvious one is fleet
+consistency. The load-bearing one is that
+[ENG-7536](https://linear.app/nexus-labs/issue/ENG-7536) proposes adopting the
+same release-please config as `-ts`/`-cli`/`-mcp`, and release-please computes the
+next version from **merged commit history**. A history of unparseable subjects is
+not something that can be fixed after the fact, so every commit that lands
+between now and then either helps or hurts that first computed bump.
+
+When that lands, one asymmetry becomes a trap worth knowing in advance: a
+`BREAKING CHANGE:` footer counts only in a **commit** body, because the squash
+commit's body is assembled from the commit messages on the branch and never from
+the PR description. The `!` in the title is the reliable declaration.
+
 ## Compatibility & deprecations
 
 This SDK follows [semver](https://semver.org/) (version in `pyproject.toml`).
@@ -83,14 +116,39 @@ preserve the old (often wrong) behavior, so removal is correct there.
 - **Batch** breaking changes into a single planned minor bump rather than
   shipping them one-per-PR.
 - Call the break out explicitly in the PR description so it can be summarized
-  in the release notes.
+  in the release notes — the notes are hand-written here, so this is what
+  actually carries it today.
+- Also put a `!` in the PR title (`feat!:`). Redundant while the version is
+  hand-set, and the declaration that computes the bump once
+  [ENG-7536](https://linear.app/nexus-labs/issue/ENG-7536) lands — see
+  [How a PR lands](#how-a-pr-lands).
 
 ### API spec version
 
-The SDK tracks a pinned Exchange API spec version in `.api-version`. The
-`drift` CI job fails if that pin isn't the latest release of the spec repo, so
-bump `.api-version` (and the README spec table) together when you target a new
-spec release.
+The SDK tracks a pinned Exchange API spec version in `.api-version`. The `drift`
+CI job fails if that pin isn't the latest release of the spec repo, so bump
+`.api-version` (and the README spec table) together when you target a new spec
+release. In practice `spec-autobump` opens that PR for you when the spec repo
+publishes a release.
+
+`endpoints.txt` lists the operations this SDK implements, and the `spec-drift` CI
+job enforces it in both directions on **every** PR: each line must exist in the
+pinned spec, and the operations the client code requests must be exactly that list.
+So adding a typed method means adding its line — CI fails otherwise, and equally
+fails on a line no method requests. To run it locally:
+
+```bash
+curl -fsSL "https://raw.githubusercontent.com/nexus-xyz/nexus-exchange-api/$(cat .api-version)/openapi.json" \
+  -o openapi.pinned.json
+python3 scripts/check_spec_drift.py openapi.pinned.json
+python3 scripts/test_check_spec_drift.py   # the checker's own tests
+```
+
+Two escape hatches exist for operations that legitimately can't be listed, both
+named and documented in `scripts/check_spec_drift.py` — `CODE_ONLY_OPS` (the
+client requests it but the pinned spec doesn't define it) and `NON_REST_TARGETS`
+(listed, but reached without a `_request` call). Both are checked for staleness, so
+an entry can't outlive its reason.
 
 ### Toward 1.0
 

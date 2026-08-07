@@ -46,6 +46,26 @@ class TransportError(NexusExchangeError):
     transient = True
 
 
+class DecodeError(NexusExchangeError, ValueError):
+    """A 2xx response body did not match the API contract.
+
+    Raised while decoding, *after* a successful response: a spec-``required``
+    field was absent, ``null``, or the wrong shape. The SDK fails loudly here
+    rather than fabricating a value — a defaulted ``0`` fee rate, equity or
+    cadence is a plausible-looking number the server never sent, which is worse
+    than an exception. Fields the spec marks optional or nullable decode to
+    ``None`` instead and never raise.
+
+    Terminal: the payload will not improve on retry.
+
+    Distinct from a plain :class:`ValueError`, which the SDK raises for *caller*
+    error (an out-of-range ``limit``, an unknown ``window``) before any request
+    is sent — so the two situations are told apart by type. This also subclasses
+    :class:`ValueError` for backwards compatibility, since strict decoding
+    predates the class and callers may already catch ``ValueError``.
+    """
+
+
 class MissingCredentialsError(NexusExchangeError):
     """A signed request was attempted without ``api_key`` / ``api_secret``."""
 

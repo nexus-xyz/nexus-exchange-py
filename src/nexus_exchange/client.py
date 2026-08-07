@@ -14,16 +14,20 @@ import hmac
 import json
 import time
 from decimal import Decimal
-from enum import Enum
 from importlib import metadata
 from typing import Any
-from urllib.parse import quote, urlencode
+from urllib.parse import quote, urlencode, urlsplit
 
 import httpx
 
+from ._parse import to_dict_list
 from .auth import AgentRegistered, AgentRegistration, EthSigner, LoginResponse
 from .errors import ApiError, MissingCredentialsError, TransportError
+from .networks import Network, NetworkConfig, SigningDomain
 from .types import (
+    AccountFees,
+    AccountPortfolioSummary,
+    AccountState,
     AccountSummary,
     AdlEvent,
     AgentInfo,
@@ -50,6 +54,8 @@ from .types import (
     OrderBook,
     OrderRequest,
     OrderResponse,
+    PortfolioHistory,
+    PortfolioWindow,
     Position,
     RateLimitStatus,
     Ticker,
@@ -59,7 +65,17 @@ from .types import (
     WsToken,
 )
 
-__all__ = ["Client", "Network", "DEFAULT_USER_AGENT", "DEFAULT_API_VERSION"]
+# `Network` and friends live in networks.py (one place for the host map, per
+# ENG-6442) and are re-exported here so `from nexus_exchange.client import
+# Network` keeps working.
+__all__ = [
+    "Client",
+    "Network",
+    "NetworkConfig",
+    "SigningDomain",
+    "DEFAULT_USER_AGENT",
+    "DEFAULT_API_VERSION",
+]
 
 _DISTRIBUTION_NAME = "nexus-exchange"
 
@@ -91,7 +107,7 @@ DEFAULT_USER_AGENT = f"nexus-exchange-py/{__version__}"
 #: contract version (ENG-5350). Mirrors the repo's source of truth in
 #: ``.api-version``; that file is not shipped in the wheel, so the tag is baked
 #: in here and ``tests/test_headers.py`` asserts the two never drift.
-DEFAULT_API_VERSION = "v0.7.1"
+DEFAULT_API_VERSION = "v0.7.3"
 
 DEFAULT_TIMEOUT = 30.0
 
@@ -101,6 +117,59 @@ DEFAULT_TIMEOUT = 30.0
 #: gateway base. The HMAC signature is computed over the full request path
 #: *including* this prefix (e.g. ``/api/v1/orders``), matching the server.
 API_V1_PREFIX = "/api/v1"
+
+
+#: Upper bound the spec puts on the portfolio-history ``limit`` parameter (the
+#: largest window's point capacity, ``all`` = 366). Validated client-side so an
+#: out-of-schema value fails fast instead of depending on server clamping.
+PORTFOLIO_LIMIT_MAX = 366
+
+
+def _portfolio_window(window: PortfolioWindow | str | None) -> str | None:
+    """Validate a portfolio ``window`` and return its wire string.
+
+    ``None`` means "omit the parameter" — the server defaults to ``day``. A
+    value outside :class:`PortfolioWindow` raises :class:`ValueError` here
+    rather than spending a signed request on a guaranteed ``400``
+    (``invalid_window``).
+
+    Always resolves through ``PortfolioWindow(...).value``: ``str()`` on a
+    ``str``-mixin enum member renders ``"PortfolioWindow.DAY"``, and
+    :func:`_query` stringifies whatever it is given — so passing a member
+    straight through would put the repr on the wire (and into the signed
+    canonical query).
+    """
+    if window is None:
+        return None
+    try:
+        return PortfolioWindow(window).value
+    except ValueError:
+        allowed = ", ".join(w.value for w in PortfolioWindow)
+        raise ValueError(f"window must be one of: {allowed} (got {window!r})") from None
+
+
+def _portfolio_limit(limit: int | None) -> int | None:
+    """Validate a portfolio-history ``limit`` against the spec's ``1..366`` range.
+
+    ``minimum: 1, maximum: 366`` on the parameter schema is a constraint on the
+    *request*, so a conforming client does not send outside it and this raises
+    :class:`ValueError` before signing. The parameter description's "a larger
+    value is clamped, not rejected" documents how the server *tolerates*
+    non-conforming input; it is not licence to send it. Note the effective cap is
+    per-window (``day`` 288, ``week`` 168, ``month`` 120, ``all`` 366), so a
+    value inside ``1..366`` may still be clamped — asking for more than the
+    window holds never returns more.
+
+    Rejects ``bool`` explicitly — it is an ``int`` subclass, and letting it
+    through would send ``limit=True``.
+    """
+    if limit is None:
+        return None
+    if isinstance(limit, bool) or not isinstance(limit, int):
+        raise ValueError("limit must be an integer")
+    if not 1 <= limit <= PORTFOLIO_LIMIT_MAX:
+        raise ValueError(f"limit must be between 1 and {PORTFOLIO_LIMIT_MAX} (got {limit})")
+    return limit
 
 
 def _query(**params: Any) -> str:
@@ -113,34 +182,6 @@ def _query(**params: Any) -> str:
     return urlencode(items)
 
 
-class Network(str, Enum):
-    """Which Nexus Exchange environment to target."""
-
-    STABLE = "stable"
-    BETA = "beta"
-    LOCAL = "local"
-
-    @property
-    def base_url(self) -> str:
-        """Legacy gateway base (``/api/exchange``) for routes not yet migrated
-        to the direct ``/api/v1`` service."""
-        return {
-            Network.STABLE: "https://exchange.nexus.xyz/api/exchange",
-            Network.BETA: "https://beta.exchange.nexus.xyz/api/exchange",
-            Network.LOCAL: "http://localhost:9090",
-        }[self]
-
-    @property
-    def direct_base_url(self) -> str:
-        """Direct-service base for the ``/api/v1`` surface — the host root, with
-        no ``/api/exchange`` gateway prefix (see :data:`API_V1_PREFIX`)."""
-        return {
-            Network.STABLE: "https://exchange.nexus.xyz",
-            Network.BETA: "https://beta.exchange.nexus.xyz",
-            Network.LOCAL: "http://localhost:9090",
-        }[self]
-
-
 class Client:
     """Client for the Nexus Exchange REST API.
 
@@ -149,12 +190,29 @@ class Client:
     signed calls to the *site* account; for per-account auth point ``base_url``
     at a direct gateway (e.g. ``Network.LOCAL``). See the README.
 
+    ``network`` selects which network — whose money — the client talks to, and
+    defaults to :attr:`Network.TESTNET` (play funds). One client targets exactly
+    one network: credentials are minted per network and are invalid on any
+    other, so never reuse a key, signature or agent registration across clients
+    pointing at different networks.
+
     Routing targets two bases. The migrated market-data and account/trading
     surface is served directly by its backend service under ``/api/v1`` at the
     host root (:attr:`Network.direct_base_url`); routes not yet migrated stay on
     the legacy ``/api/exchange`` gateway (:attr:`Network.base_url`). A custom
-    ``base_url`` overrides *both* and must therefore point at the service root
-    (e.g. ``http://localhost:9090``), not a ``/api/exchange`` gateway URL.
+    ``base_url`` overrides *both* unless ``direct_base_url`` is also given, so on
+    its own it must point at the service root (e.g. ``http://localhost:9090``),
+    not a ``/api/exchange`` gateway URL — that case is rejected at construction
+    rather than left to sign a wrong path. Note this makes ``base_url`` a
+    different field from the TypeScript SDK's similarly-named ``baseUrl``, which
+    is the *direct* base with the prefix already in it; ``direct_base_url`` is its
+    counterpart here. Pass both to target a deploy that keeps the split — this is
+    how the retired ``beta`` channel is reached now::
+
+        Client(
+            base_url="https://beta.exchange.nexus.xyz/api/exchange",
+            direct_base_url="https://beta.exchange.nexus.xyz",
+        )
 
     Usable as a context manager::
 
@@ -164,20 +222,35 @@ class Client:
 
     def __init__(
         self,
-        network: Network = Network.STABLE,
+        network: Network = Network.TESTNET,
         *,
         base_url: str | None = None,
+        direct_base_url: str | None = None,
         api_key: str | None = None,
         api_secret: str | None = None,
         api_version: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.Client | None = None,
     ) -> None:
-        self._base_url = (base_url or network.base_url).rstrip("/")
-        # Direct-service base for the /api/v1 surface. A caller-supplied base_url
-        # overrides both bases (the local/direct-gateway case); otherwise each
-        # network supplies its own gateway and direct roots.
-        self._direct_base_url = (base_url or network.direct_base_url).rstrip("/")
+        # Normalize through the enum so a bare string ("mainnet") is accepted and
+        # anything unrecognized — including the retired "stable"/"beta" channels
+        # — raises here rather than silently targeting the wrong network.
+        network = Network(network)
+        self._network = network
+        # A caller-supplied base_url overrides the network default; direct_base_url
+        # falls back to base_url so a single override still covers both surfaces
+        # (the local/direct-gateway case) while a deploy that keeps the gateway
+        # split can set them apart.
+        self._base_url = self._resolve_base(network, base_url, network.base_url, "base_url")
+        self._direct_base_url = self._resolve_base(
+            network,
+            direct_base_url or base_url,
+            network.direct_base_url,
+            "direct_base_url",
+        )
+        # The direct surface is never under the gateway prefix, and getting it
+        # wrong is silent: the bad path would be signed as well as sent.
+        self._reject_gateway_direct_base(self._direct_base_url)
         self._api_key = api_key
         self._api_secret = api_secret
         # Spec tag advertised on every request. Defaults to the tag the package
@@ -195,6 +268,77 @@ class Client:
         self._owns_http = http_client is None
         self._http = http_client or httpx.Client(timeout=timeout)
 
+    @staticmethod
+    def _resolve_base(
+        network: Network, override: str | None, default: str | None, param: str
+    ) -> str:
+        """Pick the base URL for one surface, or explain why there isn't one.
+
+        A network whose default is ``None`` has no published, reachable target
+        yet — mainnet today. Rather than invent a host, or fall back to another
+        network's (which for mainnet would mean sending real-funds traffic to
+        testnet), this refuses at construction time with the override to pass.
+        Failing here beats failing at request time, after an order is built.
+
+        A blank override falls back to the network default, matching how a blank
+        ``api_version`` is treated. An override that survives stripping but is
+        empty once trailing slashes go (``"/"``) is rejected outright: a client
+        with an empty base silently issues relative requests.
+        """
+        base = (override or "").strip() or default
+        if base is None:
+            raise ValueError(
+                f"{network.label} has no default {param} yet: its host "
+                f"({network.config.published_rest_base}) is published but not "
+                f"resolvable, so this SDK will not guess one for a real-funds "
+                f"network. Pass {param}=... explicitly to target it."
+            )
+        base = base.rstrip("/")
+        if not base:
+            raise ValueError(f"{param} must be a non-empty URL")
+        return base
+
+    @staticmethod
+    def _reject_gateway_direct_base(base: str) -> None:
+        """Refuse a legacy ``/api/exchange`` base for the direct surface.
+
+        The direct service is served at the *host root* and this client appends
+        :data:`API_V1_PREFIX` itself, so a gateway base would produce
+        ``/api/exchange/api/v1/orders`` — a 404 whose HMAC signature is over that
+        same wrong path, which reads as an auth failure rather than a
+        misconfiguration. Nothing is served under both prefixes, so there is no
+        deploy for which this is right.
+
+        Worth a guard and not just the docs, because ``base_url`` alone falls
+        back to covering both surfaces, and the one value a caller is most likely
+        to have on hand *is* a gateway base: it is this SDK's own ``base_url``
+        default, and the first line of the retired-``beta`` migration. The sibling
+        SDKs meet the same paste from the other side — the TypeScript client
+        rejects a gateway base outright, and the MCP server strips the prefix
+        defensively — so it demonstrably happens.
+
+        Raises rather than stripping: this base is where signed requests go, and
+        silently retargeting them is not this SDK's call to make.
+        """
+        # Match the path segment pair `api/exchange` rather than a substring, so a
+        # host or a query happening to contain the words is not mistaken for it.
+        segments = [s for s in urlsplit(base).path.split("/") if s]
+        is_gateway = any(
+            seg == "exchange" and segments[i - 1] == "api"
+            for i, seg in enumerate(segments)
+            if i > 0
+        )
+        if not is_gateway:
+            return
+        host_root = base[: base.index("/api/exchange")] if "/api/exchange" in base else base
+        raise ValueError(
+            f"direct_base_url must not point at the legacy '/api/exchange' gateway "
+            f"(got {base!r}): the direct {API_V1_PREFIX} surface is served at the host "
+            f"root, so this would send — and sign — '{urlsplit(base).path}{API_V1_PREFIX}/…'. "
+            f"Pass direct_base_url={host_root!r} alongside base_url to target a deploy "
+            f"that keeps the gateway/direct split."
+        )
+
     # -- lifecycle --------------------------------------------------------
     def close(self) -> None:
         if self._owns_http:
@@ -209,6 +353,12 @@ class Client:
     @property
     def has_credentials(self) -> bool:
         return bool(self._api_key and self._api_secret)
+
+    @property
+    def network(self) -> Network:
+        """The network this client targets. Fixed for the client's lifetime —
+        credentials are per-network, so switching means a new client."""
+        return self._network
 
     # -- public market data ----------------------------------------------
     # Most market-data reads are served by the direct /api/v1 service
@@ -344,9 +494,108 @@ class Client:
         return AccountSummary.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_positions(self) -> list[Position]:
-        """``GET /positions`` — open positions. Requires credentials."""
+        """``GET /positions`` — open positions. Requires credentials.
+
+        As of API spec v0.7.2 each :class:`Position` also carries per-position
+        risk detail (notional value, ROE, margin used, max leverage, funding
+        paid). Those fields are ``None`` when the server cannot derive them,
+        with the reason in the companion ``*_error`` — see :class:`Position`.
+
+        A non-object in the list raises :class:`~nexus_exchange.DecodeError`
+        rather than being skipped, so this list, ``fetch_balance().positions``
+        and ``fetch_account_state().positions`` all fail the same way instead of
+        one of them silently understating exposure.
+        """
         data = self._request("GET", "/positions", signed=True, direct=True)
-        return [Position.from_dict(p) for p in (data if isinstance(data, list) else [])]
+        return [Position.from_dict(p) for p in to_dict_list(data, "positions", required=False)]
+
+    def fetch_account_state(self) -> AccountState:
+        """``GET /account/state`` — consolidated account snapshot. Requires credentials.
+
+        One signed call for the portfolio summary aggregates *and* every open
+        position, replacing a ``/account/summary`` + ``/positions`` pair. Both
+        halves come from one coherent server-side read, so
+        ``state.summary.open_positions_count == len(state.positions)``.
+
+        ``state.summary.withdrawable`` is the authoritative wallet-withdrawable
+        balance. This endpoint **fails closed**: when the engine-authoritative
+        margin view is unavailable it returns HTTP 502
+        (``authoritative_margin_unavailable``, raised as :class:`ApiError`)
+        rather than a locally-estimated figure. That is transient — retry after
+        a short delay rather than falling back to a self-computed number.
+
+        Use :meth:`fetch_account_summary` when only the aggregates are needed —
+        it returns the same ``summary`` without the position list.
+        """
+        data = self._request("GET", "/account/state", signed=True, direct=True)
+        return AccountState.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_account_summary(self) -> AccountPortfolioSummary:
+        """``GET /account/summary`` — aggregate portfolio view. Requires credentials.
+
+        The summary-only half of :meth:`fetch_account_state`: equity, PnL,
+        volume, margin and ``withdrawable``, without the position list. Prefer it
+        when the aggregates are all you need; prefer
+        :meth:`fetch_account_state` when you also want positions, since that is
+        one coherent read rather than two calls that can straddle a fill.
+
+        Distinct from :meth:`fetch_balance` (``GET /account``), which is the
+        balance/collateral view — see :class:`AccountPortfolioSummary` versus
+        :class:`AccountSummary`.
+
+        Fails closed on the same HTTP 502 (``authoritative_margin_unavailable``,
+        raised as :class:`ApiError`) as :meth:`fetch_account_state`, for the same
+        reason: no locally-estimated ``withdrawable`` is ever substituted.
+        """
+        data = self._request("GET", "/account/summary", signed=True, direct=True)
+        return AccountPortfolioSummary.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_account_fees(self) -> AccountFees:
+        """``GET /account/fees`` — the account's effective fee schedule.
+
+        Requires credentials; the account is taken from the signing credentials,
+        not a parameter. Returns the forward-looking *schedule* rate (maker /
+        taker bps, fee tier, rolling 30-day volume, active discounts), not a
+        realized per-fill average. ``maker_fee_bps`` may be negative — a rebate
+        paid to the maker. See :class:`AccountFees` for the ``schedule``
+        scoping caveat and the ``volume_30d_estimated`` flag.
+        """
+        data = self._request("GET", "/account/fees", signed=True, direct=True)
+        return AccountFees.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_portfolio_history(
+        self,
+        window: PortfolioWindow | str | None = None,
+        limit: int | None = None,
+    ) -> PortfolioHistory:
+        """``GET /account/portfolio-history`` — portfolio time series.
+
+        Requires credentials. Returns equity, cumulative trading PnL, and
+        cumulative traded volume over ``window``, downsampled at a fixed
+        per-window cadence, ``points`` **oldest first**.
+
+        ``window`` takes a :class:`PortfolioWindow` member or its string value
+        (``"day"`` / ``"week"`` / ``"month"`` / ``"all"``); omit it for the
+        server's ``day`` default. ``limit`` caps the returned points and must
+        fall in ``1..366``. Both are validated before the request, so a bad
+        value raises :class:`ValueError` instead of costing a signed round trip
+        (the server would answer ``400 invalid_window``). Each window has its
+        own point capacity — ``limit`` above it is capped server-side, so asking
+        for more never yields more.
+
+        A malformed *response* raises :class:`~nexus_exchange.DecodeError`
+        instead, so caller error and server-payload defects are distinguishable
+        by type; every field of this response is spec-``required`` and none is
+        defaulted. See :class:`PortfolioHistory`.
+        """
+        query = _query(
+            window=_portfolio_window(window),
+            limit=_portfolio_limit(limit),
+        )
+        data = self._request(
+            "GET", "/account/portfolio-history", query=query, signed=True, direct=True
+        )
+        return PortfolioHistory.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_my_trades(self) -> list[Fill]:
         """``GET /fills`` — recent fills (private executions). Requires credentials."""
@@ -441,7 +690,19 @@ class Client:
 
         Omit ``amount`` to claim the full remaining daily allowance. Requires
         credentials.
+
+        Testnet and local only — the spec marks this operation
+        ``x-nexus-network-availability: [testnet, local]``, and mainnet has no
+        faucet because its collateral is USDX bridged from Ethereum Mainnet.
+        Raises :class:`ValueError` on a faucet-less network rather than spending
+        a signed request against a real-funds host.
         """
+        if not self._network.has_faucet:
+            raise ValueError(
+                f"{self._network.label} has no faucet: `claim_credit` mints synthetic "
+                f"funds and is testnet/local only. Real collateral is bridged — see "
+                f"`deposit`."
+            )
         body = {} if amount is None else {"amount": str(amount)}
         data = self._request("POST", "/account/credit", body=body, signed=True, direct=True)
         return CreditResult.from_dict(data if isinstance(data, dict) else {})
