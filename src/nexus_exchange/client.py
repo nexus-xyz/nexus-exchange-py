@@ -227,6 +227,35 @@ def _page_limit(limit: int | None, maximum: int, endpoint: str) -> int | None:
     return limit
 
 
+def _check_iter_args(limit: int | None, maximum: int, endpoint: str, max_pages: int | None) -> None:
+    """Validate an ``iter_*`` call's own arguments **eagerly**, at call time.
+
+    ``iter_*`` returns the generator built by :func:`iter_items`, and a generator
+    function does not execute its body until the first ``next()``. So every
+    caller-error check inside it — ``_page_limit`` via the ``fetch_page`` lambda,
+    and ``iter_pages``' own ``max_pages`` bound — was deferred: an outright bad
+    argument came back as a healthy-looking generator and only raised later, at a
+    place in the caller's code that had nothing to do with the mistake.
+
+    That also made the paired methods disagree about when a caller's own error
+    surfaces, which is the part worth fixing (@Luc-Campos in review)::
+
+        fetch_trades_page("BTC-USDX-PERP", limit=999_999)  # ValueError, at once
+        iter_trades("BTC-USDX-PERP", limit=999_999)        # generator, no error
+
+    A caller mistake is not a paging outcome, so it should not wait for paging to
+    start. Server-side failures stay lazy — they belong to the request.
+
+    Re-validating ``limit`` here means ``_page_limit`` runs twice per walk (once
+    now, once inside the first ``fetch_page``). It is pure and cheap, and the
+    alternative is threading a pre-validated value through the lambda, which
+    would put the check somewhere a reader of ``fetch_*_page`` would not find it.
+    """
+    _page_limit(limit, maximum, endpoint)
+    if max_pages is not None and max_pages < 0:
+        raise ValueError(f"max_pages must be non-negative (got {max_pages})")
+
+
 def _query(**params: Any) -> str:
     """Build a URL-encoded query string from non-``None`` params.
 
@@ -511,6 +540,7 @@ class Client:
         ``X-Next-Cursor`` ends the walk; a non-advancing cursor raises
         :class:`~nexus_exchange.PaginationError`).
         """
+        _check_iter_args(limit, TRADES_LIMIT_MAX, "trades", max_pages)
         return iter_items(
             lambda c: self.fetch_trades_page(market_id, limit=limit, cursor=c),
             cursor=cursor,
@@ -747,6 +777,7 @@ class Client:
 
         See :mod:`nexus_exchange.pagination` for the termination rules.
         """
+        _check_iter_args(limit, FILLS_LIMIT_MAX, "fills", max_pages)
         return iter_items(
             lambda c: self.fetch_my_trades_page(limit=limit, cursor=c),
             cursor=cursor,

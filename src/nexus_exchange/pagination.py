@@ -82,16 +82,30 @@ def iter_pages(
 
     Termination is guarded against a misbehaving server. Two distinct failures:
 
-    * The server hands back the **same** cursor it was given. Advancing is then
-      impossible, so re-issuing would spin forever on one page. This raises
-      :class:`~nexus_exchange.PaginationError` rather than stopping quietly — the
-      results so far are silently incomplete, and a caller told "that's all"
-      would act on a truncated history. (The Rust SDK's paginator stops silently
-      here; raising is the deliberate difference, because a Python generator
-      feeding ``list(...)`` gives the caller no other signal.)
-    * The server keeps advancing cursors without end. No client-side rule can
-      tell that apart from a genuinely long result set, so bound it with
-      ``max_pages`` when walking an unbounded history.
+    * The server sends back a cursor it has **already handed out** on this walk.
+      Advancing is then impossible — the walk is in a cycle — so continuing would
+      spin forever. This raises :class:`~nexus_exchange.PaginationError` rather
+      than stopping quietly: the results so far are silently incomplete, and a
+      caller told "that's all" would act on a truncated history. (The Rust SDK's
+      paginator stops silently here; raising is the deliberate difference,
+      because a Python generator feeding ``list(...)`` gives the caller no other
+      signal.)
+
+      Every cursor is remembered, not just the previous one. A consecutive-only
+      check misses any cycle longer than one — ``None → "A"``, ``"A" → "B"``,
+      ``"B" → "A"`` never repeats *consecutively*, so it slipped the guard and
+      paged without end. Since ``max_pages`` defaults to ``None``,
+      ``list(client.iter_my_trades())`` — the call the docstring recommends —
+      hung and grew without bound rather than raising (measured at 202 requests
+      and still climbing before this fix). Found by @Luc-Campos in review.
+
+      The cost is a set of the cursors seen, so memory grows with pages walked.
+      That is the same quantity a caller already accepted as unbounded by leaving
+      ``max_pages`` unset, and it buys termination on every cycle length rather
+      than just one.
+    * The server keeps advancing cursors without end, never repeating. No
+      client-side rule can tell that apart from a genuinely long result set, so
+      bound it with ``max_pages`` when walking an unbounded history.
 
     An empty page that still carries a cursor is *not* the end: it is yielded as
     is and paging continues, so a sparse window does not truncate the walk.
@@ -100,6 +114,10 @@ def iter_pages(
         raise ValueError(f"max_pages must be non-negative (got {max_pages})")
 
     pages = 0
+    # Every cursor this walk has requested. Seeded with the resume cursor, so a
+    # server that sends the caller straight back to where they resumed from is
+    # caught on the first hop rather than after a second lap.
+    seen: set[str] = set() if cursor is None else {cursor}
     while max_pages is None or pages < max_pages:
         requested = cursor
         page = fetch_page(requested)
@@ -109,13 +127,19 @@ def iter_pages(
         nxt = page.next_cursor
         if nxt is None:
             return
-        if requested is not None and nxt == requested:
+        if nxt in seen:
+            # Same message for both shapes, because the caller's situation is
+            # identical: the walk cannot advance and what they have is partial.
+            # The distinction is only in how obvious the server's bug is, so it
+            # is reported rather than branched on.
+            immediate = " (the same cursor it was just given)" if nxt == requested else ""
             raise PaginationError(
-                "server returned the same pagination cursor it was given "
-                f"({nxt!r}); refusing to re-request the same page forever. "
+                f"server returned a pagination cursor it had already issued: {nxt!r}"
+                f"{immediate}. Refusing to page in a cycle forever. "
                 f"{pages} page(s) were read, so any results collected so far are "
                 "incomplete."
             )
+        seen.add(nxt)
         cursor = nxt
 
 

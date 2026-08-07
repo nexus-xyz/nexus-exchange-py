@@ -135,6 +135,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **BREAKING: `fetch_trades` and `fetch_my_trades` now reject an out-of-range
+  `limit` locally instead of forwarding it (ENG-8081).** The paginated endpoints
+  declare a `maximum` (1000 for trades and fills), and the SDK now validates
+  against it before the request — and, on a signed route, before signing —
+  raising `ValueError`. Previously the value went to the server, which clamped
+  it: `fetch_trades(market_id, limit=5000)` used to succeed and return 1000 rows,
+  and now raises.
+
+  This can break a working caller, which is why it is here rather than only in
+  `Added`. A caller passing a limit above the maximum was already not getting
+  what they asked for; the change makes that visible at the call site instead of
+  silently downgrading it. Pass `limit=1000` (or omit it) for the previous
+  behaviour, or use `iter_trades` / `iter_my_trades` to walk past one page's
+  worth — which is what a caller reaching for `limit=5000` usually wanted.
+
+  The `iter_*` forms validate the same bound **at call time** rather than at the
+  first `next()`, so both forms of the same call now report a caller's own
+  mistake at the same moment.
+
 - **BREAKING: `Network.STABLE` and `Network.BETA` are removed (ENG-6454).** They
   were release channels, not networks, and the old enum had no way to name
   mainnet at all.
