@@ -57,7 +57,7 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | Portfolio — `GET /account/state` (summary + positions, incl. `withdrawable`), `/account/summary`, `/account/fees`, `/account/portfolio-history` | ✅ implemented |
 | Trading — `POST /orders`, `/orders/batch`; `GET /orders`, `/orders/{id}`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
 | Funds — `POST /account/deposit`, `/account/credit` | ✅ implemented |
-| Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses` | ✅ implemented |
+| Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses` | ✅ implemented (⚠️ see note) |
 | Keys / agents / WS token — `/keys`, `/agents`, `POST /ws-tokens` | ✅ implemented |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
 | Cursor pagination — `cursor` + `X-Next-Cursor` on `/markets/{id}/trades`, `/fills` | ✅ implemented |
@@ -67,6 +67,14 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
 Anything not listed there is not wrapped yet — contributions welcome.
+
+> ⚠️ **Implemented is not the same as deployed.** The bridge *reads* — `GET
+> /bridge/assets`, `/bridge/deposits`, `/bridge/deposits/{id}` and `GET
+> /bridge/deposit-addresses` — answer `404` (a JSON one, from the API) on testnet
+> today: the routes are in the pinned spec but not yet deployed. `POST
+> /bridge/deposit-addresses` is live. Measured 2026-08-10; every other operation
+> in the table above is reachable. Nothing to fix in this SDK, but budget for the
+> `ApiError` if you build on the bridge reads now.
 
 ### Networks
 

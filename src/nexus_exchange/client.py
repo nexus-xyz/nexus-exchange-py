@@ -118,9 +118,13 @@ DEFAULT_TIMEOUT = 30.0
 
 #: Path prefix for the direct-service ("/api/v1") surface. Under the gateway
 #: elimination (ENG-4740) each backend service exposes its own REST API under
-#: this prefix, served at the host root rather than the ``/api/exchange``
-#: gateway base. The HMAC signature is computed over the full request path
-#: *including* this prefix (e.g. ``/api/v1/orders``), matching the server.
+#: this prefix. *Where* that prefix is mounted is a property of the deploy and
+#: lives in :attr:`Network.direct_base_url` — on the hosted networks it is under
+#: the ``/api/exchange`` gateway, not at the host root (ENG-9200). The HMAC
+#: signature is computed over the request path *including* this prefix and
+#: *excluding* the base (e.g. ``/api/v1/orders``), matching the server: the
+#: gateway strips its own prefix before the signature is verified, which is why
+#: the unprefixed legacy routes sign the way they do.
 API_V1_PREFIX = "/api/v1"
 
 
@@ -1113,10 +1117,11 @@ class Client:
         ``X-Next-Cursor`` *header* as well as the body — signing, routing, and
         error mapping stay in one place for every caller.
         """
-        # `direct` routes target the /api/v1 backend service at the host root;
-        # everything else stays on the legacy gateway base. The /api/v1 prefix
-        # is part of the signed canonical path, so resolve the full path *once*
-        # and use the same value for both signing and the sent URL.
+        # `direct` routes get the /api/v1 prefix and go to whichever base that
+        # surface is mounted under (the same value as the legacy base on the
+        # hosted deploys); everything else goes unprefixed to the legacy base.
+        # The prefix is part of the signed canonical path but the base is not, so
+        # resolve the full path *once* and use it for both signing and the URL.
         base = self._direct_base_url if direct else self._base_url
         full_path = f"{API_V1_PREFIX}{path}" if direct else path
 

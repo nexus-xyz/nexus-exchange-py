@@ -11,12 +11,14 @@
 # GET /health, an operational probe outside the contract). So every line here is
 # a real contract operation, and the coverage figure counts nothing else.
 #
-# Paths under /api/v1 are served by the direct backend service (host root, no
-# /api/exchange gateway prefix) as the gateway is retired (ENG-4740); the rest
-# stay on the legacy gateway until they gain an /api/v1 route upstream. The
-# prefix is part of the operation: the client sends it (`direct=True`) and the
-# spec lists both surfaces separately, so a line must carry the prefix whenever
-# the call does.
+# Paths under /api/v1 are the direct backend service's own surface, as the
+# gateway is retired (ENG-4740); the rest stay unprefixed until they gain an
+# /api/v1 route upstream. The prefix is part of the operation: the client sends
+# it (`direct=True`) and the spec lists both surfaces separately, so a line must
+# carry the prefix whenever the call does. Note the prefix says nothing about
+# which *base* it is mounted under — on the hosted networks that is the
+# /api/exchange gateway, not the host root (ENG-9200) — and these lines describe
+# the operation, i.e. the path as signed, which is independent of the base.
 
 # -- direct /api/v1 service --
 GET /api/v1/markets/summary

@@ -262,7 +262,9 @@ class Network(str, Enum):
 
     @property
     def direct_base_url(self) -> str | None:
-        """``/api/v1`` host root, or ``None`` when none is published yet."""
+        """Base the ``/api/v1`` surface is mounted under, or ``None`` when none is
+        published yet. Not necessarily the host root — see
+        :attr:`NetworkConfig.direct_base_url`."""
         return self.config.direct_base_url
 
     @property
