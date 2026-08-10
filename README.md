@@ -58,7 +58,8 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | Trading — `POST /orders`, `/orders/batch`; `GET /orders`, `/orders/{id}`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
 | Funds — `POST /account/deposit`, `/account/credit`, `/deposits`, `/faucet`; `GET /deposits` | ✅ implemented |
 | Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses` | ✅ implemented |
-| Keys / agents / WS token — `/keys`, `/agents`, `POST /ws-tokens` | ✅ implemented |
+| Keys / agents — `/keys`, `/agents` | ✅ implemented |
+| WS tokens — `POST /ws/token` (for `/ws`), `POST /ws-tokens` (legacy, for `/stream`) | ✅ implemented |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
 | Cursor pagination — `cursor` + `X-Next-Cursor` on `/markets/{id}/trades`, `/fills`, `/account/equity-history` | ✅ implemented |
 | WebSocket streaming | ❌ not yet |

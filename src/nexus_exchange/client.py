@@ -1258,8 +1258,48 @@ class Client:
         """``DELETE /agents/{address}`` — revoke an agent key. Requires credentials."""
         return self._request("DELETE", f"/agents/{quote(address, safe='')}", signed=True)
 
+    def mint_ws_token(self) -> WsToken:
+        """``POST /ws/token`` — mint a token for the ``/ws`` socket. Requires credentials.
+
+        The token to use for the **current** WebSocket endpoint. Dial it as
+        ``{network.ws_authenticated_url}?token={token.token}`` — ``GET /ws`` names
+        this operation as its minter, and serves both the public channels
+        (``trades``, ``book``, ``candles``) and the per-account ones (``orders``,
+        ``fills``, ``positions``, ``balances``, ``liquidations``).
+
+        Single-use, expires 60 seconds after minting, and scoped to the network it
+        was minted on — mint against the same host you connect to, and mint a
+        fresh one before every reconnect. The token encodes the account identity,
+        which is what scopes the per-account channels to the signing wallet.
+
+        **Not interchangeable with** :meth:`mint_web_socket_token` (``POST
+        /ws-tokens``), which mints for the legacy ``/stream`` socket. Presenting
+        that token here is not merely an auth failure but an identity mismatch, so
+        the two are kept as separate methods rather than one with a flag.
+
+        This SDK ships no WebSocket client, so nothing is dialled on your behalf;
+        this mints the credential and hands it back. Note the spec's
+        ``operationId`` for this route is ``createWsTokenLegacy`` while its summary,
+        description and ``GET /ws`` all mark it current — the ids were swapped
+        upstream (spec PR #40) and are being corrected against
+        ``nexus-exchange-api``. Trust the route, not the id.
+        """
+        data = self._request("POST", "/ws/token", signed=True)
+        return WsToken.from_dict(data if isinstance(data, dict) else {})
+
     def mint_web_socket_token(self) -> WsToken:
-        """``POST /ws-tokens`` — mint a single-use WebSocket token. Requires credentials."""
+        """``POST /ws-tokens`` — mint a token for the legacy ``/stream`` socket.
+
+        Requires credentials. **Prefer** :meth:`mint_ws_token`: the spec marks this
+        operation legacy, and its token opens only the public
+        :attr:`Network.ws_market_data_url` (``/stream``) socket, whose protocol is
+        a single untagged ``{"subscribe": [...]}`` message and which has no
+        per-account channels.
+
+        Kept because it is a published operation and a deploy may still serve only
+        this pair; it is *not* the way to reach ``GET /ws``, which rejects a token
+        minted here.
+        """
         data = self._request("POST", "/ws-tokens", signed=True)
         return WsToken.from_dict(data if isinstance(data, dict) else {})
 

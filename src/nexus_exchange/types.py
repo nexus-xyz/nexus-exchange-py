@@ -1435,7 +1435,21 @@ class TierOverride:
 
 @dataclass(frozen=True)
 class WsToken:
-    """A freshly minted, single-use WebSocket token (``POST /ws-tokens``)."""
+    """A freshly minted, single-use WebSocket token.
+
+    Returned by both minters, which are **not** interchangeable — the token is
+    bound to one socket, so which method produced it decides where it can be
+    presented:
+
+    * :meth:`Client.mint_ws_token <nexus_exchange.Client.mint_ws_token>`
+      (``POST /ws/token``) → the current ``/ws`` socket.
+    * :meth:`Client.mint_web_socket_token
+      <nexus_exchange.Client.mint_web_socket_token>` (``POST /ws-tokens``) → the
+      legacy public ``/stream`` socket.
+
+    Single-use, expires 60s after minting, and scoped to the network it was
+    minted on: mint against the same host you connect to.
+    """
 
     token: str
     raw: dict[str, Any]

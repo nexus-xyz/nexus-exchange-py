@@ -92,7 +92,12 @@ class NetworkConfig:
     #: published target is not lost; :attr:`base_url` is what actually gets used.
     published_rest_base: str
 
-    #: The spec's WebSocket base for public market data (``/stream``).
+    #: The spec's WebSocket base for the **legacy** public market-data socket
+    #: (``/stream``), whose token comes from ``POST /ws-tokens``
+    #: (:meth:`Client.mint_web_socket_token
+    #: <nexus_exchange.Client.mint_web_socket_token>`). The spec marks this socket
+    #: legacy and points at :attr:`ws_authenticated_url` (``/ws``) instead, which
+    #: serves the same public channels *and* the per-account ones.
     #:
     #: Informational, on the same terms as :attr:`published_rest_base`: these are
     #: the durable per-network hosts, and the hosted ones do **not resolve yet**
@@ -104,9 +109,23 @@ class NetworkConfig:
     #: being hidden.
     ws_market_data_url: str
 
-    #: The spec's WebSocket base for the authenticated stream (``/ws``), which
-    #: takes a token minted over REST by ``POST /ws-tokens``. Informational and
-    #: not yet resolvable — see :attr:`ws_market_data_url`.
+    #: The spec's WebSocket base for the current, per-account stream (``/ws``),
+    #: which takes a token minted over REST by ``POST /ws/token``
+    #: (:meth:`Client.mint_ws_token <nexus_exchange.Client.mint_ws_token>`) and is
+    #: dialled as ``{ws_authenticated_url}?token=…``.
+    #:
+    #: **Not** a ``POST /ws-tokens`` token. The two minters are not
+    #: interchangeable: ``/ws-tokens`` mints for the legacy ``/stream`` socket
+    #: (:attr:`ws_market_data_url`), and ``/ws`` names ``POST /ws/token`` as its
+    #: own minter. This docstring said ``/ws-tokens`` until ENG-9200 — a pairing
+    #: the spec contradicts, and the only WS guidance this SDK ships, since it
+    #: ships no WebSocket client. Tokens are single-use, expire in 60s, and are
+    #: scoped to the network *and account* that minted them, which is what scopes
+    #: the per-account channels (``orders``, ``fills``, ``positions``,
+    #: ``balances``, ``liquidations``) — so presenting the wrong socket's token is
+    #: not only an auth failure, it is an identity mismatch.
+    #:
+    #: Informational and not yet resolvable — see :attr:`ws_market_data_url`.
     ws_authenticated_url: str
 
     #: EIP-712 domain for this network.

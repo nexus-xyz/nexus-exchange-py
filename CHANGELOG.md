@@ -7,7 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The `/ws` socket was documented as taking a `POST /ws-tokens` token, which
+  the spec contradicts (ENG-9200).** `NetworkConfig.ws_authenticated_url` — the
+  base for `GET /ws`, `wss://api.nexus.xyz/ws` on mainnet — said its token came
+  from `POST /ws-tokens`. It does not: per spec v0.7.3 that operation mints "a
+  short-lived (60s), single-use token **for the public /stream endpoint**" and
+  says "Prefer POST /ws/token", while `GET /ws` names `POST /ws/token` as its own
+  minter. Since this SDK ships no WebSocket client, that docstring was the whole
+  of its WS guidance, so anyone following it minted a `/stream` token and
+  presented it to `/ws`. The token also encodes the account identity that scopes
+  the per-account channels (`orders`, `fills`, `positions`, `balances`,
+  `liquidations`), so the wrong token is an identity mismatch, not just a 401.
+  `mint_web_socket_token`'s own docstring now says which socket it serves and
+  points at the current minter.
+
+  Trust the routes, not the `operationId`s: the spec has them swapped
+  (`createWsToken` on the legacy route, `createWsTokenLegacy` on the current
+  one). That is being corrected against `nexus-exchange-api`; anything doing
+  operationId-keyed codegen is affected.
+
 ### Added
+
+- **`mint_ws_token` — `POST /ws/token` (ENG-9200).** The minter `GET /ws` names,
+  and the missing half of the fix above: previously this SDK implemented only the
+  legacy `/stream` minter, so there was no way to obtain a token the current
+  socket accepts. Kept as a separate method from `mint_web_socket_token` rather
+  than a flag, because the two tokens are not interchangeable and the sockets
+  they open have different protocols and different channel sets. Takes coverage
+  to 53 of the pinned spec's 68 distinct operations.
 
 - **Account funds + equity history (ENG-9200, slice 1 of the spec-coverage
   push).** Four more pinned-spec operations are wrapped, taking coverage from 48
