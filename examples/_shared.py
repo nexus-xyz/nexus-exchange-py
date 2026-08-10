@@ -24,8 +24,37 @@ from __future__ import annotations
 
 import os
 import sys
+from urllib.parse import urlparse
 
 from nexus_exchange import Client, Network
+
+#: Hosts a *signed* example is allowed to point at. Loopback, plus every host
+#: reachable from a network whose funds are not real.
+#:
+#: Derived from the ``Network`` enum rather than written out, so a new play-funds
+#: network is allowed automatically and a new real-funds one is not. That
+#: direction matters: the failure mode worth designing against is someone adding
+#: a network and forgetting to update a list, and here forgetting refuses rather
+#: than permits.
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", ""})
+
+
+def _play_funds_hosts() -> frozenset[str]:
+    hosts = set(_LOOPBACK_HOSTS)
+    for network in Network:
+        if network.real_funds:
+            continue
+        for url in (network.config.base_url, network.config.direct_base_url):
+            if url:
+                host = urlparse(url).hostname
+                if host:
+                    hosts.add(host)
+    # `beta` is not a Network any more (ENG-6454), but this module documents it as
+    # a NEXUS_BASE_URL override and networks.py's own deprecation note records that
+    # it serves testnet. Allowed explicitly so the documented invocation keeps
+    # working; it is a play-funds deploy, not a fourth network.
+    hosts.add("beta.exchange.nexus.xyz")
+    return frozenset(hosts)
 
 
 def _network_from_env(default: Network) -> Network:
@@ -107,6 +136,36 @@ def make_signed_client() -> Client:
             file=sys.stderr,
         )
         raise SystemExit(2)
+
+    # ENG-4107 review (bitfalt, P1): the check above reads the *enum*, and
+    # NEXUS_BASE_URL overrides the URL the enum would have supplied. So
+    #
+    #   NEXUS_API_KEY=... NEXUS_API_SECRET=... NEXUS_BASE_URL=https://api.nexus.xyz/v1
+    #
+    # with no NEXUS_NETWORK resolved to `Network.LOCAL`, passed the refusal above,
+    # and pointed a live order at the mainnet host. The guard was checking the label
+    # while the override decided the destination.
+    #
+    # Fails closed on the host rather than deny-listing mainnet's: mainnet's
+    # base_url is still `None` pending DNS, so there is no real-funds URL to
+    # deny-list, and a deny-list would have to be updated in lockstep with every
+    # new host to keep working. An allowlist derived from the play-funds networks
+    # refuses anything it does not recognise, which is the correct default for a
+    # guard whose whole job is to not move real money by accident.
+    if base_url is not None:
+        host = urlparse(base_url).hostname or ""
+        allowed = _play_funds_hosts()
+        if host not in allowed:
+            print(
+                f"refusing to run a signed example against NEXUS_BASE_URL={base_url!r}.\n"
+                f"{host!r} is not a known play-funds host, and a signed example places "
+                "real orders.\n"
+                f"Allowed hosts: {', '.join(sorted(h for h in allowed if h))}.\n"
+                "If you genuinely mean to trade real funds, write a script that says so "
+                "rather than pointing an example at a production host.",
+                file=sys.stderr,
+            )
+            raise SystemExit(2)
 
     print(f"-> {base_url or network.base_url}")
     return Client(network=network, base_url=base_url, api_key=api_key, api_secret=api_secret)

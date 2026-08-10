@@ -128,6 +128,108 @@ def test_signed_examples_refuse_a_real_funds_network(monkeypatch: pytest.MonkeyP
     assert exc.value.code == 2
 
 
+def test_signed_examples_refuse_a_real_funds_base_url_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`NEXUS_BASE_URL` must not walk past the refusal the enum check performs.
+
+    ENG-4107 review (bitfalt, P1). The network check reads the *label*, while
+    `NEXUS_BASE_URL` decides the *destination*, so this exact invocation -- the one
+    from the review, with no `NEXUS_NETWORK` at all -- resolved to `Network.LOCAL`,
+    satisfied the real-funds guard, and pointed a live order at the mainnet host.
+
+    Note this cannot be caught by the sibling test above: that one deletes
+    `NEXUS_BASE_URL`, which is precisely the path that was unguarded.
+    """
+    monkeypatch.setenv("NEXUS_API_KEY", "nx_test")
+    monkeypatch.setenv("NEXUS_API_SECRET", "00" * 32)
+    monkeypatch.setenv("NEXUS_BASE_URL", "https://api.nexus.xyz/v1")
+    monkeypatch.delenv("NEXUS_NETWORK", raising=False)
+    shared = _shared_module()
+
+    with pytest.raises(SystemExit) as exc:
+        shared.make_signed_client()
+    assert exc.value.code == 2
+
+
+def test_signed_examples_refuse_an_unrecognised_base_url_host(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The guard fails closed, rather than deny-listing today's mainnet host.
+
+    `Network.MAINNET.base_url` is still `None` pending DNS, so there is no
+    real-funds URL to deny-list -- which is why an allowlist is the only shape that
+    can work here. An unknown host must therefore be refused, not permitted.
+    """
+    monkeypatch.setenv("NEXUS_API_KEY", "nx_test")
+    monkeypatch.setenv("NEXUS_API_SECRET", "00" * 32)
+    monkeypatch.setenv("NEXUS_BASE_URL", "https://exchange.example.invalid/api/exchange")
+    monkeypatch.delenv("NEXUS_NETWORK", raising=False)
+    shared = _shared_module()
+
+    with pytest.raises(SystemExit) as exc:
+        shared.make_signed_client()
+    assert exc.value.code == 2
+
+
+def test_signed_examples_allow_loopback_base_urls(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The converse of the two guards above, so neither passes by refusing everything.
+
+    Loopback is the invocation this module's docstring puts in front of the reader
+    (`NEXUS_BASE_URL=http://localhost:9090`), so a regression here breaks the
+    documented path.
+    """
+    monkeypatch.setenv("NEXUS_API_KEY", "nx_test")
+    monkeypatch.setenv("NEXUS_API_SECRET", "00" * 32)
+    monkeypatch.delenv("NEXUS_NETWORK", raising=False)
+    shared = _shared_module()
+
+    for url in ("http://localhost:9090", "http://127.0.0.1:9090"):
+        monkeypatch.setenv("NEXUS_BASE_URL", url)
+        with shared.make_signed_client() as client:
+            assert client is not None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://beta.exchange.nexus.xyz/api/exchange",
+        "https://exchange.nexus.xyz/api/exchange",
+    ],
+)
+def test_gateway_style_urls_pass_the_guard_and_fail_later(
+    url: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Gateway-style hosts must not be refused as real-funds targets.
+
+    Both URLs are play-funds: the first is what `beta` became (this module's
+    docstring), the second is `Network.TESTNET.config.base_url` itself. Neither may
+    be mistaken for mainnet.
+
+    Asserted on the guard rather than on a working client, because neither can
+    currently build one. `_shared.py` passes only `base_url`, `Client` falls
+    `direct_base_url` back to it, and a direct base containing `/api/exchange` is
+    rejected -- so *any* gateway-style `NEXUS_BASE_URL` raises, including the SDK's
+    own testnet default. That is ENG-10095, a pre-existing defect in how the
+    override is plumbed, and not this guard's business.
+
+    The assertion is therefore narrow on purpose: the failure must be that
+    `ValueError`, NOT the guard's `SystemExit(2)`. If a change ever starts treating
+    these hosts as real-funds, this flips to SystemExit and fails here.
+    """
+    monkeypatch.setenv("NEXUS_API_KEY", "nx_test")
+    monkeypatch.setenv("NEXUS_API_SECRET", "00" * 32)
+    monkeypatch.setenv("NEXUS_BASE_URL", url)
+    monkeypatch.delenv("NEXUS_NETWORK", raising=False)
+    shared = _shared_module()
+
+    with pytest.raises(ValueError) as exc:
+        shared.make_signed_client()
+    assert "direct_base_url" in str(exc.value)
+
+
 def test_signed_examples_allow_the_non_real_funds_networks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
