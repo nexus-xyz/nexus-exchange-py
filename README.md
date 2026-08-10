@@ -54,13 +54,13 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | Error taxonomy (terminal vs transient) | ✅ implemented |
 | Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
 | Account reads — `GET /account`, `/positions`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
-| Portfolio — `GET /account/state` (summary + positions, incl. `withdrawable`), `/account/summary`, `/account/fees`, `/account/portfolio-history` | ✅ implemented |
+| Portfolio — `GET /account/state` (summary + positions, incl. `withdrawable`), `/account/summary`, `/account/fees`, `/account/portfolio-history`, `/account/equity-history` | ✅ implemented |
 | Trading — `POST /orders`, `/orders/batch`; `GET /orders`, `/orders/{id}`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
-| Funds — `POST /account/deposit`, `/account/credit` | ✅ implemented |
+| Funds — `POST /account/deposit`, `/account/credit`, `/deposits`, `/faucet`; `GET /deposits` | ✅ implemented |
 | Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses` | ✅ implemented |
 | Keys / agents / WS token — `/keys`, `/agents`, `POST /ws-tokens` | ✅ implemented |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
-| Cursor pagination — `cursor` + `X-Next-Cursor` on `/markets/{id}/trades`, `/fills` | ✅ implemented |
+| Cursor pagination — `cursor` + `X-Next-Cursor` on `/markets/{id}/trades`, `/fills`, `/account/equity-history` | ✅ implemented |
 | WebSocket streaming | ❌ not yet |
 | Rate-limit-aware retry (`429` / `Retry-After`, token bucket) | ❌ not yet |
 | OAuth auth | ❌ not yet |

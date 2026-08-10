@@ -33,6 +33,7 @@ GET /api/v1/account/state
 GET /api/v1/account/summary
 GET /api/v1/account/fees
 GET /api/v1/account/portfolio-history
+GET /api/v1/account/equity-history
 GET /api/v1/positions
 GET /api/v1/fills
 GET /api/v1/account/rate-limit
@@ -59,6 +60,9 @@ POST /auth/login
 POST /agents/register
 GET /withdrawals
 POST /account/deposit
+GET /deposits
+POST /deposits
+POST /faucet
 POST /account/margin
 GET /orders/{order_id}
 GET /keys

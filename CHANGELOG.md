@@ -9,6 +9,35 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Account funds + equity history (ENG-9200, slice 1 of the spec-coverage
+  push).** Four more pinned-spec operations are wrapped, taking coverage from 48
+  to 52 of the 101 operations in spec v0.7.3:
+  - `fetch_equity_history` / `fetch_equity_history_page` / `iter_equity_history`
+    (`GET /account/equity-history`) — the 5s-cadence, ~1h equity series, cursor
+    paginated like trades and fills. The high-resolution companion to
+    `fetch_portfolio_history`.
+  - `fetch_deposits` (`GET /deposits`) — the funds ledger as `FundsEntry` rows,
+    synthetic credit and faucet claims included and tagged by `kind`. Not
+    cursor-paginated: it is a 100-entry window onto the newest entries, so a
+    longer reconciliation needs its own high-water mark.
+  - `submit_deposit` (`POST /deposits`) — the multi-asset deposit route, next to
+    the existing USDX-only `deposit` (`POST /account/deposit`). The amount is
+    validated as positive **and finite** before signing, because
+    `Decimal("NaN") <= 0` is `False` — a plain positivity check would have sent
+    `"NaN"` as a funds instruction — and is rendered without exponent notation,
+    so `Decimal("1e4")` goes out as `10000` rather than `1E+4`.
+  - `claim_faucet` (`POST /faucet`) — the fixed-amount, cooldown-gated testnet
+    faucet. Refused on a network whose `has_faucet` is false, like
+    `claim_credit`, rather than spending a signed request against a real-funds
+    host.
+
+  New models: `EquityPoint`, `FundsEntry`, `DepositAck`, `FaucetClaim`. Each of
+  these four responses declares no `required` properties in the spec, so every
+  field decodes to `None` when unreported rather than to a default — on these
+  routes a fabricated `0` is a balance that reads as a wiped account, an equity
+  point that plots as a crash, or a faucet cooldown that reads as "claimable
+  now". New bounds: `EQUITY_HISTORY_LIMIT_MAX` (720) and `DEPOSITS_LIMIT_MAX`
+  (100).
 - **Cursor pagination on the five paginated list endpoints (ENG-8081).** Spec
   v0.7.2 added a `cursor` query parameter and an `X-Next-Cursor` response header
   to trades, fills, order history, closed positions and equity history. The SDK

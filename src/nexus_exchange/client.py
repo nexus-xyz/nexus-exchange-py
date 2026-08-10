@@ -14,7 +14,7 @@ import hmac
 import json
 import time
 from collections.abc import Iterator
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from importlib import metadata
 from typing import Any
 from urllib.parse import quote, urlencode, urlsplit
@@ -41,9 +41,13 @@ from .types import (
     BridgeDepositAddress,
     CancelOnDisconnectStatus,
     CreditResult,
+    DepositAck,
     DepositResult,
+    EquityPoint,
+    FaucetClaim,
     Fill,
     FundingSample,
+    FundsEntry,
     HealthStatus,
     LeverageUpdate,
     MarginAdjustment,
@@ -77,6 +81,8 @@ __all__ = [
     "SigningDomain",
     "DEFAULT_USER_AGENT",
     "DEFAULT_API_VERSION",
+    "DEPOSITS_LIMIT_MAX",
+    "EQUITY_HISTORY_LIMIT_MAX",
     "FILLS_LIMIT_MAX",
     "PORTFOLIO_LIMIT_MAX",
     "TRADES_LIMIT_MAX",
@@ -142,6 +148,15 @@ TRADES_LIMIT_MAX = 1000
 #: default 100).
 FILLS_LIMIT_MAX = 1000
 
+#: Upper bound the spec puts on ``limit`` for ``GET /account/equity-history``
+#: (``maximum: 720``, default 720 — the whole retained window at its 5s cadence).
+EQUITY_HISTORY_LIMIT_MAX = 720
+
+#: Upper bound the spec puts on ``limit`` for ``GET /deposits`` (``maximum: 100``,
+#: also the default). Not cursor-paginated: this endpoint returns the newest 100
+#: entries and no cursor, so it is a *window*, not a page of a full history.
+DEPOSITS_LIMIT_MAX = 100
+
 
 def _portfolio_window(window: PortfolioWindow | str | None) -> str | None:
     """Validate a portfolio ``window`` and return its wire string.
@@ -200,20 +215,55 @@ def _decode_body(resp: httpx.Response) -> Any:
         return resp.text
 
 
+def _wire_amount(amount: Decimal | str, field: str = "amount") -> str:
+    """Validate a positive money argument and render it for the wire.
+
+    Three failures a bare ``str(amount)`` would put on the wire instead of
+    raising, each of which reaches the engine as a funds instruction:
+
+    * **Unparseable** input (``"1,000"``, ``"abc"``, ``True``) — ``Decimal(...)``
+      raises :class:`decimal.InvalidOperation`, a surprising type to catch from a
+      deposit call, so it is re-raised as :class:`ValueError` like every other
+      caller-argument error here.
+    * **Non-finite** input (``"NaN"``, ``"Infinity"``) — ``Decimal("NaN") <= 0``
+      is ``False``, so a plain positivity check *passes* it and ``"NaN"`` goes out
+      as the amount. Rejected explicitly, matching
+      :func:`nexus_exchange._parse.to_decimal` on the way back in.
+    * **Scientific notation** — ``str(Decimal("1e4"))`` is ``"1E+4"``. Rendering
+      through ``format(..., "f")`` sends the plain ``"10000"`` instead, so the
+      value cannot depend on whether the server's decimal parser accepts an
+      exponent.
+
+    Zero and negative are rejected too: neither is a deposit, and the server
+    would answer ``400``.
+    """
+    try:
+        parsed = Decimal(str(amount))
+    except (InvalidOperation, ValueError, TypeError):
+        raise ValueError(f"{field} must be a decimal number (got {amount!r})") from None
+    if not parsed.is_finite():
+        raise ValueError(f"{field} must be a finite decimal (got {amount!r})")
+    if parsed <= 0:
+        raise ValueError(f"{field} must be positive (got {amount!r})")
+    # Plain (non-exponent) notation, so "1e4" cannot reach the wire as "1E+4".
+    return format(parsed, "f")
+
+
 def _page_limit(limit: int | None, maximum: int, endpoint: str) -> int | None:
-    """Validate a paginated list endpoint's ``limit`` against its spec maximum.
+    """Validate a list endpoint's ``limit`` against its spec maximum.
 
     ``maximum`` is a constraint on the *request*, so a conforming client does not
     send past it: this raises :class:`ValueError` before the request (and, on a
     signed route, before signing) rather than relying on the server to clamp.
     Each endpoint has its own maximum — they are **not** interchangeable (trades
-    and fills 1000, orders/history 500, positions/closed 200, equity-history
-    720) — so the bound is passed in per call site rather than shared.
+    and fills 1000, orders/history 500, equity-history 720, positions/closed 200,
+    deposits 100) — so the bound is passed in per call site rather than shared.
 
-    The lower bound is the SDK's own: the paginated endpoints declare no
-    ``minimum``, but ``limit=0`` would return an empty page, which for a
-    cursor-paginated endpoint reads as "no more results" and would silently end a
-    walk at zero items. Rejecting it is friendlier than that.
+    The lower bound is the SDK's own: these endpoints declare no ``minimum``, but
+    ``limit=0`` would return an empty page, which for a cursor-paginated endpoint
+    reads as "no more results" and would silently end a walk at zero items (and
+    on an unpaginated one is a request for nothing). Rejecting it is friendlier
+    than that.
 
     Rejects ``bool`` explicitly — it is an ``int`` subclass, and letting it
     through would send ``limit=True``.
@@ -733,6 +783,75 @@ class Client:
         )
         return PortfolioHistory.from_dict(data if isinstance(data, dict) else {})
 
+    def fetch_equity_history(self, limit: int | None = None) -> list[EquityPoint]:
+        """``GET /account/equity-history`` — recent account equity, oldest first.
+
+        Requires credentials. A 5s-cadence series over a ~1h retained window —
+        the high-resolution companion to :meth:`fetch_portfolio_history`, which
+        covers days-to-months downsampled. Use this to watch equity move
+        intra-session; use the portfolio history for a chart over a window.
+
+        Returns the first page only. ``limit`` bounds it and must fall in
+        ``1..720`` (:data:`EQUITY_HISTORY_LIMIT_MAX`, the whole window at its
+        cadence). For the full retained window regardless of page size use
+        :meth:`iter_equity_history`, or :meth:`fetch_equity_history_page` for one
+        page plus its cursor.
+
+        Each :class:`EquityPoint` field is spec-optional and so may be ``None``;
+        skip such a point rather than reading it as a zero equity. A non-object
+        element raises :class:`~nexus_exchange.DecodeError` instead of being
+        dropped, because a hole in a fixed-cadence series silently bends every
+        delta derived from it.
+        """
+        return self.fetch_equity_history_page(limit=limit).items
+
+    def fetch_equity_history_page(
+        self,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+    ) -> Page[EquityPoint]:
+        """``GET /account/equity-history`` — one page of equity samples, plus its cursor.
+
+        The manual-paging form; see :meth:`fetch_trades_page`. Requires
+        credentials.
+        """
+        query = _query(
+            limit=_page_limit(limit, EQUITY_HISTORY_LIMIT_MAX, "equity-history"),
+            cursor=cursor,
+        )
+        data, next_cursor = self._request_page(
+            "/account/equity-history", query=query, signed=True, direct=True
+        )
+        rows = to_dict_list(data, "equity-history", required=False)
+        return Page([EquityPoint.from_dict(p) for p in rows], next_cursor)
+
+    def iter_equity_history(
+        self,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        max_pages: int | None = None,
+    ) -> Iterator[EquityPoint]:
+        """Every retained equity sample, oldest first, paging by cursor as needed.
+
+        A generator; each page costs one signed request, issued lazily. ``limit``
+        sets the page size, ``cursor`` resumes from a saved position, and
+        ``max_pages`` bounds the walk. Requires credentials.
+
+        The window is bounded (~1h at 5s ≈ 720 points), so unlike
+        :meth:`iter_my_trades` this walk is short by construction — but it is
+        still the server that decides when to stop handing back cursors, so
+        ``max_pages`` remains the way to cap the requests. See
+        :mod:`nexus_exchange.pagination` for the termination rules.
+        """
+        _check_iter_args(limit, EQUITY_HISTORY_LIMIT_MAX, "equity-history", max_pages)
+        return iter_items(
+            lambda c: self.fetch_equity_history_page(limit=limit, cursor=c),
+            cursor=cursor,
+            max_pages=max_pages,
+        )
+
     def fetch_my_trades(self, limit: int | None = None) -> list[Fill]:
         """``GET /fills`` — recent fills (private executions). Requires credentials.
 
@@ -788,6 +907,28 @@ class Client:
         """``GET /withdrawals`` — withdrawal history. Requires credentials."""
         data = self._request("GET", "/withdrawals", signed=True)
         return [Withdrawal.from_dict(w) for w in (data if isinstance(data, list) else [])]
+
+    def fetch_deposits(self, limit: int | None = None) -> list[FundsEntry]:
+        """``GET /deposits`` — the account's deposit ledger, newest first.
+
+        Requires credentials. ``limit`` must fall in ``1..100``
+        (:data:`DEPOSITS_LIMIT_MAX`, also the server default). Not
+        cursor-paginated, so this is a *window* onto the newest entries and there
+        is no way to page past it — a caller reconciling a longer history should
+        keep its own high-water mark (:attr:`FundsEntry.id`) rather than assume
+        this is everything.
+
+        Covers the funds *entries* — synthetic credit and faucet claims included,
+        distinguished by :attr:`FundsEntry.kind` — not on-chain bridge transfers;
+        for those use :meth:`fetch_bridge_deposits`. A malformed element raises
+        :class:`~nexus_exchange.DecodeError` rather than being skipped: a ledger
+        that silently comes back short is one a reconciliation would trust.
+
+        Not in the ``/api/v1`` spec; stays on the legacy gateway.
+        """
+        query = _query(limit=_page_limit(limit, DEPOSITS_LIMIT_MAX, "deposits"))
+        data = self._request("GET", "/deposits", query=query, signed=True)
+        return [FundsEntry.from_dict(e) for e in to_dict_list(data, "deposits", required=False)]
 
     # -- bridge (deposits) ---------------------------------------------------
 
@@ -866,6 +1007,67 @@ class Client:
         """
         data = self._request("POST", "/account/deposit", body={"amount": str(amount)}, signed=True)
         return DepositResult.from_dict(data if isinstance(data, dict) else {})
+
+    def submit_deposit(self, amount: Decimal | str, asset: str | None = None) -> DepositAck:
+        """``POST /deposits`` — submit a (testnet/synthetic) deposit. Requires credentials.
+
+        The multi-asset deposit route: ``asset`` defaults to USDX server-side when
+        omitted, so pass it only to deposit something else. Returns the engine's
+        acknowledgement with the authoritative post-deposit balance, which may be
+        ``None`` if the engine did not report one — see :class:`DepositAck`.
+
+        Distinct from :meth:`deposit` (``POST /account/deposit``), the older
+        USDX-only collateral route. Both exist in the pinned spec and this SDK
+        implements both rather than picking one, since a deploy may serve either;
+        prefer this one for new code.
+
+        ``amount`` must be a positive, finite decimal, checked before the request
+        so a malformed value cannot be signed and sent as a funds instruction
+        (see :func:`_wire_amount`). An empty or blank ``asset`` is rejected for
+        the same reason: it is a caller mistake, not "use the default".
+
+        Not in the ``/api/v1`` spec; stays on the legacy gateway.
+        """
+        body: dict[str, Any] = {"amount": _wire_amount(amount)}
+        if asset is not None:
+            if not asset.strip():
+                raise ValueError("asset must be a non-empty symbol (omit it to default to USDX)")
+            body["asset"] = asset
+        data = self._request("POST", "/deposits", body=body, signed=True)
+        return DepositAck.from_dict(data if isinstance(data, dict) else {})
+
+    def claim_faucet(self) -> FaucetClaim:
+        """``POST /faucet`` — claim the fixed testnet faucet amount. Requires credentials.
+
+        Takes no amount: the server credits a fixed sum, subject to a per-wallet
+        cooldown and a cumulative cap. On a cooldown the server answers ``429``
+        (raised as :class:`~nexus_exchange.ApiError`); wait for the
+        :attr:`FaucetClaim.available_at_ms` of the previous claim instead of
+        retrying into it.
+
+        Testnet and local only — the spec marks this operation
+        ``x-nexus-network-availability: [testnet, local]``, and mainnet has no
+        faucet because its collateral is USDX bridged from Ethereum Mainnet.
+        Raises :class:`ValueError` on a faucet-less network rather than spending a
+        signed request against a real-funds host, exactly as
+        :meth:`claim_credit` does.
+
+        Related but not the same as :meth:`claim_credit` (``POST
+        /account/credit``): that one mints synthetic USDX against a *daily
+        allowance* and takes an optional amount, this one is the fixed-amount,
+        cooldown-gated faucet. Both appear in the ledger from
+        :meth:`fetch_deposits`, tagged by :attr:`FundsEntry.kind`.
+
+        Not in the ``/api/v1`` spec; stays on the legacy gateway.
+        """
+        if not self._network.has_faucet:
+            raise ValueError(
+                f"{self._network.label} has no faucet: `claim_faucet` mints synthetic "
+                f"funds and is testnet/local only. Real collateral is bridged — see "
+                f"`deposit` and `fetch_bridge_assets`."
+            )
+        data = self._request("POST", "/faucet", signed=True)
+        return FaucetClaim.from_dict(data if isinstance(data, dict) else {})
 
     def claim_credit(self, amount: Decimal | str | None = None) -> CreditResult:
         """``POST /account/credit`` — claim synthetic (testnet) USDX from the faucet.

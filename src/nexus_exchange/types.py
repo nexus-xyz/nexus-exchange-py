@@ -711,6 +711,43 @@ class PortfolioHistory:
 
 
 @dataclass(frozen=True)
+class EquityPoint:
+    """One equity sample for the account (``GET /account/equity-history``).
+
+    A finer-grained companion to :class:`PortfolioPoint`: 5s cadence over a
+    ~1h retained window, **oldest first**, and equity only (no cumulative PnL or
+    volume). Use :class:`PortfolioHistory` for the longer, downsampled series.
+
+    Two deliberate differences from :class:`PortfolioPoint`, both straight from
+    the spec:
+
+    * **Both fields are optional.** ``EquityPoint`` declares no ``required``
+      properties, so an unreported field decodes to ``None`` rather than to a
+      fabricated ``0`` equity or an epoch timestamp — either of which would plot
+      as a real datum. Callers charting the series should skip a point whose
+      :attr:`equity` or :attr:`timestamp_ms` is ``None`` rather than coercing it.
+    * :attr:`equity` arrives as a JSON **number**, not the exact decimal string
+      the rest of the account surface uses. It is still parsed through the
+      arriving text into :class:`~decimal.Decimal` (never an intermediate
+      ``float``), but treat it as a display/heuristic figure — take an
+      authoritative equity from :meth:`Client.fetch_account_summary
+      <nexus_exchange.Client.fetch_account_summary>`.
+    """
+
+    timestamp_ms: int | None
+    equity: Decimal | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> EquityPoint:
+        return cls(
+            timestamp_ms=opt_int(d.get("timestamp_ms"), "timestamp_ms"),
+            equity=opt_decimal(d.get("equity"), "equity"),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
 class AccountFees:
     """The account's effective fee schedule (``GET /account/fees``, spec v0.7.2).
 
@@ -1204,6 +1241,97 @@ class CreditResult:
             amount=to_decimal(d.get("amount", 0)),
             credited_today=to_decimal(d.get("credited_today", 0)),
             daily_limit=to_decimal(d.get("daily_limit", 0)),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class DepositAck:
+    """Acknowledgement of a submitted deposit (``POST /deposits``).
+
+    The engine's reply, forwarded verbatim, carrying the authoritative
+    post-deposit balance. Distinct from :class:`DepositResult` (the older
+    ``POST /account/deposit``): the spec marks :attr:`balance` optional here, so
+    an unreported balance stays ``None`` instead of decoding to ``0`` — on a
+    funds route a fabricated zero reads as a wiped account. Ask
+    :meth:`Client.fetch_balance <nexus_exchange.Client.fetch_balance>` when the
+    acknowledgement carries no balance.
+
+    The response is ``additionalProperties: true``, so anything the engine adds
+    beyond ``balance`` is still reachable on :attr:`raw`.
+    """
+
+    balance: Decimal | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> DepositAck:
+        return cls(balance=opt_decimal(d.get("balance"), "balance"), raw=d)
+
+
+@dataclass(frozen=True)
+class FundsEntry:
+    """A deposit or withdrawal ledger entry (``GET /deposits``).
+
+    Every field is spec-optional, so each decodes to ``None`` when the server
+    does not report it rather than to a plausible default — an entry with a
+    fabricated ``"confirmed"`` :attr:`status` or a ``0`` :attr:`amount` is
+    exactly the kind of value a funds reconciliation would trust.
+
+    :attr:`kind` (``deposit`` / ``withdrawal`` / ``faucet``) and :attr:`status`
+    (``pending`` / ``confirmed`` / ``failed``) are typed as plain ``str``, not
+    enums, so a value added upstream later still decodes instead of failing the
+    whole page. Branch on them with an explicit fallback, and treat anything
+    other than ``"confirmed"`` as not-yet-final. :attr:`tx_hash` is ``None``
+    until the entry is on chain (and always, for synthetic credit).
+    """
+
+    id: int | None
+    kind: str | None
+    account: str | None
+    amount: Decimal | None
+    asset: str | None
+    timestamp: int | None
+    status: str | None
+    tx_hash: str | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> FundsEntry:
+        return cls(
+            id=opt_int(d.get("id"), "id"),
+            kind=opt_str(d.get("kind")),
+            account=opt_str(d.get("account")),
+            amount=opt_decimal(d.get("amount"), "amount"),
+            asset=opt_str(d.get("asset")),
+            timestamp=opt_int(d.get("timestamp"), "timestamp"),
+            status=opt_str(d.get("status")),
+            tx_hash=opt_str(d.get("tx_hash")),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class FaucetClaim:
+    """Result of a testnet faucet claim (``POST /faucet``).
+
+    :attr:`amount` is the fixed amount credited; :attr:`available_at_ms` is the
+    earliest epoch-millisecond time the faucet may be claimed again, which is
+    the value to wait on rather than retrying into a ``429``. Both are
+    spec-optional and decode to ``None`` when unreported — notably, a ``None``
+    :attr:`available_at_ms` is *not* "claimable now", it is "the server did not
+    say", so keep your own cooldown rather than reading a ``0``.
+    """
+
+    amount: Decimal | None
+    available_at_ms: int | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> FaucetClaim:
+        return cls(
+            amount=opt_decimal(d.get("amount"), "amount"),
+            available_at_ms=opt_int(d.get("available_at_ms"), "available_at_ms"),
             raw=d,
         )
 
