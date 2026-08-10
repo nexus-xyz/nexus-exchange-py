@@ -117,27 +117,33 @@ The retired `stable` / `beta` release channels were never networks. `stable`
 became `Network.TESTNET` (same target); `beta` is now an explicit override:
 
 ```python
-Client(
-    base_url="https://beta.exchange.nexus.xyz/api/exchange",
-    direct_base_url="https://beta.exchange.nexus.xyz",
-)
+Client(base_url="https://beta.exchange.nexus.xyz/api/exchange")
 ```
 
 ### Routing: direct `/api/v1` service vs. legacy gateway
 
 As the REST gateway is retired (ENG-4740), backend services expose their own
-REST API under an **`/api/v1`** prefix served at the host root
-(`https://exchange.nexus.xyz`), rather than the `…/api/exchange` gateway. The
-migrated market-data and account/trading routes now target this direct service;
-the HMAC signature covers the full path (e.g. `/api/v1/orders`). Routes with no
-`/api/v1` equivalent yet — `GET /markets`, `/health`, ADL history, `GET
-/orders/{id}`, deposits, keys/agents, WS tokens and admin tiers — stay on the
-legacy gateway. This split is internal; method names and signatures are
-unchanged. A custom `base_url` overrides both bases, so on its own point it at
-the service root (e.g. `http://localhost:9090`), not a `/api/exchange` URL — a
-gateway base reaching the direct surface is rejected at construction, since it
-would send *and HMAC-sign* `/api/exchange/api/v1/…`. Pass `direct_base_url`
-alongside it to target a deploy that keeps the split.
+REST API under an **`/api/v1`** prefix. The migrated market-data and
+account/trading routes target it; the HMAC signature covers the full prefixed
+path (e.g. `/api/v1/orders`). Routes with no `/api/v1` equivalent yet — `GET
+/markets`, `/health`, ADL history, `GET /orders/{id}`, deposits, keys/agents, WS
+tokens and admin tiers — stay unprefixed. This split is internal; method names
+and signatures are unchanged.
+
+**Where that prefix is mounted is a property of the deploy, not of the prefix.**
+On the hosted networks it sits *under* the gateway — `…/api/exchange/api/v1/…` is
+the path that answers — so `base_url` and `direct_base_url` are the same value
+there. A local service has no gateway in front of it, so both are the host root.
+Requesting `/api/v1/…` at a hosted host root returns a **404 with an HTML body**,
+which is the tell that the base is wrong: the web frontend answered and the API
+never saw the request. (This SDK assumed the host root until ENG-9200, which
+404'd 32 of its 53 operations, order placement included.)
+
+A custom `base_url` overrides both bases, which is usually what you want. Pass
+`direct_base_url` separately only for a deploy that answers `/api/v1` elsewhere,
+and do not include `/api/v1` in it — the client appends the prefix, and a base
+that already carries it is rejected at construction rather than left to sign a
+doubled path.
 
 #### If you are coming from another Nexus SDK
 
@@ -146,13 +152,13 @@ two-URL split here is one field in the TypeScript client:
 
 | Surface | Python | TypeScript | Resolves to (testnet) |
 | --- | --- | --- | --- |
-| Direct `/api/v1` service | `direct_base_url` (host root; the `/api/v1` prefix is added per request) | `baseUrl` (prefix included in the base) | `https://exchange.nexus.xyz/api/v1` |
-| Legacy `/api/exchange` gateway | `base_url` | *not modelled* | `https://exchange.nexus.xyz/api/exchange` |
+| Direct `/api/v1` surface | `direct_base_url` (the `/api/v1` prefix is added per request) | `baseUrl` (prefix included in the base) | `https://exchange.nexus.xyz/api/exchange` |
+| Legacy unprefixed routes | `base_url` | *not modelled* | `https://exchange.nexus.xyz/api/exchange` |
 
-So Python's `base_url` and TypeScript's `baseUrl` are **not** the same field
-despite the name, while `direct_base_url` plus the prefix and `baseUrl` are
-byte-identical. Copying a Python `base_url` into `baseUrl` is the mistake both
-SDKs now reject.
+So Python's two fields hold the same value on testnet, while TypeScript's
+`baseUrl` is that value **plus** `/api/v1`. Copying a `baseUrl` into
+`direct_base_url` is rejected at construction, since it would double the
+prefix.
 
 ## Authentication
 

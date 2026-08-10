@@ -281,22 +281,26 @@ class Client:
     pointing at different networks.
 
     Routing targets two bases. The migrated market-data and account/trading
-    surface is served directly by its backend service under ``/api/v1`` at the
-    host root (:attr:`Network.direct_base_url`); routes not yet migrated stay on
-    the legacy ``/api/exchange`` gateway (:attr:`Network.base_url`). A custom
-    ``base_url`` overrides *both* unless ``direct_base_url`` is also given, so on
-    its own it must point at the service root (e.g. ``http://localhost:9090``),
-    not a ``/api/exchange`` gateway URL — that case is rejected at construction
-    rather than left to sign a wrong path. Note this makes ``base_url`` a
-    different field from the TypeScript SDK's similarly-named ``baseUrl``, which
-    is the *direct* base with the prefix already in it; ``direct_base_url`` is its
-    counterpart here. Pass both to target a deploy that keeps the split — this is
-    how the retired ``beta`` channel is reached now::
+    surface is requested under an ``/api/v1`` prefix, which the client appends to
+    :attr:`Network.direct_base_url`; routes not yet migrated go to
+    :attr:`Network.base_url` unprefixed. On testnet both bases are the same
+    ``/api/exchange`` value, because that deploy mounts ``/api/v1`` under the
+    gateway rather than at the host root (measured — ENG-9200; the host-root form
+    is answered by the web frontend with a 404 *HTML* page). Local runs the
+    service with no gateway in front, so there both are the host root.
 
-        Client(
-            base_url="https://beta.exchange.nexus.xyz/api/exchange",
-            direct_base_url="https://beta.exchange.nexus.xyz",
-        )
+    A custom ``base_url`` overrides *both* unless ``direct_base_url`` is also
+    given, which is usually what you want — including for the retired ``beta``
+    channel, now a one-line override::
+
+        Client(base_url="https://beta.exchange.nexus.xyz/api/exchange")
+
+    Pass ``direct_base_url`` separately only for a deploy that answers ``/api/v1``
+    somewhere else. Either way, do not include ``/api/v1`` in it: the client adds
+    the prefix, and a base that already carries it is rejected at construction
+    rather than left to sign a doubled path. That is the one difference from the
+    TypeScript SDK's similarly-named ``baseUrl``, which *is* the direct base with
+    the prefix baked in.
 
     Usable as a context manager::
 
@@ -332,9 +336,9 @@ class Client:
             network.direct_base_url,
             "direct_base_url",
         )
-        # The direct surface is never under the gateway prefix, and getting it
-        # wrong is silent: the bad path would be signed as well as sent.
-        self._reject_gateway_direct_base(self._direct_base_url)
+        # A base that already carries /api/v1 would be prefixed a second time, and
+        # getting it wrong is silent: the bad path is signed as well as sent.
+        self._reject_prefixed_direct_base(self._direct_base_url)
         self._api_key = api_key
         self._api_secret = api_secret
         # Spec tag advertised on every request. Defaults to the tag the package
@@ -383,44 +387,43 @@ class Client:
         return base
 
     @staticmethod
-    def _reject_gateway_direct_base(base: str) -> None:
-        """Refuse a legacy ``/api/exchange`` base for the direct surface.
+    def _reject_prefixed_direct_base(base: str) -> None:
+        """Refuse a direct base that already ends in :data:`API_V1_PREFIX`.
 
-        The direct service is served at the *host root* and this client appends
-        :data:`API_V1_PREFIX` itself, so a gateway base would produce
-        ``/api/exchange/api/v1/orders`` — a 404 whose HMAC signature is over that
-        same wrong path, which reads as an auth failure rather than a
-        misconfiguration. Nothing is served under both prefixes, so there is no
-        deploy for which this is right.
+        This client appends the prefix per request, so a base that already carries
+        it produces ``/api/v1/api/v1/orders`` — signed over that same wrong path,
+        so it reads as an auth failure rather than a misconfiguration. There is no
+        deploy for which double-prefixing is right.
 
-        Worth a guard and not just the docs, because ``base_url`` alone falls
-        back to covering both surfaces, and the one value a caller is most likely
-        to have on hand *is* a gateway base: it is this SDK's own ``base_url``
-        default, and the first line of the retired-``beta`` migration. The sibling
-        SDKs meet the same paste from the other side — the TypeScript client
-        rejects a gateway base outright, and the MCP server strips the prefix
-        defensively — so it demonstrably happens.
+        Worth a guard and not just the docs, because the value a caller is most
+        likely to have on hand *does* include the prefix: the TypeScript SDK's
+        ``baseUrl`` is the direct base with ``/api/v1`` already in it, and the
+        README's cross-SDK table exists precisely because that paste happens.
+
+        This replaced a guard that refused an ``/api/exchange`` base here
+        (ENG-9200). That guard encoded the assumption that the direct surface is
+        served at the host root — which the live testnet deploy contradicts: it
+        mounts ``/api/v1`` *under* the gateway, so the guard rejected the one
+        value that works and left no way to configure the client correctly. Where
+        the mount lives is per-deploy and is not this SDK's business to police; a
+        base prefixed twice is wrong on any deploy, so that is what is checked.
 
         Raises rather than stripping: this base is where signed requests go, and
         silently retargeting them is not this SDK's call to make.
         """
-        # Match the path segment pair `api/exchange` rather than a substring, so a
-        # host or a query happening to contain the words is not mistaken for it.
+        # Compare path segments, not a substring, so a host or query happening to
+        # contain the words is not mistaken for the prefix.
         segments = [s for s in urlsplit(base).path.split("/") if s]
-        is_gateway = any(
-            seg == "exchange" and segments[i - 1] == "api"
-            for i, seg in enumerate(segments)
-            if i > 0
-        )
-        if not is_gateway:
+        prefix_segments = [s for s in API_V1_PREFIX.split("/") if s]
+        if segments[-len(prefix_segments) :] != prefix_segments:
             return
-        host_root = base[: base.index("/api/exchange")] if "/api/exchange" in base else base
+        trimmed = base[: base.rindex(API_V1_PREFIX)] or "/"
         raise ValueError(
-            f"direct_base_url must not point at the legacy '/api/exchange' gateway "
-            f"(got {base!r}): the direct {API_V1_PREFIX} surface is served at the host "
-            f"root, so this would send — and sign — '{urlsplit(base).path}{API_V1_PREFIX}/…'. "
-            f"Pass direct_base_url={host_root!r} alongside base_url to target a deploy "
-            f"that keeps the gateway/direct split."
+            f"direct_base_url must not already include {API_V1_PREFIX!r} (got {base!r}): "
+            f"this client appends it per request, so the path sent — and signed — would "
+            f"be '{urlsplit(base).path}{API_V1_PREFIX}/…'. Pass "
+            f"direct_base_url={trimmed!r} instead. Note this differs from the "
+            f"TypeScript SDK's `baseUrl`, which has the prefix baked in."
         )
 
     # -- lifecycle --------------------------------------------------------

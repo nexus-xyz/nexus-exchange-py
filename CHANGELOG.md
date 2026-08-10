@@ -7,6 +7,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **The `/api/v1` surface was requested at the host root, where nothing serves it
+  — 32 of 53 operations 404'd on the default testnet config (ENG-9200).** It is
+  mounted *under* the gateway: `https://exchange.nexus.xyz/api/exchange/api/v1/…`
+  answers, while the host-root form is caught by the web frontend and returns a
+  404 with an **HTML** body. So every `direct=True` call failed against the
+  default testnet target — all market-data reads except `GET /markets`, the entire
+  authenticated account surface, and `POST /orders` / `/orders/batch` / both
+  cancels. The README's own quick start failed on its second call.
+
+  `Network.TESTNET.direct_base_url` now points at the gateway base. Verified live:
+  all eight public `/api/v1` reads go 404 → 200, and an authenticated `/api/v1`
+  read now returns a JSON `401 UNAUTHORIZED` from the API rather than a 404 HTML
+  page from the frontend.
+
+  **Signing is deliberately unchanged** — the canonical path stays `/api/v1/…`,
+  since the gateway strips its own `/api/exchange` before the signature is
+  verified (which is why the pre-existing unprefixed legacy routes sign the way
+  they do). Confirming that with a *valid* signed `/api/v1` call is the one step
+  that needs credentials; routing to the authenticator is confirmed.
+
+- **A gateway `direct_base_url` is no longer refused at construction.** The old
+  guard encoded the host-root assumption, so it rejected the only value that
+  works and left no way to configure the client correctly — not even as a
+  workaround. It is replaced by one that rejects a direct base already containing
+  `/api/v1`, which is wrong on any deploy (and is exactly what pasting the
+  TypeScript SDK's `baseUrl` produces). Where the mount lives is per-deploy and
+  not this SDK's business to police.
+
+  The retired `beta` channel is consequently a one-line override now:
+  `Client(base_url="https://beta.exchange.nexus.xyz/api/exchange")`.
+
 ### Added
 
 - **Cursor pagination on the five paginated list endpoints (ENG-8081).** Spec

@@ -11,8 +11,9 @@ def test_network_base_urls() -> None:
     # targets: the legacy gateway still serves testnet, and the hosted per-network
     # host is not resolvable yet.
     assert Network.TESTNET.base_url == "https://exchange.nexus.xyz/api/exchange"
-    # The direct /api/v1 base is the host root — no /api/exchange gateway prefix.
-    assert Network.TESTNET.direct_base_url == "https://exchange.nexus.xyz"
+    # The direct /api/v1 surface is mounted *under* the gateway on this deploy, so
+    # the two bases coincide and the client sends /api/exchange/api/v1/… (ENG-9200).
+    assert Network.TESTNET.direct_base_url == "https://exchange.nexus.xyz/api/exchange"
     assert Client(Network.LOCAL)._base_url == "http://localhost:9090"
     assert Client(Network.LOCAL)._direct_base_url == "http://localhost:9090"
 

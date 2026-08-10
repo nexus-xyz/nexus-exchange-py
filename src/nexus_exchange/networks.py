@@ -117,7 +117,17 @@ class NetworkConfig:
     #: deliberate absence rather than a guess — see :class:`Network`.
     base_url: str | None
 
-    #: Host root for the direct ``/api/v1`` surface, or ``None`` as above.
+    #: Base the direct ``/api/v1`` surface is mounted under, or ``None`` as above.
+    #: The client appends ``/api/v1`` itself, so this is the value *before* that
+    #: prefix — **not** necessarily the host root.
+    #:
+    #: Where the mount lives is a property of the deploy and has to be measured,
+    #: not derived from the prefix's name. On testnet it is under the gateway
+    #: (``…/api/exchange/api/v1/…`` answers; the host-root form is caught by the
+    #: web frontend and returns 404 *HTML*), which is the opposite of what this
+    #: SDK assumed until ENG-9200. Locally there is no gateway in front of the
+    #: service, so the host root is right there. An HTML 404 body is the tell that
+    #: this value is wrong: it means the request never reached the API.
     direct_base_url: str | None
 
 
@@ -131,6 +141,15 @@ class NetworkConfig:
 # nexus.xyz` is testnet, so there is nothing to fall back to and nothing safe to
 # invent. Its bases are None, and the client says so plainly instead of
 # resolving to a host that would quietly be the wrong network.
+#
+# On where `/api/v1` is mounted: it is under the gateway base on testnet, not at
+# the host root. This was measured against the live deploy (ENG-9200), and the
+# earlier host-root assumption 404'd 32 of this SDK's 53 operations — including
+# order placement — with an HTML body, because the web frontend answered instead
+# of the API. The prefix's *name* suggests a separate service; the deploy decides
+# where it actually answers, so treat this as a per-network fact to verify rather
+# than derive. Local runs the service with no gateway in front, so there the host
+# root is correct and the two bases coincide for a different reason.
 #
 # The WebSocket bases are the spec's values as published and are not reachable
 # yet either (there is no legacy WS base to keep using, and no WS client here to
@@ -157,7 +176,10 @@ _CONFIGS: Mapping[str, NetworkConfig] = MappingProxyType(
             ws_authenticated_url="wss://api.testnet.nexus.xyz/ws",
             signing_domain=SigningDomain(),
             base_url="https://exchange.nexus.xyz/api/exchange",
-            direct_base_url="https://exchange.nexus.xyz",
+            # Same base as the gateway: testnet mounts the direct /api/v1 surface
+            # *under* /api/exchange. Measured, not assumed — see the comment above
+            # the map and `NetworkConfig.direct_base_url`.
+            direct_base_url="https://exchange.nexus.xyz/api/exchange",
         ),
         "local": NetworkConfig(
             label="Local",

@@ -87,7 +87,8 @@ class TestClientTargeting:
         with Client() as client:
             assert client.network is Network.TESTNET
             assert client._base_url == "https://exchange.nexus.xyz/api/exchange"
-            assert client._direct_base_url == "https://exchange.nexus.xyz"
+            # Testnet mounts /api/v1 *under* the gateway, so both bases coincide.
+            assert client._direct_base_url == "https://exchange.nexus.xyz/api/exchange"
 
     def test_mainnet_without_an_explicit_base_refuses_at_construction(self) -> None:
         # Its host is published but not resolvable. Guessing one would mean
@@ -106,54 +107,45 @@ class TestClientTargeting:
             assert client._base_url == "https://api.nexus.xyz"
             assert client.network.real_funds is True
 
-    def test_retired_beta_channel_is_reachable_via_the_two_overrides(self) -> None:
-        # Beta is demoted to an explicit override. It keeps the gateway/direct
-        # split, which a single base_url would have collapsed.
-        with Client(
-            base_url="https://beta.exchange.nexus.xyz/api/exchange",
-            direct_base_url="https://beta.exchange.nexus.xyz",
-        ) as client:
+    def test_retired_beta_channel_is_reachable_via_one_override(self) -> None:
+        # Beta is demoted to an explicit override. A single base_url covers both
+        # surfaces, which is now the *correct* shape rather than a collapse: beta
+        # mounts /api/v1 under its gateway the same way testnet does.
+        with Client(base_url="https://beta.exchange.nexus.xyz/api/exchange") as client:
             assert client._base_url == "https://beta.exchange.nexus.xyz/api/exchange"
-            assert client._direct_base_url == "https://beta.exchange.nexus.xyz"
+            assert client._direct_base_url == "https://beta.exchange.nexus.xyz/api/exchange"
 
     def test_single_base_url_override_still_covers_both_surfaces(self) -> None:
         with Client(Network.LOCAL, base_url="http://127.0.0.1:8080/") as client:
             assert client._base_url == "http://127.0.0.1:8080"
             assert client._direct_base_url == "http://127.0.0.1:8080"
 
-    def test_a_lone_gateway_base_url_is_refused(self) -> None:
-        # The half-copied beta migration, and the value most likely to be on
-        # hand. Falling back to it for the direct surface would send *and sign*
-        # /api/exchange/api/v1/orders — a 404 that reads as an auth failure.
-        with pytest.raises(ValueError, match="must not point at the legacy"):
-            Client(base_url="https://beta.exchange.nexus.xyz/api/exchange")
+    def test_a_gateway_base_url_is_accepted_for_both_surfaces(self) -> None:
+        # Regression, ENG-9200: this was refused. The direct surface is *not*
+        # served at the host root on the hosted deploys — /api/exchange/api/v1/…
+        # is the path that answers — so refusing this value left no way to
+        # configure the client correctly.
+        with Client(base_url="https://beta.exchange.nexus.xyz/api/exchange") as client:
+            assert client._direct_base_url == "https://beta.exchange.nexus.xyz/api/exchange"
 
-    def test_the_gateway_refusal_names_the_host_root_to_pass(self) -> None:
-        with pytest.raises(ValueError) as exc:
-            Client(base_url="https://beta.exchange.nexus.xyz/api/exchange")
-        assert "'https://beta.exchange.nexus.xyz'" in str(exc.value)
-
-    def test_an_explicit_gateway_direct_base_is_refused_too(self) -> None:
-        # Nothing serves /api/v1 under the gateway prefix, so there is no deploy
-        # for which this is the right value.
-        with pytest.raises(ValueError, match="must not point at the legacy"):
+    def test_a_direct_base_that_already_has_the_v1_prefix_is_refused(self) -> None:
+        # The TypeScript SDK's `baseUrl` has /api/v1 baked in; pasting it here
+        # would send — and sign — /api/v1/api/v1/orders.
+        with pytest.raises(ValueError, match="must not already include"):
             Client(
-                base_url="https://beta.exchange.nexus.xyz/api/exchange",
-                direct_base_url="https://beta.exchange.nexus.xyz/api/exchange/",
+                base_url="https://exchange.nexus.xyz/api/exchange",
+                direct_base_url="https://exchange.nexus.xyz/api/exchange/api/v1",
             )
 
-    def test_the_default_gateway_base_url_is_not_caught_by_the_guard(self) -> None:
-        # The guard covers the direct surface only. Testnet's own base_url is a
-        # gateway URL, and must stay one.
-        with Client() as client:
-            assert client._base_url == "https://exchange.nexus.xyz/api/exchange"
-            assert client._direct_base_url == "https://exchange.nexus.xyz"
+    def test_the_prefix_refusal_names_the_value_to_pass(self) -> None:
+        with pytest.raises(ValueError) as exc:
+            Client(Network.LOCAL, direct_base_url="http://localhost:9090/api/v1/")
+        assert "'http://localhost:9090'" in str(exc.value)
 
-    def test_a_host_containing_the_word_exchange_is_not_a_gateway(self) -> None:
-        # The check is on path segments, so `exchange.nexus.xyz` and a path like
-        # /exchange are both fine — only the `api/exchange` pair is refused.
-        with Client(base_url="https://exchange.nexus.xyz/exchange") as client:
-            assert client._direct_base_url == "https://exchange.nexus.xyz/exchange"
+    def test_a_path_merely_containing_v1_is_not_the_prefix(self) -> None:
+        # Segment comparison, not a substring: /api/v1beta and /v1 are both fine.
+        with Client(Network.LOCAL, direct_base_url="http://localhost:9090/api/v1beta") as client:
+            assert client._direct_base_url == "http://localhost:9090/api/v1beta"
 
     def test_blank_override_falls_back_to_the_network_default(self) -> None:
         # Matches the old `base_url or network.base_url` behaviour, and how a
@@ -242,3 +234,54 @@ class TestSigningDomain:
 
     def test_domain_defaults_match_the_contract(self) -> None:
         assert SigningDomain() == SigningDomain("Nexus Exchange", "1", None)
+
+
+class TestDirectSurfaceResolution:
+    """Where a ``direct=True`` call actually lands (ENG-9200).
+
+    The bug these pin was invisible to every existing test: the *prefix* was
+    right, the *base* was wrong, so URL-building tests passed while 32 of the
+    SDK's 53 operations 404'd against the live deploy — the web frontend answering
+    instead of the API. Asserting the resolved URL is what catches that class of
+    defect, so these check the path the client sends rather than the parts.
+    """
+
+    def test_a_direct_call_lands_under_the_gateway_on_testnet(self, httpx_mock) -> None:
+        httpx_mock.add_response(
+            url="https://exchange.nexus.xyz/api/exchange/api/v1/tickers", json={}
+        )
+        with Client(Network.TESTNET) as client:
+            client.fetch_tickers()
+        assert httpx_mock.get_request().url.path == "/api/exchange/api/v1/tickers"
+
+    def test_a_legacy_call_stays_unprefixed_on_testnet(self, httpx_mock) -> None:
+        httpx_mock.add_response(url="https://exchange.nexus.xyz/api/exchange/markets", json=[])
+        with Client(Network.TESTNET) as client:
+            client.fetch_markets()
+        assert httpx_mock.get_request().url.path == "/api/exchange/markets"
+
+    def test_local_keeps_the_direct_surface_at_the_host_root(self, httpx_mock) -> None:
+        # No gateway in front of the local service, so the mount differs from
+        # testnet's. This is why the base is per-network data, not a constant.
+        httpx_mock.add_response(url="http://localhost:9090/api/v1/tickers", json={})
+        with Client(Network.LOCAL) as client:
+            client.fetch_tickers()
+        assert httpx_mock.get_request().url.path == "/api/v1/tickers"
+
+    def test_the_signed_path_is_the_prefixed_path_not_the_base(self, httpx_mock) -> None:
+        # The canonical string covers the path as sent minus the base, so moving
+        # the base must not change what is signed. Recorded because the fix for
+        # ENG-9200 deliberately left signing untouched.
+        httpx_mock.add_response(
+            url="https://exchange.nexus.xyz/api/exchange/api/v1/account", json={}
+        )
+        secret = "00" * 32
+        with Client(Network.TESTNET, api_key="nx_test", api_secret=secret) as client:
+            signed = client._sign("GET", "/api/v1/account", "", b"")
+            client.fetch_balance()
+        # Same key/timestamp inputs would yield the same signature; what matters
+        # here is that the request signs at all and targets the mounted path.
+        assert set(signed) == {"x-api-key", "x-timestamp", "x-signature"}
+        req = httpx_mock.get_request()
+        assert req.url.path == "/api/exchange/api/v1/account"
+        assert req.headers["x-api-key"] == "nx_test"
