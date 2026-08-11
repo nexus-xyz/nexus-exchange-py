@@ -97,9 +97,9 @@ with Client(Network.TESTNET) as client:
 **positively** so an undeclared target fails closed:
 
 ```python
-if client.network.funds is not Funds.PLAY:   # correct — UNKNOWN is refused
+if client.network.funds is not Funds.PLAY:  # correct — UNKNOWN is refused
     refuse()
-if client.network.funds is Funds.REAL:       # WRONG — UNKNOWN slips through
+if client.network.funds is Funds.REAL:  # WRONG — UNKNOWN slips through
     refuse()
 ```
 
@@ -148,12 +148,12 @@ somewhere else:
 from nexus_exchange import Client, Funds, NetworkConfig
 
 config = NetworkConfig.custom(
-    label="dev",                              # required
-    funds=Funds.PLAY,                         # required — no default
+    label="dev",  # required
+    funds=Funds.PLAY,  # required — no default
     base_url="https://exchange.example.com",
     direct_base_url="https://exchange.example.com",  # optional; defaults to base_url
-    has_faucet=False,                         # absent until declared
-    chain_id=None,                            # unknown ⇒ signing refuses
+    has_faucet=False,  # absent until declared
+    chain_id=None,  # unknown ⇒ signing refuses
 )
 
 with Client(config) as client:
@@ -175,7 +175,7 @@ faucet, since a URL on its own says nothing about what is behind it. Name the
 network alongside it to keep that network's semantics:
 
 ```python
-Client(base_url="https://exchange.example.com")        # Funds.UNKNOWN, no faucet
+Client(base_url="https://exchange.example.com")  # Funds.UNKNOWN, no faucet
 Client(Network.LOCAL, base_url="http://127.0.0.1:8080")  # stays play funds + faucet
 ```
 
