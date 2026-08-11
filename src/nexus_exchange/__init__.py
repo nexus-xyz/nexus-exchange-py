@@ -32,12 +32,14 @@ from .client import (
     __version__,
 )
 from .errors import (
+    JURISDICTION_CODES,
     ApiError,
     AuthError,
     DecodeError,
     MissingCredentialsError,
     NexusExchangeError,
     PaginationError,
+    RestrictedJurisdictionError,
     TransportError,
 )
 from .networks import (
@@ -159,6 +161,8 @@ __all__ = [
     "MissingCredentialsError",
     "DecodeError",
     "PaginationError",
+    "RestrictedJurisdictionError",
+    "JURISDICTION_CODES",
     "Page",
     "iter_pages",
     "iter_items",

@@ -40,6 +40,78 @@ class ApiError(NexusExchangeError):
         return self.status >= 500 or self.status == 408
 
 
+#: Body ``code`` values that identify a jurisdiction refusal when the
+#: ``x-nexus-block-reason`` header is absent (spec v0.7.3, ``JurisdictionError``).
+#:
+#: This set is a *fallback discriminator*, not a closed enum. The spec is explicit
+#: that the code list is open and that an unrecognized value must be treated as a
+#: permanent refusal, so it is only consulted when the header — which by itself
+#: proves the refusal came from a jurisdiction control — did not arrive.
+JURISDICTION_CODES = frozenset({"US_RESTRICTED", "GEO_UNRESOLVED", "RESTRICTED_JURISDICTION"})
+
+
+class RestrictedJurisdictionError(ApiError):
+    """A ``403`` from a jurisdiction control (spec v0.7.3).
+
+    Declared on every state-changing operation — placing, amending and batching
+    orders, deposits, margin adjustments, credits and the faucet — and, for the
+    sanctions case alone, on reads too.
+
+    **Permanent for the caller's origin.** Terminal like any 4xx, but stronger:
+    the same request will keep being refused from the same origin, so this is not
+    a failure to surface and retry later. That distinction is why it gets a type
+    rather than being left as a bare :class:`ApiError` with a ``code`` to
+    string-match — the SDK's own error taxonomy exists to make "stop" and "try
+    again" different classes rather than different field values.
+
+    Subclasses :class:`ApiError`, so existing ``except ApiError`` handlers keep
+    catching it unchanged and ``status`` / ``code`` / ``message`` / ``body`` all
+    stay where they were.
+
+    Branch on :attr:`block_reason`:
+
+    ``RESTRICTED_JURISDICTION``
+        Sanctions list. The only reason that can also be returned on a read.
+    ``US_RESTRICTED``
+        US write restriction; state-changing operations only.
+    ``GEO_UNRESOLVED``
+        The origin could not be resolved and the write failed closed. Not a
+        statement about where the caller actually is.
+
+    Treat an unrecognized reason exactly like a recognized one — the spec keeps
+    the list open on purpose, so this class is raised on any value the header
+    carries rather than only on the three above.
+
+    That header check is on the *value*, not on presence: a header sent empty or
+    whitespace-only is malformed and names no reason to branch on, so it is read
+    as absent and the body ``code`` decides. Classification therefore still holds
+    for the proxy shapes that actually occur — a dropped header with an intact
+    body, or an intact header with a body that was absent, truncated at
+    :class:`ApiError`'s 2000-character bound, or never JSON. It is lost only if a
+    proxy blanks the header *and* the body is unusable, which no realistic
+    deployment does; do not read the header branch as unconditional.
+
+    Never match on ``message``: the spec marks its wording unstable.
+    """
+
+    def __init__(
+        self,
+        status: int,
+        body: str,
+        *,
+        code: str | None = None,
+        message: str | None = None,
+        block_reason: str | None = None,
+    ) -> None:
+        super().__init__(status, body, code=code, message=message)
+        #: The ``x-nexus-block-reason`` header, falling back to the body ``code``.
+        #: The spec guarantees the two are identical; the header is preferred
+        #: because it survives a body that was absent, truncated or not JSON.
+        #: Whitespace-stripped, and empty reads as absent, so an equality test
+        #: against a documented reason is not defeated by a padded header value.
+        self.block_reason = block_reason or code
+
+
 class TransportError(NexusExchangeError):
     """A connection / timeout error before any response was received."""
 

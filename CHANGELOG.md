@@ -36,7 +36,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flat", and an absent `closed_at_ms` plotted at 1970. An explicitly `null`
   field and an omitted one now agree, where previously one raised and the
   other returned zero.
-
+- **`RestrictedJurisdictionError` for the jurisdiction `403` (ENG-9635).** Spec
+  v0.7.3 declares this refusal on every state-changing operation — placing,
+  amending and batching orders, deposits, margin adjustments, credits, the
+  faucet — and, for the sanctions code, on reads as well. It is **permanent for
+  the caller's origin**, so it is not a failure to surface and retry later, and
+  that is what earns it a type instead of an `ApiError` whose `code` has to be
+  string-matched. Branch on `err.block_reason`: `US_RESTRICTED` (US write
+  restriction), `GEO_UNRESOLVED` (origin unresolved, the write failed closed) or
+  `RESTRICTED_JURISDICTION` (sanctions list). The value comes from the
+  `x-nexus-block-reason` header, falling back to the body `code` — the header is
+  preferred because it still classifies when the body is absent, truncated or
+  not JSON. The spec keeps that list **open**, so an unrecognized reason raises
+  the same class rather than degrading to a bare `ApiError`. Additive: it
+  subclasses `ApiError`, so existing `except ApiError` handlers are unaffected,
+  and the other `403`s in the contract (`credits_frozen`, the admin-secret
+  refusal) deliberately stay plain `ApiError`s — those can lift, this one does
+  not.
 - **The network axis `{Mainnet, Testnet, Local}` (ENG-6454).** `Network` now
   names a *network* — which chain, and whose money — instead of a release
   channel, and each member bundles its whole config in one frozen
