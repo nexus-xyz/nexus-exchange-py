@@ -23,7 +23,13 @@ import httpx
 
 from ._parse import to_dict_list
 from .auth import AgentRegistered, AgentRegistration, EthSigner, LoginResponse
-from .errors import ApiError, MissingCredentialsError, TransportError
+from .errors import (
+    JURISDICTION_CODES,
+    ApiError,
+    MissingCredentialsError,
+    RestrictedJurisdictionError,
+    TransportError,
+)
 from .networks import Network, NetworkConfig, SigningDomain
 from .pagination import NEXT_CURSOR_HEADER, Page, iter_items
 from .types import (
@@ -119,7 +125,7 @@ DEFAULT_USER_AGENT = f"nexus-exchange-py/{__version__}"
 #: contract version (ENG-5350). Mirrors the repo's source of truth in
 #: ``.api-version``; that file is not shipped in the wheel, so the tag is baked
 #: in here and ``tests/test_headers.py`` asserts the two never drift.
-DEFAULT_API_VERSION = "v0.7.3"
+DEFAULT_API_VERSION = "v0.8.1"
 
 DEFAULT_TIMEOUT = 30.0
 
@@ -1349,6 +1355,34 @@ class Client:
                     message = parsed.get("message")
             except ValueError:
                 pass
+
+            # A jurisdiction refusal gets its own type: it is permanent for the
+            # caller's origin, so it is not a 403 to surface and retry later.
+            #
+            # Discriminated on the header first, because `x-nexus-block-reason`
+            # is only ever sent by a jurisdiction control — that makes it proof
+            # on its own, and it holds even when the body is missing, truncated
+            # or not JSON. The body `code` is the fallback for a deployment or
+            # proxy that drops the header. Both are needed: 403 alone would
+            # wrongly capture `credits_frozen` (the other 403 on
+            # `POST /account/credit`) and the admin-secret 403.
+            #
+            # The header test is truthiness, not presence: a header sent with an
+            # empty (or whitespace-only) value is malformed and carries no reason
+            # to branch on, so it is treated as absent and the body `code` decides
+            # — same normalization `_request_page` applies to `X-Next-Cursor`.
+            # Stripping also keeps a padded value comparable, since callers branch
+            # on `block_reason` by equality.
+            block_reason = (resp.headers.get("x-nexus-block-reason") or "").strip() or None
+            if resp.status_code == 403 and (block_reason or code in JURISDICTION_CODES):
+                raise RestrictedJurisdictionError(
+                    resp.status_code,
+                    resp.text[:2000],
+                    code=code,
+                    message=message,
+                    block_reason=block_reason,
+                )
+
             raise ApiError(resp.status_code, resp.text[:2000], code=code, message=message)
 
         return resp

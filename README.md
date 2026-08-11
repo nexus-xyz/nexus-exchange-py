@@ -53,7 +53,7 @@ from the environment — no secrets in source).
 | HMAC request signing (the plumbing for authed calls) | ✅ implemented |
 | Wallet-signed auth — `sign_in` (EIP-191) + `register_agent` (EIP-712) | ✅ implemented |
 | CCXT-compatible adapter — public market data | ✅ implemented |
-| Error taxonomy (terminal vs transient) | ✅ implemented |
+| Error taxonomy (terminal vs transient, incl. the jurisdiction `403`) | ✅ implemented |
 | Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
 | Account reads — `GET /account`, `/positions`, `/positions/closed`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
 | Portfolio — `GET /account/state` (summary + positions, incl. `withdrawable`), `/account/summary`, `/account/fees`, `/account/portfolio-history`, `/account/equity-history` | ✅ implemented |
@@ -267,6 +267,24 @@ malformed, the call raises `DecodeError` (a `NexusExchangeError`, and a
 That extends to lists — a malformed point or position raises instead of silently
 dropping out of the series.
 
+One 4xx is worth catching by itself. A jurisdiction control refuses
+state-changing calls — and, on the sanctions list, reads too — with a `403` that
+is **permanent for your origin**, so retrying it never helps:
+
+```python
+from nexus_exchange import RestrictedJurisdictionError
+
+try:
+    client.create_order(order)
+except RestrictedJurisdictionError as err:
+    # US_RESTRICTED | GEO_UNRESOLVED | RESTRICTED_JURISDICTION — and the list is
+    # open, so treat anything unrecognized as permanent too. Never match on
+    # `err.message`; the spec marks its wording unstable.
+    print("refused:", err.block_reason)
+```
+
+It subclasses `ApiError`, so an existing `except ApiError` still catches it.
+
 ## Pagination
 
 The list endpoints return a page of results plus an opaque cursor for the next
@@ -359,7 +377,7 @@ dependency. See `examples/ccxt_market_data.py`.
 
 <!-- api-version-sync:start -->
 
-Currently targets Exchange API spec **`v0.7.3`**.
+Currently targets Exchange API spec **`v0.8.1`**.
 
 <!-- api-version-sync:end -->
 
