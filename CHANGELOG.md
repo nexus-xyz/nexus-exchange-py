@@ -7,7 +7,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **`NetworkConfig.real_funds` (bool) is now `funds` (tri-state) (ENG-9826).**
+  **Breaking.** `Funds.REAL` / `Funds.PLAY` / `Funds.UNKNOWN`, on both
+  `NetworkConfig` and `Network`. A boolean cannot express a target whose funds
+  were never declared, and that state has to exist — a caller-supplied URL says
+  nothing about what is behind it. It is deliberately **not** kept as a derived
+  boolean: `real_funds is False` would read as "play money" for an undeclared
+  target, which is the one wrong answer that costs money. Guard on `PLAY`
+  positively (`funds is not Funds.PLAY`), never by negating `REAL`.
+- **`Client.network` returns the `NetworkConfig`, not the `Network` member.**
+  **Breaking.** A named network and a custom target now expose the same fields,
+  so every guard reads one shape. Compare against `Network.TESTNET.config`.
+- **A bare `base_url` with no network named now reports undeclared funds.**
+  **Breaking (behavioural).** It builds a custom config with `Funds.UNKNOWN` and
+  no faucet, so `claim_credit` refuses where it previously inherited testnet's
+  faucet. Previously the override changed transport only and left whichever
+  network was default supplying the funds semantics — which is exactly how a
+  client pointed at a real-funds deployment kept reporting play-funds
+  guardrails. Naming the network alongside the URL keeps its semantics
+  (`Client(Network.LOCAL, base_url=…)`), and mainnet's required override is
+  unaffected.
+
 ### Added
+
+- **`NetworkConfig.custom(...)` — a caller-supplied network target (ENG-9826).**
+  Reaches a deployment this SDK ships no hostname for, and carries the whole
+  bundle rather than a bare URL: both bases, funds semantics, faucet, signing
+  domain and a label. Accepted anywhere a `Network` is — `Client(config)` —
+  while the shipped network map stays immutable and a custom target stays
+  un-addressable by name. `label` and `funds` are required and have no defaults.
+  `label` is charset-validated (`[A-Za-z0-9._-]`, max 64, no `.` or `..`)
+  because it is the key credentials are namespaced under across these SDKs; an
+  unvalidated one could let one target address another's. `has_faucet` defaults
+  to absent, and a real-funds target with a faucet is refused outright as
+  incoherent. `chain_id` defaults to unknown, so signing refuses rather than
+  guessing — the same rule the named networks follow.
 
 - **Cursor pagination on the five paginated list endpoints (ENG-8081).** Spec
   v0.7.2 added a `cursor` query parameter and an `X-Next-Cursor` response header
@@ -162,6 +198,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   this repo has `allow_auto_merge` disabled, the workflow probes the setting and
   says plainly in the PR that a human must merge, rather than arming auto-merge
   into a silent no-op.
+
+### Fixed
+
+- **A gateway-prefixed `direct_base_url` is no longer rejected (ENG-10095).**
+  The validation asserted that the direct `/api/v1` surface is served only at
+  the host root; production measurement found the opposite
+  ([rs#131](https://github.com/nexus-xyz/nexus-exchange-rs/pull/131),
+  ENG-10063) — the gateway mounts `/api/v1` under its own prefix and answers
+  `200`, while the host root answers `404 text/html`. Both topologies are real,
+  so the unconditional rejection made the working configuration unreachable on
+  the deploy this SDK targets by default. Which one applies is a property of the
+  URL, and is now left to the URL.
 
 ### Changed
 
