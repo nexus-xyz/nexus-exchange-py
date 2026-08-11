@@ -33,7 +33,9 @@ GET /api/v1/account/state
 GET /api/v1/account/summary
 GET /api/v1/account/fees
 GET /api/v1/account/portfolio-history
+GET /api/v1/account/equity-history
 GET /api/v1/positions
+GET /api/v1/positions/closed
 GET /api/v1/fills
 GET /api/v1/account/rate-limit
 GET /api/v1/account/cancel-on-disconnect
@@ -42,6 +44,7 @@ POST /api/v1/account/credit
 POST /api/v1/orders
 POST /api/v1/orders/batch
 GET /api/v1/orders
+GET /api/v1/orders/history
 PATCH /api/v1/orders/{order_id}
 DELETE /api/v1/orders/{order_id}
 DELETE /api/v1/orders
