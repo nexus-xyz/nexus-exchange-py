@@ -22,6 +22,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   says so rather than hanging, and rather than stopping quietly — a silent stop
   is indistinguishable from "that was the last page", which would hand the
   caller a truncated history it believes is complete.
+- **`/orders/history`, `/positions/closed` and `/account/equity-history`
+  (ENG-8082).** Three endpoints the SDK did not reach. Each has a
+  `fetch_*` (one page), a `*_page` (page plus next cursor) and an `iter_*`
+  (walks every page), with `OrderHistoryEntry`, `ClosedPosition` and
+  `EquityPoint` models and the per-endpoint page-size maxima
+  `ORDER_HISTORY_LIMIT_MAX`, `CLOSED_POSITIONS_LIMIT_MAX` and
+  `EQUITY_HISTORY_LIMIT_MAX` taken from the spec rather than copied.
+- **Absent money and timestamps decode to `None`, not `0`.** `ClosedPosition`
+  and `EquityPoint` declare no `required` fields in spec v0.7.2, so their
+  money and timestamp fields are `Decimal | None` / `int | None`. A defaulted
+  zero was a real, wrong number: an absent `realized_pnl` read as "closed
+  flat", and an absent `closed_at_ms` plotted at 1970. An explicitly `null`
+  field and an omitted one now agree, where previously one raised and the
+  other returned zero.
 
 - **The network axis `{Mainnet, Testnet, Local}` (ENG-6454).** `Network` now
   names a *network* — which chain, and whose money — instead of a release
