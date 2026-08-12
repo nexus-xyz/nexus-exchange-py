@@ -77,7 +77,7 @@ jobs:
   autobump:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # A PR opened with the default GITHUB_TOKEN does not trigger other
           # workflows, which would leave the bump PR with no `spec-drift` run —
