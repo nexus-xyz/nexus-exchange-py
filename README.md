@@ -82,15 +82,29 @@ Each member bundles its config — REST bases, both WebSocket bases, funds
 semantics and the EIP-712 signing domain:
 
 ```python
-from nexus_exchange import Client, Network
+from nexus_exchange import Client, Funds, Network
 
 Network.TESTNET.ws_market_data_url  # 'wss://api.testnet.nexus.xyz/stream'
 Network.TESTNET.ws_authenticated_url  # 'wss://api.testnet.nexus.xyz/ws'
-Network.MAINNET.real_funds  # True — branch on this, never on the host string
+Network.MAINNET.funds  # Funds.REAL — branch on this, never on the host string
 
 with Client(Network.TESTNET) as client:
     ...
 ```
+
+`funds` is a **tri-state**, not a boolean: `Funds.REAL`, `Funds.PLAY`, or
+`Funds.UNKNOWN` for a target whose funds were never declared. Guard on `PLAY`
+**positively** so an undeclared target fails closed:
+
+```python
+if client.network.funds is not Funds.PLAY:  # correct — UNKNOWN is refused
+    refuse()
+if client.network.funds is Funds.REAL:  # WRONG — UNKNOWN slips through
+    refuse()
+```
+
+Whether a faucet exists is tracked separately (`has_faucet`): "not real money"
+does not imply "can mint more of it".
 
 The two WebSocket bases and `published_rest_base` are the spec's **durable**
 per-network values, recorded here so they live in one place. The hosted ones do
@@ -123,6 +137,60 @@ Client(
 )
 ```
 
+#### Custom targets
+
+For a deployment this SDK ships no hostname for, build the config yourself and
+pass it wherever a `Network` goes. It carries the **whole bundle**, not just a
+URL — that is what stops a client reporting play-funds guardrails while pointed
+somewhere else:
+
+```python
+from nexus_exchange import Client, Funds, NetworkConfig
+
+config = NetworkConfig.custom(
+    label="dev",  # required
+    funds=Funds.PLAY,  # required — no default
+    base_url="https://exchange.example.com",
+    direct_base_url="https://exchange.example.com",  # optional; defaults to base_url
+    has_faucet=False,  # absent until declared
+    chain_id=None,  # unknown ⇒ signing refuses
+)
+
+with Client(config) as client:
+    ...
+```
+
+`label` and `funds` are required and have no defaults. There is no safe default
+for `funds`: assuming play makes every guardrail lie on a real-funds deployment,
+and assuming real makes a dev target unusable. Pass `Funds.UNKNOWN` when it truly
+is unknown — the guards treat that as unsafe, which is the honest answer.
+
+`label` is validated (`[A-Za-z0-9._-]`, max 64, no `.` or `..`) because it is a
+**key**: it is what stored credentials are namespaced under across these SDKs, so
+a label that can escape a directory or split a keyring entry would let one target
+address another's credentials.
+
+Both base URLs are validated for scheme and host, and refused if they carry
+**userinfo** or a query or fragment. The request path is appended to the base, so
+`https://host?a=1` would be sent *and signed* as
+`https://host?a=1/api/v1/orders`, and `https://api.nexus.xyz@evil.com` reads as
+the published host to anyone skimming a config file while the requests — and the
+API keys — go to `evil.com`. A **path** is accepted: a base under
+`/api/exchange` is a real, working topology. The same checks apply to a raw
+`base_url` / `direct_base_url` override, including the one mainnet requires.
+
+**A bare `base_url` with no network named now yields `Funds.UNKNOWN`** and no
+faucet, since a URL on its own says nothing about what is behind it. Name the
+network alongside it to keep that network's semantics:
+
+```python
+Client(base_url="https://exchange.example.com")  # Funds.UNKNOWN, no faucet
+Client(Network.LOCAL, base_url="http://127.0.0.1:8080")  # stays play funds + faucet
+```
+
+Custom configs are never added to the network map and are not addressable by
+name — `Network("dev")` still raises.
+
 ### Routing: direct `/api/v1` service vs. legacy gateway
 
 As the REST gateway is retired (ENG-4740), backend services expose their own
@@ -133,11 +201,22 @@ the HMAC signature covers the full path (e.g. `/api/v1/orders`). Routes with no
 `/api/v1` equivalent yet — `GET /markets`, `/health`, ADL history, `GET
 /orders/{id}`, deposits, keys/agents, WS tokens and admin tiers — stay on the
 legacy gateway. This split is internal; method names and signatures are
-unchanged. A custom `base_url` overrides both bases, so on its own point it at
-the service root (e.g. `http://localhost:9090`), not a `/api/exchange` URL — a
-gateway base reaching the direct surface is rejected at construction, since it
-would send *and HMAC-sign* `/api/exchange/api/v1/…`. Pass `direct_base_url`
+unchanged. A custom `base_url` overrides both bases; pass `direct_base_url`
 alongside it to target a deploy that keeps the split.
+
+**Either topology is accepted.** A gateway-prefixed `direct_base_url` used to be
+rejected at construction, on the premise that `/api/v1` is served only at the
+host root. Production measurement says otherwise ([rs#131][rs131], ENG-10063):
+`…/api/exchange/api/v1/markets/summary` answers `200 application/json` while
+`…/api/v1/markets/summary` answers `404 text/html`, and junk segments under the
+gateway prefix answer a JSON `NOT_FOUND` — so the gateway mounts `/api/v1`
+specifically rather than routing permissively. A direct indexer host plausibly
+serves it at the root too, so both are real and which applies is a property of
+the URL, not something this client can assert. The rejection made the working
+configuration unreachable on the deploy targeted by default, so it is gone
+(ENG-10095).
+
+[rs131]: https://github.com/nexus-xyz/nexus-exchange-rs/pull/131
 
 #### If you are coming from another Nexus SDK
 

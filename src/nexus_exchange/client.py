@@ -17,7 +17,7 @@ from collections.abc import Iterator
 from decimal import Decimal
 from importlib import metadata
 from typing import Any
-from urllib.parse import quote, urlencode, urlsplit
+from urllib.parse import quote, urlencode
 
 import httpx
 
@@ -30,7 +30,7 @@ from .errors import (
     RestrictedJurisdictionError,
     TransportError,
 )
-from .networks import Network, NetworkConfig, SigningDomain
+from .networks import Funds, Network, NetworkConfig, SigningDomain, _clean_base_url
 from .pagination import NEXT_CURSOR_HEADER, Page, iter_items
 from .types import (
     AccountFees,
@@ -83,6 +83,7 @@ __all__ = [
     "Client",
     "Network",
     "NetworkConfig",
+    "Funds",
     "SigningDomain",
     "DEFAULT_USER_AGENT",
     "DEFAULT_API_VERSION",
@@ -308,14 +309,20 @@ class Client:
     other, so never reuse a key, signature or agent registration across clients
     pointing at different networks.
 
+    It also accepts a :class:`NetworkConfig` directly, which is how a deployment
+    this SDK ships no hostname for is reached (ENG-9826)::
+
+        Client(NetworkConfig.custom(
+            label="dev",
+            funds=Funds.PLAY,          # required — there is no safe default
+            base_url="https://exchange.example.com",
+        ))
+
     Routing targets two bases. The migrated market-data and account/trading
-    surface is served directly by its backend service under ``/api/v1`` at the
-    host root (:attr:`Network.direct_base_url`); routes not yet migrated stay on
-    the legacy ``/api/exchange`` gateway (:attr:`Network.base_url`). A custom
-    ``base_url`` overrides *both* unless ``direct_base_url`` is also given, so on
-    its own it must point at the service root (e.g. ``http://localhost:9090``),
-    not a ``/api/exchange`` gateway URL — that case is rejected at construction
-    rather than left to sign a wrong path. Note this makes ``base_url`` a
+    surface is served under ``/api/v1`` (:attr:`NetworkConfig.direct_base_url`);
+    routes not yet migrated stay on the legacy ``/api/exchange`` gateway
+    (:attr:`NetworkConfig.base_url`). A custom ``base_url`` overrides *both*
+    unless ``direct_base_url`` is also given. Note this makes ``base_url`` a
     different field from the TypeScript SDK's similarly-named ``baseUrl``, which
     is the *direct* base with the prefix already in it; ``direct_base_url`` is its
     counterpart here. Pass both to target a deploy that keeps the split — this is
@@ -326,6 +333,13 @@ class Client:
             direct_base_url="https://beta.exchange.nexus.xyz",
         )
 
+    **A bare** ``base_url`` **with no network named yields undeclared funds.** It
+    builds a custom config with :attr:`Funds.UNKNOWN` and no faucet, because a URL
+    on its own says nothing about what is behind it — and the guardrails must not
+    keep reporting play money while pointed somewhere else. Name the network
+    alongside it (``Client(Network.LOCAL, base_url=...)``) to keep that network's
+    funds semantics, which is also what mainnet's required override does.
+
     Usable as a context manager::
 
         with Client() as client:
@@ -334,7 +348,7 @@ class Client:
 
     def __init__(
         self,
-        network: Network = Network.TESTNET,
+        network: Network | NetworkConfig | str | None = None,
         *,
         base_url: str | None = None,
         direct_base_url: str | None = None,
@@ -344,25 +358,18 @@ class Client:
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.Client | None = None,
     ) -> None:
-        # Normalize through the enum so a bare string ("mainnet") is accepted and
-        # anything unrecognized — including the retired "stable"/"beta" channels
-        # — raises here rather than silently targeting the wrong network.
-        network = Network(network)
-        self._network = network
-        # A caller-supplied base_url overrides the network default; direct_base_url
+        config = self._resolve_config(network, base_url, direct_base_url)
+        self._network = config
+        # A caller-supplied base_url overrides the config default; direct_base_url
         # falls back to base_url so a single override still covers both surfaces
-        # (the local/direct-gateway case) while a deploy that keeps the gateway
-        # split can set them apart.
-        self._base_url = self._resolve_base(network, base_url, network.base_url, "base_url")
+        # while a deploy that keeps the gateway split can set them apart.
+        self._base_url = self._resolve_base(config, base_url, config.base_url, "base_url")
         self._direct_base_url = self._resolve_base(
-            network,
+            config,
             direct_base_url or base_url,
-            network.direct_base_url,
+            config.direct_base_url,
             "direct_base_url",
         )
-        # The direct surface is never under the gateway prefix, and getting it
-        # wrong is silent: the bad path would be signed as well as sent.
-        self._reject_gateway_direct_base(self._direct_base_url)
         self._api_key = api_key
         self._api_secret = api_secret
         # Spec tag advertised on every request. Defaults to the tag the package
@@ -381,75 +388,107 @@ class Client:
         self._http = http_client or httpx.Client(timeout=timeout)
 
     @staticmethod
+    def _resolve_config(
+        network: Network | NetworkConfig | str | None,
+        base_url: str | None,
+        direct_base_url: str | None,
+    ) -> NetworkConfig:
+        """Resolve the ``network`` argument to the config that drives this client.
+
+        A :class:`NetworkConfig` is taken as-is — it already carries the whole
+        bundle, and :meth:`NetworkConfig.custom` has validated it.
+
+        A name (member or string) resolves through :class:`Network`, so an
+        unrecognized value — including the retired ``stable``/``beta`` channels —
+        raises rather than silently targeting the wrong network.
+
+        Omitting ``network`` means testnet, *unless* a base URL was supplied. That
+        case is the one this indirection exists for: a bare URL used to keep
+        whichever network's flags happened to be default, so a client pointed at a
+        real-funds deployment still reported play-funds guardrails (ENG-9823). It
+        now builds a custom config with undeclared funds instead, which every
+        guard treats as unsafe.
+
+        Naming the network *and* overriding the URL keeps that network's
+        semantics, deliberately: the caller has declared the funds, and mainnet
+        cannot be reached any other way — its base is required, so downgrading
+        that combination to ``UNKNOWN`` would strip the real-funds flag from the
+        only path that reaches real funds.
+        """
+        if isinstance(network, NetworkConfig):
+            return network
+        if network is not None:
+            return Network(network).config
+        # Strip before falling back between the two, not after: a blank string is
+        # "unset" everywhere else here, so `base_url="  "` must defer to a real
+        # `direct_base_url` rather than being carried through as an empty base.
+        gateway = (base_url or "").strip()
+        direct = (direct_base_url or "").strip()
+        if not gateway and not direct:
+            return Network.TESTNET.config
+        return NetworkConfig.custom(
+            label="custom",
+            funds=Funds.UNKNOWN,
+            base_url=gateway or direct,
+            direct_base_url=direct or gateway,
+        )
+
+    @staticmethod
     def _resolve_base(
-        network: Network, override: str | None, default: str | None, param: str
+        config: NetworkConfig, override: str | None, default: str | None, param: str
     ) -> str:
         """Pick the base URL for one surface, or explain why there isn't one.
 
-        A network whose default is ``None`` has no published, reachable target
+        A config whose default is ``None`` has no published, reachable target
         yet — mainnet today. Rather than invent a host, or fall back to another
         network's (which for mainnet would mean sending real-funds traffic to
         testnet), this refuses at construction time with the override to pass.
         Failing here beats failing at request time, after an order is built.
 
-        A blank override falls back to the network default, matching how a blank
-        ``api_version`` is treated. An override that survives stripping but is
-        empty once trailing slashes go (``"/"``) is rejected outright: a client
-        with an empty base silently issues relative requests.
+        A blank override falls back to the config default, matching how a blank
+        ``api_version`` is treated. Whatever survives that fallback is validated
+        by :func:`~nexus_exchange.networks._clean_base_url` — the same function
+        :meth:`NetworkConfig.custom` uses, so an override gets the scheme, host,
+        userinfo and query/fragment checks rather than only the ones a custom
+        config happens to pass through. That matters most here: naming a network
+        keeps its config, so this is the *only* validation a
+        ``Client(Network.MAINNET, base_url=…)`` override ever sees, and mainnet
+        cannot be reached without one.
+
+        Validated *after* the fallback, not before: a blank override means
+        "unset" everywhere in this SDK, so it must defer to the default rather
+        than be the one input that raises. An override that survives stripping
+        but is empty once trailing slashes go (``"/"``) is still rejected: a
+        client with an empty base silently issues relative requests.
+
+        **A base under** ``/api/exchange`` **is accepted for either surface.**
+        This used to be refused outright for ``direct_base_url``, on the stated
+        premise that the direct ``/api/v1`` surface is served only at the host
+        root. Production says otherwise — see the probe table on
+        ``nexus-exchange-rs`` PR #131 (ENG-10063)::
+
+            .../api/exchange/api/v1/markets/summary  -> 200 application/json
+            .../api/v1/markets/summary               -> 404 text/html   (frontend)
+            .../api/exchange/api/v2/markets/summary  -> 404 application/json
+            .../api/exchange/zzz/markets/summary     -> 404 application/json
+
+        The last two are the controls: junk segments answer a JSON ``NOT_FOUND``
+        where ``/api/v1`` answers 200, so the gateway mounts ``/api/v1``
+        specifically rather than routing permissively. A direct indexer host
+        plausibly serves it at the root too, so **both topologies are real** and
+        the rejection made the working one unreachable on the deploy this SDK
+        targets by default (ENG-10095). Which one is right is a property of the
+        URL, not an invariant this client can assert, so it is left to the URL.
         """
         base = (override or "").strip() or default
         if base is None:
             raise ValueError(
-                f"{network.label} has no default {param} yet: its host "
-                f"({network.config.published_rest_base}) is published but not "
+                f"{config.label} has no default {param} yet: its host "
+                f"({config.published_rest_base}) is published but not "
                 f"resolvable, so this SDK will not guess one for a real-funds "
                 f"network. Pass {param}=... explicitly to target it."
             )
-        base = base.rstrip("/")
-        if not base:
-            raise ValueError(f"{param} must be a non-empty URL")
-        return base
-
-    @staticmethod
-    def _reject_gateway_direct_base(base: str) -> None:
-        """Refuse a legacy ``/api/exchange`` base for the direct surface.
-
-        The direct service is served at the *host root* and this client appends
-        :data:`API_V1_PREFIX` itself, so a gateway base would produce
-        ``/api/exchange/api/v1/orders`` — a 404 whose HMAC signature is over that
-        same wrong path, which reads as an auth failure rather than a
-        misconfiguration. Nothing is served under both prefixes, so there is no
-        deploy for which this is right.
-
-        Worth a guard and not just the docs, because ``base_url`` alone falls
-        back to covering both surfaces, and the one value a caller is most likely
-        to have on hand *is* a gateway base: it is this SDK's own ``base_url``
-        default, and the first line of the retired-``beta`` migration. The sibling
-        SDKs meet the same paste from the other side — the TypeScript client
-        rejects a gateway base outright, and the MCP server strips the prefix
-        defensively — so it demonstrably happens.
-
-        Raises rather than stripping: this base is where signed requests go, and
-        silently retargeting them is not this SDK's call to make.
-        """
-        # Match the path segment pair `api/exchange` rather than a substring, so a
-        # host or a query happening to contain the words is not mistaken for it.
-        segments = [s for s in urlsplit(base).path.split("/") if s]
-        is_gateway = any(
-            seg == "exchange" and segments[i - 1] == "api"
-            for i, seg in enumerate(segments)
-            if i > 0
-        )
-        if not is_gateway:
-            return
-        host_root = base[: base.index("/api/exchange")] if "/api/exchange" in base else base
-        raise ValueError(
-            f"direct_base_url must not point at the legacy '/api/exchange' gateway "
-            f"(got {base!r}): the direct {API_V1_PREFIX} surface is served at the host "
-            f"root, so this would send — and sign — '{urlsplit(base).path}{API_V1_PREFIX}/…'. "
-            f"Pass direct_base_url={host_root!r} alongside base_url to target a deploy "
-            f"that keeps the gateway/direct split."
-        )
+        return _clean_base_url(base, param)
 
     # -- lifecycle --------------------------------------------------------
     def close(self) -> None:
@@ -467,9 +506,15 @@ class Client:
         return bool(self._api_key and self._api_secret)
 
     @property
-    def network(self) -> Network:
-        """The network this client targets. Fixed for the client's lifetime —
-        credentials are per-network, so switching means a new client."""
+    def network(self) -> NetworkConfig:
+        """The config this client targets. Fixed for the client's lifetime —
+        credentials are per-network, so switching means a new client.
+
+        Returns the :class:`NetworkConfig` rather than the :class:`Network`
+        member, so a named network and a custom target expose the same fields and
+        every guard reads one shape. Compare against ``Network.TESTNET.config``,
+        not ``Network.TESTNET``.
+        """
         return self._network
 
     # -- public market data ----------------------------------------------

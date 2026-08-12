@@ -32,7 +32,7 @@ from __future__ import annotations
 from typing import Any
 from urllib.parse import quote, urlencode
 
-from .client import Client, Network
+from .client import Client, Network, NetworkConfig
 
 __all__ = ["NexusExchange"]
 
@@ -84,7 +84,7 @@ class NexusExchange:
     def __init__(
         self,
         *,
-        network: Network = Network.TESTNET,
+        network: Network | NetworkConfig | str | None = None,
         base_url: str | None = None,
         direct_base_url: str | None = None,
         client: Client | None = None,

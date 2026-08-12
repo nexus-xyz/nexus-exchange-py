@@ -43,6 +43,7 @@ from .errors import (
     TransportError,
 )
 from .networks import (
+    Funds,
     Network,
     NetworkConfig,
     SigningDomain,
@@ -106,6 +107,7 @@ __all__ = [
     "Client",
     "Network",
     "NetworkConfig",
+    "Funds",
     "SigningDomain",
     "Market",
     "MarketSummary",
