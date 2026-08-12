@@ -170,6 +170,15 @@ is unknown — the guards treat that as unsafe, which is the honest answer.
 a label that can escape a directory or split a keyring entry would let one target
 address another's credentials.
 
+Both base URLs are validated for scheme and host, and refused if they carry
+**userinfo** or a query or fragment. The request path is appended to the base, so
+`https://host?a=1` would be sent *and signed* as
+`https://host?a=1/api/v1/orders`, and `https://api.nexus.xyz@evil.com` reads as
+the published host to anyone skimming a config file while the requests — and the
+API keys — go to `evil.com`. A **path** is accepted: a base under
+`/api/exchange` is a real, working topology. The same checks apply to a raw
+`base_url` / `direct_base_url` override, including the one mainnet requires.
+
 **A bare `base_url` with no network named now yields `Funds.UNKNOWN`** and no
 faucet, since a URL on its own says nothing about what is behind it. Name the
 network alongside it to keep that network's semantics:

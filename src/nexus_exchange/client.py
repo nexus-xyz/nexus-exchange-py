@@ -30,7 +30,7 @@ from .errors import (
     RestrictedJurisdictionError,
     TransportError,
 )
-from .networks import Funds, Network, NetworkConfig, SigningDomain
+from .networks import Funds, Network, NetworkConfig, SigningDomain, _clean_base_url
 from .pagination import NEXT_CURSOR_HEADER, Page, iter_items
 from .types import (
     AccountFees,
@@ -446,9 +446,20 @@ class Client:
         Failing here beats failing at request time, after an order is built.
 
         A blank override falls back to the config default, matching how a blank
-        ``api_version`` is treated. An override that survives stripping but is
-        empty once trailing slashes go (``"/"``) is rejected outright: a client
-        with an empty base silently issues relative requests.
+        ``api_version`` is treated. Whatever survives that fallback is validated
+        by :func:`~nexus_exchange.networks._clean_base_url` — the same function
+        :meth:`NetworkConfig.custom` uses, so an override gets the scheme, host,
+        userinfo and query/fragment checks rather than only the ones a custom
+        config happens to pass through. That matters most here: naming a network
+        keeps its config, so this is the *only* validation a
+        ``Client(Network.MAINNET, base_url=…)`` override ever sees, and mainnet
+        cannot be reached without one.
+
+        Validated *after* the fallback, not before: a blank override means
+        "unset" everywhere in this SDK, so it must defer to the default rather
+        than be the one input that raises. An override that survives stripping
+        but is empty once trailing slashes go (``"/"``) is still rejected: a
+        client with an empty base silently issues relative requests.
 
         **A base under** ``/api/exchange`` **is accepted for either surface.**
         This used to be refused outright for ``direct_base_url``, on the stated
@@ -477,10 +488,7 @@ class Client:
                 f"resolvable, so this SDK will not guess one for a real-funds "
                 f"network. Pass {param}=... explicitly to target it."
             )
-        base = base.rstrip("/")
-        if not base:
-            raise ValueError(f"{param} must be a non-empty URL")
-        return base
+        return _clean_base_url(base, param)
 
     # -- lifecycle --------------------------------------------------------
     def close(self) -> None:

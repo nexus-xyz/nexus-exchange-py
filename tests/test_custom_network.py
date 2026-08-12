@@ -286,6 +286,25 @@ class TestBaseUrlValidation:
         with pytest.raises(ValueError, match="query or fragment"):
             _custom(base_url=url)
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "https://exchange.example.invalid@evil.invalid",
+            "https://user:pass@evil.invalid",
+            # A backslash is not a netloc delimiter to `urlsplit`, so this is
+            # userinfo too — and it is the form that reads as the real host.
+            "https://exchange.example.invalid\\@evil.invalid",
+            "https://exchange.example.invalid@evil.invalid/api/exchange",
+        ],
+    )
+    def test_rejects_userinfo(self, url: str) -> None:
+        # The only check here aimed at a person rather than a typo: everything
+        # before the '@' is credentials, so the host is `evil.invalid` while the
+        # string reads as ours — and the client would sign requests and send API
+        # keys there. The sibling SDKs reject it too (ENG-9823).
+        with pytest.raises(ValueError, match="userinfo"):
+            _custom(base_url=url)
+
     def test_the_direct_base_is_validated_on_its_own_terms(self) -> None:
         with pytest.raises(ValueError, match="direct_base_url"):
             _custom(direct_base_url="not-a-url")
@@ -295,6 +314,61 @@ class TestBaseUrlValidation:
         # A blank string is "unset" everywhere else in this SDK, so it must not
         # be the one input that raises instead of deferring.
         assert _custom(direct_base_url=blank).direct_base_url == _BASE
+
+
+class TestARawOverrideIsValidatedTheSameWay:
+    """Naming a network keeps its config, so ``custom()`` never sees the URL.
+
+    That made the override path — the only way to reach mainnet — the one place a
+    base URL was taken on trust: it was stripped of trailing slashes and used to
+    build and sign requests without a scheme, host or userinfo check. The checks
+    live in one function so both doors get all of them.
+    """
+
+    def test_userinfo_is_refused_on_the_mainnet_override(self) -> None:
+        # The highest-value target for this trick: mainnet *requires* an override,
+        # moves real money, and the string reads as the published host.
+        with pytest.raises(ValueError, match="userinfo"):
+            Client(Network.MAINNET, base_url="https://api.nexus.xyz@evil.invalid")
+
+    def test_a_query_is_refused_on_an_override(self) -> None:
+        # Previously accepted, then concatenated into
+        # "https://x.invalid?a=1/api/v1/markets/summary" and signed.
+        with pytest.raises(ValueError, match="query or fragment"):
+            Client(Network.LOCAL, base_url="https://x.invalid?a=1")
+
+    def test_a_schemeless_override_is_refused(self) -> None:
+        with pytest.raises(ValueError, match="must start with http"):
+            Client(Network.LOCAL, base_url="x.invalid")
+
+    def test_the_direct_override_is_validated_too(self) -> None:
+        with pytest.raises(ValueError, match="direct_base_url"):
+            Client(Network.LOCAL, direct_base_url="https://x.invalid@evil.invalid")
+
+    def test_a_blank_override_still_defers_to_the_default(self) -> None:
+        # The ordering that makes the above safe to add: validation runs on what
+        # survives the fallback, so "unset" keeps meaning unset rather than
+        # becoming the one override that raises.
+        with Client(Network.LOCAL, base_url="   ") as client:
+            assert client._base_url == Network.LOCAL.config.base_url
+
+    def test_a_named_config_passed_directly_is_validated_at_construction(self) -> None:
+        # `NetworkConfig` is public and `__post_init__` does not check URLs, so a
+        # raw dataclass can carry an unvalidated base. The client is where it
+        # would be signed, so the client is where it must be caught.
+        bad = NetworkConfig(
+            label="dev",
+            funds=Funds.PLAY,
+            has_faucet=False,
+            published_rest_base=_BASE,
+            ws_market_data_url="",
+            ws_authenticated_url="",
+            signing_domain=Network.LOCAL.signing_domain,
+            base_url="https://exchange.example.invalid@evil.invalid",
+            direct_base_url=_BASE,
+        )
+        with pytest.raises(ValueError, match="userinfo"):
+            Client(bad)
 
 
 class TestBareBaseUrlIsSugarForACustomTarget:

@@ -156,6 +156,9 @@ def _clean_base_url(url: object, param: str) -> str:
     fragment, which would be *concatenated* with the request path — producing
     ``https://host?a=1/api/v1/orders`` and, worse, signing that string.
 
+    Also rejects userinfo, which is the one check here that defends against a
+    person rather than a typo — see the inline comment.
+
     Deliberately does **not** reject a path. A base under ``/api/exchange`` is a
     real, working topology (see :meth:`Client._resolve_base`), and refusing it is
     what made the gateway deploy unreachable (ENG-10095).
@@ -170,6 +173,22 @@ def _clean_base_url(url: object, param: str) -> str:
         raise ValueError(f"{param} must start with http:// or https:// (got {cleaned!r})")
     if not parts.netloc:
         raise ValueError(f"{param} must include a host (got {cleaned!r})")
+    # `urlsplit` puts `user:pass@host` in `netloc`, so without this every other
+    # check here passes for "https://exchange.nexus.xyz@evil.com" — scheme is
+    # https, the host is non-empty, no query, no fragment — and the client then
+    # signs requests and sends API keys to `evil.com`. It reads as the legitimate
+    # host to anyone skimming a config file, which is the whole trick. The
+    # sibling SDKs reject it too (rs `validate_url`, ts, mcp — ENG-9823), and a
+    # security check that three of four implementations agree on is not one to
+    # diverge on quietly.
+    if "@" in parts.netloc:
+        raise ValueError(
+            f"{param} must not carry userinfo (got {cleaned!r}): everything before "
+            f"the '@' is credentials, not the host, so the request would be signed "
+            f"and sent to whatever follows it. To reach a host behind HTTP auth, "
+            f"pass the credentials on the transport instead: "
+            f"Client(..., http_client=httpx.Client(auth=(user, password)))."
+        )
     # Tested on the literal characters, not on `parts.query` / `parts.fragment`:
     # a trailing "?" parses as *no* query, so the parsed form would accept
     # "https://host/p?" and then build "https://host/p?/api/v1/orders".

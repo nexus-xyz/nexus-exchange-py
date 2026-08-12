@@ -29,6 +29,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   guardrails. Naming the network alongside the URL keeps its semantics
   (`Client(Network.LOCAL, base_url=…)`), and mainnet's required override is
   unaffected.
+- **A raw `base_url` / `direct_base_url` override is now validated (ENG-9826).**
+  **Breaking (behavioural).** Naming a network keeps its config, so an override
+  passed alongside one never reached `NetworkConfig.custom`'s checks: it was
+  stripped of trailing slashes and then used to build *and sign* requests. Both
+  doors now share one validator, so an override gets the scheme, host, userinfo
+  and query/fragment checks too. This was the only path to mainnet, which makes
+  it the one place a malformed or hostile base could not be caught. A blank
+  override still means "unset" and defers to the network's default — validation
+  runs on what survives that fallback, not on the raw argument.
 
 ### Added
 
@@ -43,7 +52,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   unvalidated one could let one target address another's. `has_faucet` defaults
   to absent, and a real-funds target with a faucet is refused outright as
   incoherent. `chain_id` defaults to unknown, so signing refuses rather than
-  guessing — the same rule the named networks follow.
+  guessing — the same rule the named networks follow. Both base URLs are
+  validated for scheme and host, and rejected if they carry userinfo or a query
+  or fragment: the request path is appended to the base, so `https://host?a=1`
+  would be signed as `https://host?a=1/api/v1/orders`, and
+  `https://exchange.nexus.xyz@evil.com` reads as the published host while
+  sending API keys somewhere else. A path is deliberately still accepted — that
+  is the gateway topology this variant exists to reach (ENG-10095).
 
 - **Cursor pagination on the five paginated list endpoints (ENG-8081).** Spec
   v0.7.2 added a `cursor` query parameter and an `X-Next-Cursor` response header
