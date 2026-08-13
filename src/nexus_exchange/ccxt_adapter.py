@@ -77,6 +77,14 @@ class NexusExchange:
     a unified id, so there is no separate CCXT-symbol vs market-id translation
     in this increment.
 
+    ``network``, ``base_url`` and ``direct_base_url`` are forwarded verbatim to
+    :class:`~nexus_exchange.Client`, so they carry its rules — including that a
+    bare ``base_url`` with no network named is the deprecated selector
+    (ENG-10955). Pass ``network=NetworkConfig.custom(...)`` instead; it declares
+    the funds a bare URL cannot, and this facade hides
+    :attr:`~nexus_exchange.Client.network`, so an undeclared target is even
+    easier to miss here.
+
     Usable as a context manager; ``close()`` releases the underlying HTTP
     client. Pass an existing :class:`~nexus_exchange.Client` to share transport.
     """

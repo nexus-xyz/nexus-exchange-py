@@ -128,12 +128,16 @@ Three things worth knowing before you pick one:
   verification or produces a signature valid on a *different* network.
 
 The retired `stable` / `beta` release channels were never networks. `stable`
-became `Network.TESTNET` (same target); `beta` is now an explicit override:
+became `Network.TESTNET` (same target); `beta` is now a custom target:
 
 ```python
 Client(
-    base_url="https://beta.exchange.nexus.xyz/api/exchange",
-    direct_base_url="https://beta.exchange.nexus.xyz",
+    NetworkConfig.custom(
+        label="beta",
+        funds=Funds.UNKNOWN,  # that deploy's funds are not ours to assert
+        base_url="https://beta.exchange.nexus.xyz/api/exchange",
+        direct_base_url="https://beta.exchange.nexus.xyz",
+    )
 )
 ```
 
@@ -179,13 +183,29 @@ API keys — go to `evil.com`. A **path** is accepted: a base under
 `/api/exchange` is a real, working topology. The same checks apply to a raw
 `base_url` / `direct_base_url` override, including the one mainnet requires.
 
-**A bare `base_url` with no network named now yields `Funds.UNKNOWN`** and no
-faucet, since a URL on its own says nothing about what is behind it. Name the
-network alongside it to keep that network's semantics:
+**A bare `base_url` with no network named is deprecated** (ENG-10955) — build
+the config instead. Both reach the same host; only the config says what is
+behind it, so the bare form yields `Funds.UNKNOWN` and no faucet, and every
+guard treats that as unsafe:
 
 ```python
-Client(base_url="https://exchange.example.com")  # Funds.UNKNOWN, no faucet
+Client(base_url="https://exchange.example.com")  # deprecated: UNKNOWN, no faucet
+Client(NetworkConfig.custom(label="dev", funds=Funds.PLAY, base_url="https://exchange.example.com"))
+```
+
+It still works, unchanged, and **does not warn at runtime**: a
+`DeprecationWarning` shows by default under `__main__`, which is the local
+scripts and notebooks this form exists for, so the marker stays where the other
+SDKs put theirs — at build time (ENG-10950). Nothing is removed here.
+
+What is deprecated is the *selector* — a URL that picks the target on its own.
+`direct_base_url` is a modifier and stays, and so does a URL passed alongside a
+named network, which keeps that network's semantics because the caller has
+declared them:
+
+```python
 Client(Network.LOCAL, base_url="http://127.0.0.1:8080")  # stays play funds + faucet
+Client(Network.MAINNET, base_url="https://api.nexus.xyz")  # stays real funds
 ```
 
 Custom configs are never added to the network map and are not addressable by
