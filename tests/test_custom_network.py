@@ -22,6 +22,8 @@ so nothing in this file can accidentally reach a real deployment.
 
 from __future__ import annotations
 
+import warnings
+
 import pytest
 
 from nexus_exchange import Client, Funds, Network, NetworkConfig
@@ -412,6 +414,32 @@ class TestBareBaseUrlIsSugarForACustomTarget:
             assert client.network.funds is Funds.UNKNOWN
             assert client._base_url == _BASE
             assert client._direct_base_url == _BASE
+
+    def test_the_deprecated_selector_stays_silent_at_runtime(self) -> None:
+        # The bare selector is deprecated in the docs only (ENG-10955), so this
+        # asserts the decision rather than leaving it to whoever next reads the
+        # docstring. Silence here is the *current* state, not the end state: a
+        # release that warns has to ship before one that removes the form, and
+        # this test is the thing that has to be updated — deliberately, in the
+        # PR that adds the warning — to say so.
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter("always")
+            with Client(base_url=_BASE) as client:
+                assert client.network.funds is Funds.UNKNOWN
+        # Matched on the warning itself, not on `w.filename`: a `stacklevel=2`
+        # warning reports the *caller's* file, so filtering by package path
+        # would drop the very warning this test exists to catch. All three
+        # deprecation-shaped categories count, so staging the warning as
+        # `PendingDeprecationWarning` or `FutureWarning` does not slip past.
+        ours = [
+            w
+            for w in caught
+            if issubclass(
+                w.category, (DeprecationWarning, PendingDeprecationWarning, FutureWarning)
+            )
+            and "base_url" in str(w.message)
+        ]
+        assert ours == [], f"the bare selector warned at runtime: {[str(w.message) for w in ours]}"
 
 
 class TestCustomTargetsStayOutOfTheSharedMap:

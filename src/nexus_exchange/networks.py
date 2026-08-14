@@ -443,8 +443,10 @@ _CONFIGS: Mapping[str, NetworkConfig] = MappingProxyType(
 )
 
 # Values the old release-channel enum accepted, mapped to what to say now. Beta
-# was never a network — it was a deploy of testnet — so it becomes a base_url
-# override rather than a renamed member.
+# was never a network — it was a deploy of testnet — so it becomes a custom
+# target rather than a renamed member. The suggestion says `Funds.UNKNOWN`
+# rather than the play funds that deploy once had: this SDK cannot check what
+# that host serves today, and guessing low is the direction that costs money.
 _RETIRED: Mapping[str, str] = MappingProxyType(
     {
         "stable": (
@@ -454,9 +456,11 @@ _RETIRED: Mapping[str, str] = MappingProxyType(
         ),
         "beta": (
             "`beta` was a release channel, not a network, and is no longer a "
-            "Network value. Target it explicitly instead:\n"
-            '    Client(base_url="https://beta.exchange.nexus.xyz/api/exchange",\n'
-            '           direct_base_url="https://beta.exchange.nexus.xyz")'
+            "Network value. Build a custom target for it instead — the bundle "
+            "declares the funds, which a bare base_url cannot:\n"
+            '    NetworkConfig.custom(label="beta", funds=Funds.UNKNOWN,\n'
+            '        base_url="https://beta.exchange.nexus.xyz/api/exchange",\n'
+            '        direct_base_url="https://beta.exchange.nexus.xyz")'
         ),
     }
 )

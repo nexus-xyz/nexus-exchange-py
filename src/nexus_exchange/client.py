@@ -328,17 +328,35 @@ class Client:
     counterpart here. Pass both to target a deploy that keeps the split — this is
     how the retired ``beta`` channel is reached now::
 
-        Client(
+        Client(NetworkConfig.custom(
+            label="beta",
+            funds=Funds.UNKNOWN,  # that deploy's funds are not ours to assert
             base_url="https://beta.exchange.nexus.xyz/api/exchange",
             direct_base_url="https://beta.exchange.nexus.xyz",
-        )
+        ))
 
-    **A bare** ``base_url`` **with no network named yields undeclared funds.** It
-    builds a custom config with :attr:`Funds.UNKNOWN` and no faucet, because a URL
-    on its own says nothing about what is behind it — and the guardrails must not
-    keep reporting play money while pointed somewhere else. Name the network
-    alongside it (``Client(Network.LOCAL, base_url=...)``) to keep that network's
-    funds semantics, which is also what mainnet's required override does.
+    **A bare** ``base_url`` **with no network named is deprecated** (ENG-10955).
+    Use :meth:`NetworkConfig.custom` instead: it reaches the same target, but it
+    declares the funds, the faucet and the signing domain, which a bare URL
+    cannot. That is why the bare form builds a custom config with
+    :attr:`Funds.UNKNOWN` and no faucet — a URL on its own says nothing about
+    what is behind it, and the guardrails must not keep reporting play money
+    while pointed somewhere else.
+
+    It still works, unchanged, and deliberately does **not** warn at runtime —
+    the marker each SDK carries was chosen per ecosystem (decided once for the
+    five in ENG-10950), and Python's is prose. So a caller who never opens these
+    docs gets no signal at all, which is exactly why **removal has to be
+    preceded by a release that does warn**: a real ``DeprecationWarning``, which
+    Python shows by default when the caller is ``__main__``, i.e. in the local
+    scripts and notebooks this form exists for. Nothing is removed here, and
+    nothing is removed before that runway has shipped.
+
+    Deprecated is the *selector* — a URL that picks the target on its own —
+    not the modifiers. ``direct_base_url`` refines a target already chosen, and a
+    URL passed alongside a named network (``Client(Network.LOCAL, base_url=...)``,
+    which is also mainnet's required override) keeps that network's funds
+    semantics because the caller has declared them. Both stay.
 
     Usable as a context manager::
 
@@ -407,7 +425,11 @@ class Client:
         whichever network's flags happened to be default, so a client pointed at a
         real-funds deployment still reported play-funds guardrails (ENG-9823). It
         now builds a custom config with undeclared funds instead, which every
-        guard treats as unsafe.
+        guard treats as unsafe. That bare path is the deprecated selector
+        (ENG-10955): it is kept working and silent for now, and callers are
+        pointed at :meth:`NetworkConfig.custom`, the form that declares its
+        funds. A release that warns has to come before one that removes it —
+        see the class docstring.
 
         Naming the network *and* overriding the URL keeps that network's
         semantics, deliberately: the caller has declared the funds, and mainnet

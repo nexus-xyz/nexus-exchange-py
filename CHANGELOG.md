@@ -214,6 +214,42 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   says plainly in the PR that a human must merge, rather than arming auto-merge
   into a silent no-op.
 
+### Deprecated
+
+- **A bare `base_url` with no network named — use `NetworkConfig.custom(...)`
+  (ENG-10955).** Now that every client has landed a custom target (ENG-10950),
+  the raw override is sugar over it, and the sugar cannot say what it is
+  pointed at. Both forms reach the same host; only the config declares the
+  funds, the faucet and the signing domain, which is why the bare form has to
+  fall back to `Funds.UNKNOWN` and no faucet. Nothing changes at runtime: the
+  bare form still works, still builds the same undeclared-funds config, and the
+  guarded paths still refuse.
+  - **No `DeprecationWarning` is raised** — this is a documentation-only
+    deprecation, decided across the five SDKs rather than per-repo (ENG-10950).
+    The mechanisms deliberately differ by ecosystem idiom, and so does how loud
+    they are: Rust carries `#[deprecated]` and warns on every build, the MCP
+    server prints a notice on stderr every run, while Python and TypeScript
+    mark this in prose only. Python and TypeScript callers therefore get **no
+    runtime signal at all** from this release, which is the tradeoff being
+    made, not an oversight.
+  - **Removal requires a release that warns first.** Because this one is
+    silent, the bare selector cannot go straight from here to removed: a real
+    `DeprecationWarning` — which Python shows by default when the caller is
+    `__main__`, i.e. in exactly the local scripts and notebooks this form
+    exists for — has to ship, and ship in a release, before removal. Removal is
+    itself a breaking change and needs its own release after that. Recorded
+    here rather than only in the PR that decided it.
+  - The **selector** is what is deprecated — a URL that picks the target on its
+    own. `direct_base_url` is a modifier and is untouched, and so is a URL
+    passed *alongside* a named network (`Client(Network.LOCAL, base_url=…)`,
+    and mainnet's required override): those refine a target whose funds the
+    caller has already declared.
+  - The retired-`beta` migration message and the README now suggest
+    `NetworkConfig.custom(...)` rather than the bare override. The suggestion
+    declares `Funds.UNKNOWN`, not the play funds that deploy once had: this SDK
+    cannot check what that host serves today, and guessing low is the direction
+    that costs money.
+
 ### Fixed
 
 - **A gateway-prefixed `direct_base_url` is no longer rejected (ENG-10095).**
