@@ -193,10 +193,13 @@ Client(base_url="https://exchange.example.com")  # deprecated: UNKNOWN, no fauce
 Client(NetworkConfig.custom(label="dev", funds=Funds.PLAY, base_url="https://exchange.example.com"))
 ```
 
-It still works, unchanged, and **does not warn at runtime**: a
-`DeprecationWarning` shows by default under `__main__`, which is the local
-scripts and notebooks this form exists for, so the marker stays where the other
-SDKs put theirs — at build time (ENG-10950). Nothing is removed here.
+It still works, unchanged, and **does not warn at runtime** — the marker each
+SDK carries was chosen per ecosystem (ENG-10950), and Python's is prose. So if
+you do not read this section you get no signal at all, which is exactly why **a
+release that warns has to come before one that removes it**: a real
+`DeprecationWarning`, which Python shows by default when the caller is
+`__main__`, i.e. in the local scripts and notebooks this form exists for.
+Nothing is removed here, and nothing is removed before that runway has shipped.
 
 What is deprecated is the *selector* — a URL that picks the target on its own.
 `direct_base_url` is a modifier and stays, and so does a URL passed alongside a

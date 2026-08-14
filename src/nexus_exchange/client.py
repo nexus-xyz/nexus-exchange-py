@@ -343,11 +343,14 @@ class Client:
     what is behind it, and the guardrails must not keep reporting play money
     while pointed somewhere else.
 
-    It still works, unchanged, and deliberately does **not** warn at runtime: a
-    ``DeprecationWarning`` is shown by default under ``__main__``, which is the
-    local scripts and notebooks this form exists for, so the marker stays where
-    the other SDKs put theirs — at build time (decided once for the five in
-    ENG-10950). Nothing is removed here; removal is its own change.
+    It still works, unchanged, and deliberately does **not** warn at runtime —
+    the marker each SDK carries was chosen per ecosystem (decided once for the
+    five in ENG-10950), and Python's is prose. So a caller who never opens these
+    docs gets no signal at all, which is exactly why **removal has to be
+    preceded by a release that does warn**: a real ``DeprecationWarning``, which
+    Python shows by default when the caller is ``__main__``, i.e. in the local
+    scripts and notebooks this form exists for. Nothing is removed here, and
+    nothing is removed before that runway has shipped.
 
     Deprecated is the *selector* — a URL that picks the target on its own —
     not the modifiers. ``direct_base_url`` refines a target already chosen, and a
@@ -423,8 +426,10 @@ class Client:
         real-funds deployment still reported play-funds guardrails (ENG-9823). It
         now builds a custom config with undeclared funds instead, which every
         guard treats as unsafe. That bare path is the deprecated selector
-        (ENG-10955): it is kept working and silent, and callers are pointed at
-        :meth:`NetworkConfig.custom`, the form that declares its funds.
+        (ENG-10955): it is kept working and silent for now, and callers are
+        pointed at :meth:`NetworkConfig.custom`, the form that declares its
+        funds. A release that warns has to come before one that removes it —
+        see the class docstring.
 
         Naming the network *and* overriding the URL keeps that network's
         semantics, deliberately: the caller has declared the funds, and mainnet

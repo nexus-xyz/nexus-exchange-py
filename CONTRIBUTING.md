@@ -111,6 +111,21 @@ This only works for a **pure rename** (same signature and semantics). A change
 of return type or behavior is a genuine break — keeping the old method would
 preserve the old (often wrong) behavior, so removal is correct there.
 
+### Deprecating a form, not a name
+
+A form with a *better* replacement rather than a new spelling — the bare
+`base_url` selector, deprecated in favour of `NetworkConfig.custom(...)`
+(ENG-10955) — is not a rename, so the runtime nudge above is a judgement call
+rather than the rule. That one is deliberately **documentation-only**: the
+mechanism was picked per ecosystem across the SDKs (ENG-10950) and Python's is
+prose, so it does not `warnings.warn`, and `tests/test_custom_network.py` pins
+that silence so the decision is asserted rather than inferred.
+
+The cost is that a caller who never reads the docs gets no signal, which sets
+the condition for undoing it: **a release that warns has to ship before the one
+that removes the form.** Adding that warning means updating the test that
+currently pins silence — deliberately, in the PR that adds it.
+
 ### When a break is unavoidable
 
 - **Batch** breaking changes into a single planned minor bump rather than

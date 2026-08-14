@@ -225,18 +225,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bare form still works, still builds the same undeclared-funds config, and the
   guarded paths still refuse.
   - **No `DeprecationWarning` is raised** — this is a documentation-only
-    deprecation, decided across the five SDKs rather than per-repo. Python
-    shows `DeprecationWarning` by default when the caller is `__main__`, i.e.
-    in exactly the local scripts and notebooks this form exists for; that is
-    louder than the compile-time marker the Rust and TypeScript SDKs carry for
-    the same change.
+    deprecation, decided across the five SDKs rather than per-repo (ENG-10950).
+    The mechanisms deliberately differ by ecosystem idiom, and so does how loud
+    they are: Rust carries `#[deprecated]` and warns on every build, the MCP
+    server prints a notice on stderr every run, while Python and TypeScript
+    mark this in prose only. Python and TypeScript callers therefore get **no
+    runtime signal at all** from this release, which is the tradeoff being
+    made, not an oversight.
+  - **Removal requires a release that warns first.** Because this one is
+    silent, the bare selector cannot go straight from here to removed: a real
+    `DeprecationWarning` — which Python shows by default when the caller is
+    `__main__`, i.e. in exactly the local scripts and notebooks this form
+    exists for — has to ship, and ship in a release, before removal. Removal is
+    itself a breaking change and needs its own release after that. Recorded
+    here rather than only in the PR that decided it.
   - The **selector** is what is deprecated — a URL that picks the target on its
     own. `direct_base_url` is a modifier and is untouched, and so is a URL
     passed *alongside* a named network (`Client(Network.LOCAL, base_url=…)`,
     and mainnet's required override): those refine a target whose funds the
     caller has already declared.
-  - Nothing is removed here. Removal is a breaking change and needs its own
-    release, once the deprecation has shipped at least once.
   - The retired-`beta` migration message and the README now suggest
     `NetworkConfig.custom(...)` rather than the bare override. The suggestion
     declares `Funds.UNKNOWN`, not the play funds that deploy once had: this SDK
