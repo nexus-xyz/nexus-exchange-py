@@ -279,7 +279,15 @@ class NetworkConfig:
     #: deliberate absence rather than a guess — see :class:`Network`.
     base_url: str | None
 
-    #: Host root for the direct ``/api/v1`` surface, or ``None`` as above.
+    #: Base the ``/api/v1`` surface is mounted under, or ``None`` as above.
+    #:
+    #: Named "direct" for the *direct-service* surface, not for a host root:
+    #: the client appends ``/api/v1`` to this, so it must point wherever that
+    #: surface actually answers. On the hosted deploy that is under the gateway
+    #: prefix, so this equals :attr:`base_url`; on a direct indexer host
+    #: (``local``) it is the bare origin. Setting it to the host root of a
+    #: gateway deploy composes ``https://host/api/v1/...``, which 404s to the
+    #: frontend — see :meth:`Client._resolve_base` for the probe table.
     direct_base_url: str | None
 
     def __post_init__(self) -> None:
@@ -426,7 +434,10 @@ _CONFIGS: Mapping[str, NetworkConfig] = MappingProxyType(
             ws_authenticated_url="wss://api.testnet.nexus.xyz/ws",
             signing_domain=SigningDomain(),
             base_url="https://exchange.nexus.xyz/api/exchange",
-            direct_base_url="https://exchange.nexus.xyz",
+            # The /api/v1 surface is mounted UNDER the gateway prefix on this
+            # deploy, so this is the gateway base too — not the host root, which
+            # 404s (ENG-10063). Measured; pinned by test_client.py.
+            direct_base_url="https://exchange.nexus.xyz/api/exchange",
         ),
         "local": NetworkConfig(
             label="Local",

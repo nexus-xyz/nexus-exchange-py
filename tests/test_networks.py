@@ -100,7 +100,7 @@ class TestClientTargeting:
         with Client() as client:
             assert client.network is Network.TESTNET.config
             assert client._base_url == "https://exchange.nexus.xyz/api/exchange"
-            assert client._direct_base_url == "https://exchange.nexus.xyz"
+            assert client._direct_base_url == "https://exchange.nexus.xyz/api/exchange"
 
     def test_mainnet_without_an_explicit_base_refuses_at_construction(self) -> None:
         # Its host is published but not resolvable. Guessing one would mean
@@ -161,19 +161,20 @@ class TestClientTargeting:
         ) as client:
             assert client._direct_base_url == "https://beta.exchange.nexus.xyz/api/exchange"
 
-    def test_the_gateway_default_still_splits_the_two_surfaces(self) -> None:
-        # Accepting a gateway direct base must not disturb testnet's own split,
-        # where the direct surface genuinely is at the host root.
+    def test_both_surfaces_share_the_gateway_base_on_testnet(self) -> None:
+        # There is no split to preserve on this deploy: the /api/v1 surface is
+        # mounted under the gateway prefix, so both bases are the same value.
+        # The two fields stay separate for a deploy that does split them.
         with Client(Network.TESTNET) as client:
             assert client._base_url == "https://exchange.nexus.xyz/api/exchange"
-            assert client._direct_base_url == "https://exchange.nexus.xyz"
+            assert client._direct_base_url == "https://exchange.nexus.xyz/api/exchange"
 
     def test_the_default_gateway_base_url_is_not_caught_by_the_guard(self) -> None:
         # The guard covers the direct surface only. Testnet's own base_url is a
         # gateway URL, and must stay one.
         with Client() as client:
             assert client._base_url == "https://exchange.nexus.xyz/api/exchange"
-            assert client._direct_base_url == "https://exchange.nexus.xyz"
+            assert client._direct_base_url == "https://exchange.nexus.xyz/api/exchange"
 
     def test_a_host_containing_the_word_exchange_is_not_a_gateway(self) -> None:
         # The check is on path segments, so `exchange.nexus.xyz` and a path like
