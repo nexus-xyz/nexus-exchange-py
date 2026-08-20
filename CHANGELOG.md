@@ -252,19 +252,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **`Network.TESTNET.direct_base_url` now points under the `/api/exchange`
-  gateway, not at the host root (ENG-10063).** It was
-  `https://exchange.nexus.xyz`, and the client composes
-  `direct_base_url + "/api/v1" + path`, so every `direct=True` route built
-  `https://exchange.nexus.xyz/api/v1/...` — a 404 to the frontend. All ~36
-  direct routes (market data, account, trading) were unreachable on a default
-  testnet client; only the gateway-based legacy routes worked. The `/api/v1`
-  surface is mounted *under* the gateway prefix on this deploy. `_resolve_base`
-  had already stopped rejecting a gateway base for this field on the strength of
-  that measurement, but the default was never moved to match. No caller change
-  is required — code that was failing starts working — though anyone asserting
-  the old literal will see it change. The two fields stay separate for a deploy
-  that does serve the surfaces apart; on this one they are equal.
+- **`Network.TESTNET.direct_base_url` changed from
+  `https://exchange.nexus.xyz` to `https://exchange.nexus.xyz/api/exchange`,
+  which fixes every `direct=True` route on a default testnet client**
+  ([rs#131](https://github.com/nexus-xyz/nexus-exchange-rs/pull/131),
+  ENG-10063). The client composes `direct_base_url + "/api/v1" + path`, so the
+  old value built `https://exchange.nexus.xyz/api/v1/...`, which answers `404
+  text/html` — the frontend, not the API. The working URL is
+  `https://exchange.nexus.xyz/api/exchange/api/v1/...`: on this deploy the
+  `/api/v1` service is mounted *under* the `/api/exchange` gateway prefix rather
+  than at the host root, so the direct base has to carry that prefix too. All
+  ~36 direct routes (market data, account, trading) were unreachable; only the
+  legacy gateway routes worked. `_resolve_base` had already stopped rejecting a
+  gateway base for this field on the strength of that measurement, but the
+  default was never moved to match. No caller change is required — code that was
+  failing starts working — though anyone asserting the old literal will see it
+  change. The two fields stay separate for a deploy that does serve the surfaces
+  apart; on this one they are equal. The README's SDK-comparison table
+  documented the old, broken URL as the expected result and is corrected here.
 
 - **A gateway-prefixed `direct_base_url` is no longer rejected (ENG-10095).**
   The validation asserted that the direct `/api/v1` surface is served only at
