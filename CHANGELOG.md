@@ -104,7 +104,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the other `403`s in the contract (`credits_frozen`, the admin-secret
   refusal) deliberately stay plain `ApiError`s — those can lift, this one does
   not.
-- **The network axis `{Mainnet, Testnet, Local}`.** `Network` now
+- **The network axis `{Mainnet, Testnet, Local}` (#51).** `Network` now
   names a *network* — which chain, and whose money — instead of a release
   channel, and each member bundles its whole config in one frozen
   `NetworkConfig`: both REST bases, the market-data and authenticated
@@ -113,7 +113,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   EIP-712 `SigningDomain`. The host map is spelled out with mainnet as a named
   case — `api.nexus.xyz`, never `api.mainnet.nexus.xyz` — because interpolating
   the network name resolves for every environment that can be tested and breaks
-  only on real funds. Mirrors the spec's `x-nexus-networks`.
+  only on real funds. Mirrors the spec's `x-nexus-networks` (#51).
 - **`direct_base_url` on `Client`.** Targets a deploy that keeps the
   gateway/direct split, which a single `base_url` collapses. This is what the
   retired `beta` channel becomes.
@@ -255,7 +255,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`Network.TESTNET.direct_base_url` changed from
   `https://exchange.nexus.xyz` to `https://exchange.nexus.xyz/api/exchange`,
   which fixes every `direct=True` route on a default testnet client**
-  ([rs#131](https://github.com/nexus-xyz/nexus-exchange-rs/pull/131)). The
+  (#62, [rs#131](https://github.com/nexus-xyz/nexus-exchange-rs/pull/131)). The
   client composes `direct_base_url + "/api/v1" + path`, so the old value built
   `https://exchange.nexus.xyz/api/v1/...`, which answers `404 text/html` — the
   frontend, not the API. The working URL is
@@ -302,7 +302,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first `next()`, so both forms of the same call now report a caller's own
   mistake at the same moment.
 
-- **BREAKING: `Network.STABLE` and `Network.BETA` are removed.** They
+- **BREAKING: `Network.STABLE` and `Network.BETA` are removed (#51).** They
   were release channels, not networks, and the old enum had no way to name
   mainnet at all.
   - `Network.STABLE` → **`Network.TESTNET`**, which is also the new default for

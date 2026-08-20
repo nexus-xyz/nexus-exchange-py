@@ -186,7 +186,7 @@ API keys — go to `evil.com`. A **path** is accepted: a base under
 `/api/exchange` is a real, working topology. The same checks apply to a raw
 `base_url` / `direct_base_url` override, including the one mainnet requires.
 
-**A bare `base_url` with no network named is deprecated** (#61) — build
+**A bare `base_url` with no network named is deprecated** ([#61][pr61]) — build
 the config instead. Both reach the same host; only the config says what is
 behind it, so the bare form yields `Funds.UNKNOWN` and no faucet, and every
 guard treats that as unsafe:
@@ -244,9 +244,11 @@ specifically rather than routing permissively. A direct indexer host plausibly
 serves it at the root too, so both are real and which applies is a property of
 the URL, not something this client can assert. The rejection made the working
 configuration unreachable on the deploy targeted by default, so it is gone
-(#60).
+([#60][pr60]).
 
 [rs131]: https://github.com/nexus-xyz/nexus-exchange-rs/pull/131
+[pr60]: https://github.com/nexus-xyz/nexus-exchange-py/pull/60
+[pr61]: https://github.com/nexus-xyz/nexus-exchange-py/pull/61
 
 #### If you are coming from another Nexus SDK
 
