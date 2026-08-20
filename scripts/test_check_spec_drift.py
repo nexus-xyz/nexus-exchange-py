@@ -612,16 +612,12 @@ class TestCoverageCanonicalization(unittest.TestCase):
         )
 
     def test_a_bare_path_is_unchanged(self):
-        self.assertEqual(
-            csd.canonical_op(("GET", "/orders"), self.PREFIX), ("GET", "/orders")
-        )
+        self.assertEqual(csd.canonical_op(("GET", "/orders"), self.PREFIX), ("GET", "/orders"))
 
     def test_the_prefix_is_stripped_only_as_a_whole_segment(self):
         # Stripping a partial match would invent a path that does not exist.
         for path in ("/api/v1foo", "/api/v1", "/apiv1/orders", "/v1/orders"):
-            self.assertEqual(
-                csd.canonical_op(("GET", path), self.PREFIX), ("GET", path), path
-            )
+            self.assertEqual(csd.canonical_op(("GET", path), self.PREFIX), ("GET", path), path)
 
     def test_the_method_still_separates_operations(self):
         self.assertNotEqual(

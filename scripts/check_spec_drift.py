@@ -216,7 +216,7 @@ def canonical_op(op, api_v1_prefix):
     method, path = op
     prefix = api_v1_prefix.rstrip("/")
     if prefix and path.startswith(prefix + "/"):
-        path = path[len(prefix):]
+        path = path[len(prefix) :]
     return (method, path)
 
 
@@ -227,7 +227,10 @@ def coverage_figures(manifest, available, api_v1_prefix):
     gaps print the same reassuring line, so the tests need something to call
     other than `main`.
     """
-    canon = lambda ops: {canonical_op(op, api_v1_prefix) for op in ops}
+
+    def canon(ops):
+        return {canonical_op(op, api_v1_prefix) for op in ops}
+
     spec_set, mine = canon(available), canon(manifest)
     return {
         "spec": spec_set,
