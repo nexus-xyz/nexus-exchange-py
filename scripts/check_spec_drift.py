@@ -194,6 +194,50 @@ def load_manifest(path=ENDPOINTS_TXT):
     return out
 
 
+def canonical_op(op, api_v1_prefix):
+    """One (method, path) per operation, whichever spelling the spec used.
+
+    The pinned spec documents many operations TWICE — once bare (`/orders`) and
+    once behind the v1 prefix (`/api/v1/orders`) — pending the layout decision in
+    ENG-8155. They are one operation. Comparing path strings literally therefore
+    reported the spelling this SDK did not pick as an uncovered gap, and divided
+    by a denominator that counted 101 paths where the API has 68 operations:
+    coverage read 50.5% when it was 75.0%, and 33 of the 50 reported gaps were
+    the other spelling of something already implemented (ENG-11847).
+
+    The prefix is the one `read_api_v1_prefix` pulls out of client.py's AST, not
+    a literal repeated here — the same reason that function exists: the value
+    this checker reasons about has to be the value the client actually sends.
+
+    Applied ONLY to the coverage figures. Invariant 1 keeps comparing literal
+    paths, because the manifest must name a path the spec really declares, not
+    merely some spelling of it.
+    """
+    method, path = op
+    prefix = api_v1_prefix.rstrip("/")
+    if prefix and path.startswith(prefix + "/"):
+        path = path[len(prefix):]
+    return (method, path)
+
+
+def coverage_figures(manifest, available, api_v1_prefix):
+    """Canonical coverage sets, split out of `main` so they are testable.
+
+    Worth keeping separate: a report that hides every gap and a report with no
+    gaps print the same reassuring line, so the tests need something to call
+    other than `main`.
+    """
+    canon = lambda ops: {canonical_op(op, api_v1_prefix) for op in ops}
+    spec_set, mine = canon(available), canon(manifest)
+    return {
+        "spec": spec_set,
+        "manifest": mine,
+        "covered": spec_set & mine,
+        "uncovered": sorted(spec_set - mine),
+        "spellings": len(available) - len(spec_set),
+    }
+
+
 def spec_ops(spec):
     ops = set()
     for p, methods in spec.get("paths", {}).items():
@@ -500,20 +544,29 @@ def main():
     available = spec_ops(spec)
 
     print(f"Pinned spec: {pinned} (openapi.json declares {declared})")
-    pct = 100.0 * len(manifest) / len(available)
+
+    with open(CLIENT_PY) as f:
+        api_v1_prefix = read_api_v1_prefix(f.read())
+    cov = coverage_figures(manifest, available, api_v1_prefix)
+    pct = 100.0 * len(cov["covered"]) / len(cov["spec"]) if cov["spec"] else 0.0
     print(
-        f"The Python SDK implements {len(manifest)} of {len(available)} spec "
-        f"operations ({pct:.1f}% coverage)."
+        f"The Python SDK implements {len(cov['covered'])} of {len(cov['spec'])} "
+        f"spec operations ({pct:.1f}% coverage) — {len(available)} documented "
+        f"paths, {cov['spellings']} of them a second spelling of an operation "
+        f"already counted."
     )
 
-    # Invariant 1: manifest -> pinned spec, matched exactly.
+    # Invariant 1: manifest -> pinned spec, matched exactly. Literal paths, NOT
+    # canonicalized: the manifest must name a path the spec really declares.
     missing = [op for op in manifest if op not in available]
-    uncovered = sorted(available - set(manifest))
+    uncovered = cov["uncovered"]
 
     if uncovered:
         print(f"\nNot yet implemented by the Python SDK ({len(uncovered)}):")
         for m, p in uncovered:
             print(f"  - {m} {p}")
+    else:
+        print("\nOK: every spec operation is implemented by the Python SDK.")
 
     failures = 0
     if missing:

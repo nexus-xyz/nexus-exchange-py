@@ -19,7 +19,9 @@ Run: python3 scripts/test_check_spec_drift.py   (stdlib unittest; no pytest need
 
 import contextlib
 import io
+import json
 import os
+import re
 import sys
 import tempfile
 import textwrap
@@ -592,6 +594,140 @@ class TestRealPackage(unittest.TestCase):
         # the coverage figure counts an operation no released spec defines.
         self.assertNotIn(("GET", "/health"), self.manifest)
         self.assertIn(("GET", "/health"), csd.CODE_ONLY_OPS)
+
+
+class TestCoverageCanonicalization(unittest.TestCase):
+    """Coverage counts operations, not path spellings (ENG-11847).
+
+    Every test here also checks the fix does not over-correct: a genuine gap must
+    survive deduplication, or this trades a wrong number for a blind one.
+    """
+
+    PREFIX = "/api/v1"
+
+    def test_both_spellings_are_one_operation(self):
+        self.assertEqual(
+            csd.canonical_op(("GET", "/api/v1/orders"), self.PREFIX),
+            csd.canonical_op(("GET", "/orders"), self.PREFIX),
+        )
+
+    def test_a_bare_path_is_unchanged(self):
+        self.assertEqual(
+            csd.canonical_op(("GET", "/orders"), self.PREFIX), ("GET", "/orders")
+        )
+
+    def test_the_prefix_is_stripped_only_as_a_whole_segment(self):
+        # Stripping a partial match would invent a path that does not exist.
+        for path in ("/api/v1foo", "/api/v1", "/apiv1/orders", "/v1/orders"):
+            self.assertEqual(
+                csd.canonical_op(("GET", path), self.PREFIX), ("GET", path), path
+            )
+
+    def test_the_method_still_separates_operations(self):
+        self.assertNotEqual(
+            csd.canonical_op(("GET", "/api/v1/orders"), self.PREFIX),
+            csd.canonical_op(("POST", "/orders"), self.PREFIX),
+        )
+
+    def test_a_trailing_slash_on_the_prefix_is_tolerated(self):
+        # The prefix comes from client.py's AST, so its exact spelling is not
+        # this checker's to choose.
+        self.assertEqual(
+            csd.canonical_op(("GET", "/api/v1/orders"), "/api/v1/"), ("GET", "/orders")
+        )
+
+    def test_a_real_gap_survives_deduplication(self):
+        available = {
+            ("GET", "/orders"),
+            ("GET", "/api/v1/orders"),
+            ("GET", "/widgets"),
+            ("GET", "/api/v1/widgets"),
+        }
+        cov = csd.coverage_figures({("GET", "/api/v1/orders")}, available, self.PREFIX)
+        self.assertEqual(cov["uncovered"], [("GET", "/widgets")])
+        self.assertEqual(len(cov["spec"]), 2)
+        self.assertEqual(cov["spellings"], 2)
+
+    def test_coverage_is_full_when_each_operation_is_implemented_once(self):
+        available = {
+            ("GET", "/orders"),
+            ("GET", "/api/v1/orders"),
+            ("GET", "/fills"),
+            ("GET", "/api/v1/fills"),
+        }
+        manifest = {("GET", "/api/v1/orders"), ("GET", "/fills")}
+        cov = csd.coverage_figures(manifest, available, self.PREFIX)
+        self.assertEqual(cov["uncovered"], [])
+        self.assertEqual(len(cov["covered"]), 2)
+
+
+class TestCoverageReportEndToEnd(unittest.TestCase):
+    """Runs the checker as a process, so `main` is what is under test.
+
+    The set-level tests above pass even if `main` stops using
+    `coverage_figures` — hardcoding the gap list to empty is invisible to them,
+    because they build their own sets. "No gaps" and "not looking" print the same
+    line, so the only test that separates them runs the entry point.
+
+    Hermetic: synthetic spec on disk, no network. The synthetic spec fails other
+    invariants (the real manifest's paths are absent), so this asserts on stdout
+    and ignores the exit code.
+    """
+
+    PATHS = {"/widgets": {"get": {}}, "/api/v1/widgets": {"get": {}}}
+
+    def _stdout(self):
+        import subprocess
+
+        repo = os.path.dirname(os.path.dirname(os.path.abspath(csd.__file__)))
+        # Invariant 0 aborts before printing anything if the spec's declared
+        # version does not match .api-version — correctly, since a mismatched
+        # spec makes every later figure untrustworthy. So the fixture declares
+        # the real pin, read from the file rather than hardcoded, and this test
+        # keeps working across bumps.
+        with open(os.path.join(repo, ".api-version")) as f:
+            pinned = f.read().strip().lstrip("v")
+        spec = {"info": {"version": pinned}, "paths": self.PATHS}
+        with tempfile.NamedTemporaryFile("w", suffix=".json", delete=False) as f:
+            json.dump(spec, f)
+            spec_path = f.name
+        try:
+            return subprocess.run(
+                [
+                    sys.executable,
+                    os.path.join(repo, "scripts", "check_spec_drift.py"),
+                    spec_path,
+                ],
+                cwd=repo,
+                capture_output=True,
+                text=True,
+            ).stdout
+        finally:
+            os.unlink(spec_path)
+
+    def test_a_genuine_gap_is_printed_once(self):
+        out = self._stdout()
+        self.assertIn("Not yet implemented by the Python SDK (1):", out)
+        self.assertEqual(out.count("- GET /widgets"), 1, out)
+        self.assertNotIn("/api/v1/widgets", out)
+
+    def test_the_headline_counts_operations_not_paths(self):
+        out = self._stdout()
+        self.assertIn("implements 0 of 1 spec operations", out)
+        self.assertIn("2 documented paths, 1 of them a second spelling", out)
+
+    def test_the_percentage_is_derived_from_the_same_numbers_it_prints(self):
+        # The counts alone do not pin the percentage: reverting just the pct to
+        # `len(manifest) / len(available)` left every other test green. Against
+        # this synthetic spec that formula prints 2550% — the real manifest's 51
+        # entries over 2 documented paths — so a ratio of a real numerator to an
+        # unrelated denominator is not merely imprecise, it can exceed 100%.
+        out = self._stdout()
+        self.assertIn("(0.0% coverage)", out)
+        printed = [float(m) for m in re.findall(r"\(([0-9.]+)% coverage\)", out)]
+        self.assertTrue(printed, out)
+        for pct in printed:
+            self.assertLessEqual(pct, 100.0, f"a coverage percentage above 100%: {out}")
 
 
 if __name__ == "__main__":
