@@ -136,7 +136,10 @@ Client(
         label="beta",
         funds=Funds.UNKNOWN,  # that deploy's funds are not ours to assert
         base_url="https://beta.exchange.nexus.xyz/api/exchange",
-        direct_base_url="https://beta.exchange.nexus.xyz",
+        # direct_base_url defaults to base_url, which is the right shape for a
+        # gateway deploy: the /api/v1 surface is mounted under the prefix, not at
+        # the host root. Only set it if you have measured that deploy serving the
+        # two surfaces apart.
     )
 )
 ```
@@ -217,15 +220,19 @@ name — `Network("dev")` still raises.
 ### Routing: direct `/api/v1` service vs. legacy gateway
 
 As the REST gateway is retired (ENG-4740), backend services expose their own
-REST API under an **`/api/v1`** prefix served at the host root
-(`https://exchange.nexus.xyz`), rather than the `…/api/exchange` gateway. The
-migrated market-data and account/trading routes now target this direct service;
-the HMAC signature covers the full path (e.g. `/api/v1/orders`). Routes with no
+REST API under an **`/api/v1`** prefix. That prefix is a *path*, not a host: it
+is mounted wherever the deployment serves the direct service, which on the
+hosted deploy is under the `…/api/exchange` gateway prefix
+(`https://exchange.nexus.xyz/api/exchange/api/v1/…`) and on a direct indexer
+host is the bare origin. The client appends `/api/v1` to `direct_base_url`, so
+that field carries whichever base applies. The migrated market-data and
+account/trading routes now target this direct service; the HMAC signature covers
+the full path (e.g. `/api/v1/orders`), independent of the base. Routes with no
 `/api/v1` equivalent yet — `GET /markets`, `/health`, ADL history, `GET
 /orders/{id}`, deposits, keys/agents, WS tokens and admin tiers — stay on the
 legacy gateway. This split is internal; method names and signatures are
 unchanged. A custom `base_url` overrides both bases; pass `direct_base_url`
-alongside it to target a deploy that keeps the split.
+alongside it to target a deploy that serves the two surfaces apart.
 
 **Either topology is accepted.** A gateway-prefixed `direct_base_url` used to be
 rejected at construction, on the premise that `/api/v1` is served only at the
@@ -244,17 +251,27 @@ configuration unreachable on the deploy targeted by default, so it is gone
 #### If you are coming from another Nexus SDK
 
 The field names differ, so line them up before copying a base URL across — the
-two-URL split here is one field in the TypeScript client:
+two-URL split here is one field in the TypeScript client. Every field below
+holds a **deployment base with no `/api/v1`** — Python, TypeScript and Rust all
+append that prefix themselves, on the direct routes only:
 
-| Surface | Python | TypeScript | Resolves to (testnet) |
-| --- | --- | --- | --- |
-| Direct `/api/v1` service | `direct_base_url` (host root; the `/api/v1` prefix is added per request) | `baseUrl` (prefix included in the base) | `https://exchange.nexus.xyz/api/v1` |
-| Legacy `/api/exchange` gateway | `base_url` | *not modelled* | `https://exchange.nexus.xyz/api/exchange` |
+| Surface | Python | TypeScript | Base value (testnet) | Composed URL |
+| --- | --- | --- | --- | --- |
+| Direct `/api/v1` service | `direct_base_url` | `baseUrl` | `https://exchange.nexus.xyz/api/exchange` | `…/api/exchange/api/v1/orders` |
+| Legacy `/api/exchange` gateway | `base_url` | *not modelled* | `https://exchange.nexus.xyz/api/exchange` | `…/api/exchange/ws/token` |
 
-So Python's `base_url` and TypeScript's `baseUrl` are **not** the same field
-despite the name, while `direct_base_url` plus the prefix and `baseUrl` are
-byte-identical. Copying a Python `base_url` into `baseUrl` is the mistake both
-SDKs now reject.
+On this deploy all of these hold the **same string**, because the direct surface
+is mounted under the gateway prefix — so copying a base across the three SDKs
+gives the right answer today, and Python's two fields stay separate only so a
+deploy that *does* serve the surfaces apart can still say so.
+
+What does not survive the copy is a base that already carries **`/api/v1`** —
+including the value `Network.TESTNET.direct_base_url` composes to, and TypeScript
+`baseUrl`'s own pre-0.3 default. Every SDK appends the prefix itself, so such a
+base sends `/api/v1/api/v1/orders` while signing the correct `/api/v1/orders`:
+a routing failure whose signature looks fine. TypeScript rejects it at
+construction; Python does not check, so strip the prefix before pasting a URL
+into `base_url` or `direct_base_url`.
 
 ## Authentication
 
