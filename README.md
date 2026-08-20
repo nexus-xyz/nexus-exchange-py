@@ -108,7 +108,7 @@ does not imply "can mint more of it".
 
 The two WebSocket bases and `published_rest_base` are the spec's **durable**
 per-network values, recorded here so they live in one place. The hosted ones do
-not resolve yet (DNS is ENG-8155), and this SDK ships no WebSocket client, so
+not resolve yet (DNS is not configured), and this SDK ships no WebSocket client, so
 treat them as published targets rather than something to connect to today. What
 the client actually sends to is `base_url` / `direct_base_url`.
 
@@ -186,7 +186,7 @@ API keys — go to `evil.com`. A **path** is accepted: a base under
 `/api/exchange` is a real, working topology. The same checks apply to a raw
 `base_url` / `direct_base_url` override, including the one mainnet requires.
 
-**A bare `base_url` with no network named is deprecated** (ENG-10955) — build
+**A bare `base_url` with no network named is deprecated** (#61) — build
 the config instead. Both reach the same host; only the config says what is
 behind it, so the bare form yields `Funds.UNKNOWN` and no faucet, and every
 guard treats that as unsafe:
@@ -197,7 +197,7 @@ Client(NetworkConfig.custom(label="dev", funds=Funds.PLAY, base_url="https://exc
 ```
 
 It still works, unchanged, and **does not warn at runtime** — the marker each
-SDK carries was chosen per ecosystem (ENG-10950), and Python's is prose. So if
+SDK carries was chosen per ecosystem, and Python's is prose. So if
 you do not read this section you get no signal at all, which is exactly why **a
 release that warns has to come before one that removes it**: a real
 `DeprecationWarning`, which Python shows by default when the caller is
@@ -219,7 +219,7 @@ name — `Network("dev")` still raises.
 
 ### Routing: direct `/api/v1` service vs. legacy gateway
 
-As the REST gateway is retired (ENG-4740), backend services expose their own
+As the REST gateway is retired, backend services expose their own
 REST API under an **`/api/v1`** prefix. That prefix is a *path*, not a host: it
 is mounted wherever the deployment serves the direct service, which on the
 hosted deploy is under the `…/api/exchange` gateway prefix
@@ -236,7 +236,7 @@ alongside it to target a deploy that serves the two surfaces apart.
 
 **Either topology is accepted.** A gateway-prefixed `direct_base_url` used to be
 rejected at construction, on the premise that `/api/v1` is served only at the
-host root. Production measurement says otherwise ([rs#131][rs131], ENG-10063):
+host root. Production measurement says otherwise ([rs#131][rs131]):
 `…/api/exchange/api/v1/markets/summary` answers `200 application/json` while
 `…/api/v1/markets/summary` answers `404 text/html`, and junk segments under the
 gateway prefix answer a JSON `NOT_FOUND` — so the gateway mounts `/api/v1`
@@ -244,7 +244,7 @@ specifically rather than routing permissively. A direct indexer host plausibly
 serves it at the root too, so both are real and which applies is a property of
 the URL, not something this client can assert. The rejection made the working
 configuration unreachable on the deploy targeted by default, so it is gone
-(ENG-10095).
+(#60).
 
 [rs131]: https://github.com/nexus-xyz/nexus-exchange-rs/pull/131
 
