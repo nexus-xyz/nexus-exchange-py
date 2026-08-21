@@ -2,10 +2,18 @@
 
 All notable changes to this project are documented in this file.
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+This project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html);
+pre-1.0, a breaking change is a **minor** bump.
 
-## [Unreleased]
+**This file is maintained by [release-please](https://github.com/googleapis/release-please)**
+— it writes a new section from the Conventional Commit subjects merged since the
+last release, into the open release PR. Don't hand-edit released sections or add
+an `Unreleased` heading: release-please inserts each new section directly above
+the topmost version heading, so an extra heading at the top would push every
+future release below it. To improve the wording of a release, edit
+`CHANGELOG.md` on the release PR's branch before merging it. Sections at and
+below `0.4.0` predate this and follow
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [0.4.0] - 2026-08-20
 

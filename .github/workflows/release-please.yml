@@ -1,0 +1,94 @@
+name: release-please
+
+# Version + changelog automation (ENG-7536).
+#
+# Watches `main` and, from Conventional Commit subjects, maintains a standing
+# "release PR" that bumps `version` in pyproject.toml (plus the `_resolve_version`
+# fallback literal in src/nexus_exchange/client.py, via `extra-files`) and writes
+# CHANGELOG.md. Nothing ships while that PR sits open — merging it is the human
+# gate.
+#
+# Pre-1.0 policy, matching the rest of the fleet (-ts / -cli / -mcp):
+# `bump-minor-pre-major` + `bump-patch-for-minor-pre-major` in
+# release-please-config.json mean `feat!`/`BREAKING CHANGE` -> minor and
+# `feat`/`fix` -> patch, so the computed version can never reach 1.0.0. Those two
+# flags ARE the pre-1.0 guarantee; deleting them is how this SDK would
+# deliberately go 1.0 (and `release.yml`'s major-version guard is the second lock
+# on that door). `tests/test_release_config.py` fails if either flag goes missing,
+# so the policy is enforced rather than remembered.
+#
+# Handoff to release.yml, and why it takes two extra steps:
+#   * The release is created as a DRAFT (`"draft": true`). A published release
+#     with no artifacts must never exist, and release.yml is what verifies the
+#     tree and builds them — so release.yml undrafts it at the end, once the
+#     sdist/wheel are attached.
+#   * GitHub does not materialise the underlying git tag for a draft release, so
+#     we create the ref ourselves — release.yml checks that tag out.
+#   * A `push: tags` event raised by the built-in GITHUB_TOKEN does not start a
+#     workflow run, so pushing the tag would not wake release.yml. We dispatch it
+#     explicitly instead: `workflow_dispatch` is the documented exception to that
+#     rule, which keeps this on GITHUB_TOKEN with no App token or PAT to manage.
+
+on:
+  push:
+    branches: [main]
+  # Re-run the version computation by hand (e.g. after fixing a bad commit
+  # subject). Idempotent: it refreshes the standing release PR.
+  workflow_dispatch:
+
+# Default-deny; the one job opts into the minimum it needs.
+permissions: {}
+
+# Serialize; never cancel a run that may be mid-handoff.
+concurrency:
+  group: release-please
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # release commit, tag, draft release
+      pull-requests: write # open/update the release PR
+      actions: write # dispatch release.yml
+    steps:
+      - uses: googleapis/release-please-action@v5
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
+
+      # Draft releases don't create the git tag, and release.yml checks the tag
+      # out. Idempotent so a re-run is safe.
+      - name: Create the release tag
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+          SHA: ${{ steps.release.outputs.sha }}
+        run: |
+          set -euo pipefail
+          if gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${TAG}" >/dev/null 2>&1; then
+            echo "Tag ${TAG} already exists — nothing to do."
+          else
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/git/refs" \
+              -f "ref=refs/tags/${TAG}" -f "sha=${SHA}" >/dev/null
+            echo "Created tag ${TAG} at ${SHA}."
+          fi
+
+      # Verify, build, attach artifacts, undraft, publish to PyPI. If this step
+      # ever fails, the draft release and its tag are already in place: re-run
+      # the same handoff by hand from Actions -> Release -> Run workflow.
+      - name: Hand off to release.yml
+        if: ${{ steps.release.outputs.release_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.release.outputs.tag_name }}
+        run: |
+          set -euo pipefail
+          gh workflow run release.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref "$GITHUB_REF_NAME" \
+            -f "tag=${TAG}"
+          echo "Dispatched release.yml for ${TAG}."

@@ -43,23 +43,28 @@ is your PR title**, so write it as a
 `docs:`, `chore:`, `ci:` — and declare a breaking change with `!` before the
 colon (`feat!:`, `feat(client)!: …`).
 
-Unlike the rest of the fleet, **nothing here parses that subject today**: this
-SDK's version is set by hand in `pyproject.toml` and the release notes come from
-`CHANGELOG.md` (see [Releasing](#releasing)), so the convention is currently about
-a readable history rather than a computed version.
+**That subject is load-bearing.** release-please reads the merged commit history
+and computes the next version from it (see [Releasing](#releasing)), so the type
+you write is the bump you get:
 
-It is still worth following now, for two reasons. The obvious one is fleet
-consistency. The load-bearing one is that
-[ENG-7536](https://linear.app/nexus-labs/issue/ENG-7536) proposes adopting the
-same release-please config as `-ts`/`-cli`/`-mcp`, and release-please computes the
-next version from **merged commit history**. A history of unparseable subjects is
-not something that can be fixed after the fact, so every commit that lands
-between now and then either helps or hurts that first computed bump.
+| Subject | Bump from `0.4.0` |
+| -- | -- |
+| `feat!:` / `fix!:` (or a `BREAKING CHANGE:` footer) | `0.5.0` (minor) |
+| `feat:` | `0.4.1` (patch) |
+| `fix:` | `0.4.1` (patch) |
+| `docs:`, `chore:`, `ci:`, `refactor:`, `test:` | none |
 
-When that lands, one asymmetry becomes a trap worth knowing in advance: a
-`BREAKING CHANGE:` footer counts only in a **commit** body, because the squash
-commit's body is assembled from the commit messages on the branch and never from
-the PR description. The `!` in the title is the reliable declaration.
+A subject that doesn't parse doesn't count — it lands silently and contributes
+nothing to the version or the changelog, which is the failure mode to watch for.
+
+Two asymmetries are worth knowing:
+
+- A `BREAKING CHANGE:` footer counts only in a **commit** body. The squash
+  commit's body is assembled from the commit messages on the branch and never
+  from the PR description, so a footer typed into the PR description is lost.
+  The `!` in the title is the reliable declaration.
+- `!` is a **minor** bump here, not a major one — see
+  [Compatibility & deprecations](#compatibility--deprecations).
 
 ## Compatibility & deprecations
 
@@ -67,6 +72,12 @@ This SDK follows [semver](https://semver.org/) (version in `pyproject.toml`).
 It's **experimental** — expect churn before `1.0` — but we still work to
 minimize and **batch** breaking changes so integrators aren't forced through
 one break at a time. Pre-1.0 (`0.x`), a breaking change is a **minor** bump.
+
+That rule is mechanical, not remembered (ENG-7536): `bump-minor-pre-major` and
+`bump-patch-for-minor-pre-major` in `release-please-config.json` are what make
+`feat!` a minor rather than a `1.0.0`, and `tests/test_release_config.py` fails if
+either flag goes missing. See [Toward 1.0](#toward-10) for what leaving `0.x`
+takes.
 
 ### Prefer designs that don't need a break
 
@@ -130,13 +141,12 @@ currently pins silence — deliberately, in the PR that adds it.
 
 - **Batch** breaking changes into a single planned minor bump rather than
   shipping them one-per-PR.
-- Call the break out explicitly in the PR description so it can be summarized
-  in the release notes — the notes are hand-written here, so this is what
-  actually carries it today.
-- Also put a `!` in the PR title (`feat!:`). Redundant while the version is
-  hand-set, and the declaration that computes the bump once
-  [ENG-7536](https://linear.app/nexus-labs/issue/ENG-7536) lands — see
-  [How a PR lands](#how-a-pr-lands).
+- Put a `!` in the PR title (`feat!:`). This is the declaration that computes
+  the bump — see [How a PR lands](#how-a-pr-lands). Nothing else does: not the
+  PR description, not a label, not the changelog.
+- Also call the break out in the PR description. That's for the reviewer, and
+  for the prose you'll want when enriching the generated release notes on the
+  release PR (see [Releasing](#releasing)).
 
 ### API spec version
 
@@ -170,22 +180,47 @@ an entry can't outlive its reason.
 `0.x` is for iteration. We'll commit to a stable public surface at `1.0`; after
 that, breaking changes require a deprecation window and a major bump.
 
+Nothing gets there by accident. Three locks have to be opened in one deliberate
+diff, and each one fails loudly on its own:
+
+1. Drop `bump-minor-pre-major` and `bump-patch-for-minor-pre-major` from
+   `release-please-config.json` — until then the computed version literally
+   cannot reach `1.0.0`.
+2. Update `tests/test_release_config.py`, which asserts both flags and that the
+   version is still `0.x`.
+3. Set the repo variable `ALLOW_MAJOR_RELEASE=true`; `release.yml` refuses to
+   release a `>= 1.0.0` version without it, which also covers a hand-pushed tag.
+
 ## Releasing
 
-Releases are cut by the `release` workflow (`.github/workflows/release.yml`) from
-a version tag. To ship `X.Y.Z`:
+The version is **computed, not hand-set** (ENG-7536). Two workflows, two stages:
 
-1. On `main`, set `version = "X.Y.Z"` in `pyproject.toml` and move the
-   `CHANGELOG.md` `[Unreleased]` notes under a new `## [X.Y.Z] - <date>` section.
-   Merge that through a normal PR.
-2. Tag the merge commit and push the tag:
-   `git tag vX.Y.Z && git push origin vX.Y.Z`.
+1. `release-please.yml` watches `main` and keeps a standing **release PR** open,
+   accumulating the Conventional Commit history into a version bump
+   (`pyproject.toml`, `.release-please-manifest.json`, and the
+   `_resolve_version` fallback literal in `src/nexus_exchange/client.py`) plus a
+   new `CHANGELOG.md` section. Nothing ships while it sits open.
+2. **Merging that PR is the release.** release-please tags the merge commit and
+   cuts a *draft* GitHub release, then dispatches `release.yml`, which guards
+   the tag against `pyproject.toml`, guards the version against the pre-1.0
+   policy, runs the full check suite, builds the sdist + wheel, attaches them,
+   sets the release notes to the `CHANGELOG.md` section for that version, and
+   only then undrafts the release — so a published release with no artifacts
+   never exists.
 
-The workflow then guards that the tag equals `pyproject.toml`'s version, runs the
-full check suite, builds the sdist + wheel, and publishes a GitHub release whose
-notes are the `CHANGELOG.md` section for `X.Y.Z`. The tag **must** have a
-matching, non-empty changelog section or the run fails. It can also be re-run via
-**Actions → Release → Run workflow** with an existing tag.
+So: don't edit `version` in `pyproject.toml`, and don't push tags by hand.
+
+**Enriching the notes.** release-please generates one bullet per commit, which is
+thinner than the prose this changelog has carried. To do better, edit
+`CHANGELOG.md` on the release PR's branch before merging it — that's the one
+place hand-written notes belong now. Keep the `## [X.Y.Z](…)` heading intact: the
+release notes are extracted from it by `scripts/changelog_notes.py`, and an
+empty or missing section fails the release.
+
+If the handoff in step 2 fails (draft release and tag exist, no artifacts),
+re-run it from **Actions → Release → Run workflow** with that tag. Both stages
+are idempotent. A hand-pushed `vX.Y.Z` tag also still triggers `release.yml`
+directly, so releases remain possible if release-please is ever removed.
 
 PyPI publishing is wired (Trusted Publishing / OIDC) but off by default. To turn
 it on: register the project and a trusted publisher on pypi.org, create a `pypi`

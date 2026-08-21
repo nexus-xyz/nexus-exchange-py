@@ -106,11 +106,20 @@ def _resolve_version() -> str:
     actually-installed version — one source of truth (``pyproject.toml``) rather
     than a hand-updated string that can drift. Falls back to a literal when
     running from a source tree with no install, so import never fails.
+
+    The fallback literal below carries a release-please marker comment, so
+    release-please rewrites it in the same commit as ``pyproject.toml`` and the
+    two can't drift (this file is listed under ``extra-files`` in
+    ``release-please-config.json``, and ``tests/test_release_config.py`` asserts
+    they agree). Only the marked line is touched, so nothing else here — such as
+    ``DEFAULT_API_VERSION``, which is a spec tag, not a package version — moves
+    with it. Don't repeat the marker text in prose: every line carrying it is a
+    line release-please tries to rewrite.
     """
     try:
         return metadata.version(_DISTRIBUTION_NAME)
     except metadata.PackageNotFoundError:  # pragma: no cover - only without an install
-        return "0.4.0"
+        return "0.4.0"  # x-release-please-version
 
 
 #: Package version, resolved from installed distribution metadata.
