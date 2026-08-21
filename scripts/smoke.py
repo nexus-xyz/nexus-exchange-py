@@ -12,8 +12,8 @@ Usage::
     python scripts/smoke.py --network beta
     python scripts/smoke.py --base-url http://localhost:9090
 
-It is read-only and unauthenticated: it lists markets, fetches a ticker for the
-first market, and checks gateway health. Exits non-zero on any failure.
+It is read-only and unauthenticated: it lists markets, then fetches a ticker and
+an order book for the first market. Exits non-zero on any failure.
 """
 
 from __future__ import annotations
@@ -40,8 +40,8 @@ def run(network: Network, base_url: str | None) -> int:
             ticker = client.fetch_ticker(first)
             print(f"  fetch_ticker({first}): last={ticker.last} mark={ticker.mark_price}")
 
-        health = client.health_check()
-        print(f"  health_check: connected={health.connected} uptime={health.uptime_seconds}s")
+            book = client.fetch_order_book(first)
+            print(f"  fetch_order_book({first}): {len(book.bids)} bids / {len(book.asks)} asks")
     print("smoke: OK")
     return 0
 

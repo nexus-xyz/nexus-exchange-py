@@ -62,12 +62,13 @@ _TICKER = {
     "info": {},
 }
 
-_HEALTH = {
-    "events_received": 12345,
-    "fills_total": 678,
-    "uptime_seconds": 4242,
-    "connected": True,
-    "health": "healthy",
+_ORDERBOOK = {
+    "symbol": "BTC-USDX-PERP",
+    "bids": [["50010.0", "1.5"], ["50009.5", "2.25"]],
+    "asks": [["50012.5", "0.75"]],
+    "timestamp": 1776033900000,
+    "datetime": "2026-04-13T00:00:00Z",
+    "nonce": 7,
 }
 
 
@@ -86,14 +87,14 @@ class _Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self) -> None:  # noqa: N802 (http.server dispatch name)
-        # `/markets` and `/health` are legacy-gateway routes; the ticker read is
-        # served by the direct /api/v1 service, so it carries the /api/v1 prefix.
+        # `/markets` is a legacy-gateway route; the ticker and order-book reads
+        # are served by the direct /api/v1 service, so they carry the prefix.
         if self.path == "/markets":
             self._send(200, _MARKETS)
         elif self.path == "/api/v1/markets/BTC-USDX-PERP/ticker":
             self._send(200, _TICKER)
-        elif self.path == "/health":
-            self._send(200, _HEALTH)
+        elif self.path == "/api/v1/markets/BTC-USDX-PERP/orderbook":
+            self._send(200, _ORDERBOOK)
         else:
             self._send(404, {"code": "not_found", "message": f"no route {self.path}"})
 
@@ -128,10 +129,11 @@ def test_fetch_ticker_round_trip(live_client: Client) -> None:
     assert ticker.last is not None and str(ticker.last) == "50011.6"
 
 
-def test_health_check_round_trip(live_client: Client) -> None:
-    health = live_client.health_check()
-    assert health.connected is True
-    assert health.events_received == 12345
+def test_fetch_order_book_round_trip(live_client: Client) -> None:
+    book = live_client.fetch_order_book("BTC-USDX-PERP")
+    assert book.symbol == "BTC-USDX-PERP"
+    assert [str(lvl.price) for lvl in book.bids] == ["50010.0", "50009.5"]
+    assert [str(lvl.amount) for lvl in book.asks] == ["0.75"]
 
 
 def test_unknown_route_raises_api_error(live_client: Client) -> None:

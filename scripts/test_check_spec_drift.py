@@ -185,20 +185,19 @@ class TestManifestParser(unittest.TestCase):
 
 
 class TestCodeVersusManifest(unittest.TestCase):
-    """Invariant 2: requested operations == manifest, modulo the allowlists."""
+    """Invariant 2: requested operations == manifest, modulo NON_REST_TARGETS."""
 
-    def _errors(self, client_body, manifest, spec, code_only=(), non_rest=(), extra=None):
+    def _errors(self, client_body, manifest, code_only=(), non_rest=(), extra=None):
         with synthetic_package(client_body=client_body, manifest=manifest, extra_modules=extra):
             entries = csd.load_manifest(csd.ENDPOINTS_TXT)
             with allowlists(code_only, non_rest):
-                return _quiet(csd.check_code_vs_manifest, entries, csd.spec_ops(spec))
+                return _quiet(csd.check_code_vs_manifest, entries)
 
     def test_agreement_passes(self):
         self.assertEqual(
             self._errors(
                 'def a(self):\n    self._request("GET", "/markets")\n',
                 "GET /markets\n",
-                spec_of(("GET", "/markets")),
             ),
             0,
         )
@@ -210,7 +209,6 @@ class TestCodeVersusManifest(unittest.TestCase):
             self._errors(
                 'def a(self):\n    self._request("GET", "/bridge/assets", direct=True)\n',
                 "GET /api/v1/bridge/assets\n",
-                spec_of(("GET", "/api/v1/bridge/assets")),
             ),
             0,
         )
@@ -221,7 +219,6 @@ class TestCodeVersusManifest(unittest.TestCase):
             self._errors(
                 'def a(self):\n    self._request("GET", "/bridge/assets", direct=True)\n',
                 "GET /bridge/assets\n",
-                spec_of(("GET", "/bridge/assets")),
             ),
             2,
         )
@@ -231,7 +228,6 @@ class TestCodeVersusManifest(unittest.TestCase):
             self._errors(
                 'def a(self):\n    self._request("POST", "/orders")\n',
                 "GET /markets\n",
-                spec_of(("GET", "/markets"), ("POST", "/orders")),
                 extra=None,
             ),
             2,  # POST /orders unlisted, GET /markets uncalled
@@ -242,44 +238,6 @@ class TestCodeVersusManifest(unittest.TestCase):
             self._errors(
                 'def a(self):\n    self._request("GET", "/markets")\n',
                 "GET /markets\nGET /keys\n",
-                spec_of(("GET", "/markets"), ("GET", "/keys")),
-            ),
-            1,
-        )
-
-    def test_code_only_op_is_exempt_from_the_manifest(self):
-        self.assertEqual(
-            self._errors(
-                'def a(self):\n    self._request("GET", "/markets")\n'
-                'def b(self):\n    self._request("POST", "/account/leverage")\n',
-                "GET /markets\n",
-                spec_of(("GET", "/markets")),
-                code_only={("POST", "/account/leverage")},
-            ),
-            0,
-        )
-
-    def test_stale_code_only_op_without_a_caller_fails(self):
-        self.assertEqual(
-            self._errors(
-                'def a(self):\n    self._request("GET", "/markets")\n',
-                "GET /markets\n",
-                spec_of(("GET", "/markets")),
-                code_only={("POST", "/account/leverage")},
-            ),
-            1,
-        )
-
-    def test_code_only_op_the_spec_now_defines_fails(self):
-        # The allowlist is self-expiring: once the pinned spec ships the operation,
-        # the exemption's reason is gone and it belongs in the manifest.
-        self.assertEqual(
-            self._errors(
-                'def a(self):\n    self._request("GET", "/markets")\n'
-                'def b(self):\n    self._request("POST", "/account/leverage")\n',
-                "GET /markets\n",
-                spec_of(("GET", "/markets"), ("POST", "/account/leverage")),
-                code_only={("POST", "/account/leverage")},
             ),
             1,
         )
@@ -289,7 +247,6 @@ class TestCodeVersusManifest(unittest.TestCase):
             self._errors(
                 'def a(self):\n    self._request("GET", "/markets")\n',
                 "GET /markets\nGET /ws\n",
-                spec_of(("GET", "/markets"), ("GET", "/ws")),
                 non_rest={("GET", "/ws")},
             ),
             0,
@@ -300,7 +257,6 @@ class TestCodeVersusManifest(unittest.TestCase):
             self._errors(
                 'def a(self):\n    self._request("GET", "/markets")\n',
                 "GET /markets\n",
-                spec_of(("GET", "/markets")),
                 non_rest={("GET", "/ws")},
             ),
             1,
@@ -312,7 +268,6 @@ class TestCodeVersusManifest(unittest.TestCase):
             self._errors(
                 'def a(self, m):\n    self._request("GET", f"/markets/{m}/ticker")\n',
                 "GET /markets/{market_id}/ticker\n",
-                spec_of(("GET", "/markets/{market_id}/ticker")),
             ),
             0,
         )
@@ -324,7 +279,6 @@ class TestCodeVersusManifest(unittest.TestCase):
             self._errors(
                 "",
                 "GET /markets\n",
-                spec_of(("GET", "/markets"), ("GET", "/tickers")),
                 extra={
                     "adapter.py": """
                         class Adapter:
@@ -345,7 +299,6 @@ class TestCodeVersusManifest(unittest.TestCase):
                 'def a(self):\n    self._request("GET", "/markets")\n'
                 'def sneaky(self):\n    return self._http.get("/keys")\n',
                 "GET /markets\nGET /keys\n",
-                spec_of(("GET", "/markets"), ("GET", "/keys")),
             ),
             2,
         )
@@ -363,7 +316,6 @@ class TestCodeVersusManifest(unittest.TestCase):
             self._errors(
                 'def a(self):\n    self._request_page("/fills", signed=True)\n',
                 "GET /fills\n",
-                spec_of(("GET", "/fills")),
             ),
             0,
         )
@@ -375,7 +327,6 @@ class TestCodeVersusManifest(unittest.TestCase):
             self._errors(
                 'def a(self):\n    self._request_page("/fills", direct=True)\n',
                 "GET /api/v1/fills\n",
-                spec_of(("GET", "/api/v1/fills")),
             ),
             0,
         )
@@ -390,7 +341,6 @@ class TestCodeVersusManifest(unittest.TestCase):
                 'def a(self):\n    self._request("GET", "/markets")\n'
                 'def sneaky(self):\n    return self._http.get("/keys")\n',
                 "GET /markets\nGET /keys\n",
-                spec_of(("GET", "/markets"), ("GET", "/keys")),
             ),
             2,
         )
@@ -401,10 +351,72 @@ class TestCodeVersusManifest(unittest.TestCase):
                 "def close(self):\n    self._http.close()\n"
                 'def a(self):\n    self._request("GET", "/markets")\n',
                 "GET /markets\n",
-                spec_of(("GET", "/markets")),
             ),
             0,
         )
+
+
+class TestAllowlistMustStayEmpty(unittest.TestCase):
+    """The delete-only policy (ENG-8616/ENG-8618): CODE_ONLY_OPS must be empty.
+
+    The allowlist used to say "implemented, but ahead of the pinned spec", guarded
+    by two staleness checks — the entry lost its caller, or the spec gained the
+    operation. Neither fires for an operation no spec version has ever defined, so
+    a phantom sat green forever. These tests pin the replacement: any entry is red,
+    and an entry exempts nothing.
+    """
+
+    def _errors(self, client_body, manifest, code_only=()):
+        with synthetic_package(client_body=client_body, manifest=manifest):
+            entries = csd.load_manifest(csd.ENDPOINTS_TXT)
+            with allowlists(code_only):
+                return _quiet(csd.check_code_vs_manifest, entries)
+
+    def test_the_shipped_allowlist_is_empty(self):
+        self.assertEqual(csd.CODE_ONLY_OPS, set())
+
+    def test_an_entry_with_a_caller_goes_red(self):
+        # The state that used to pass: the op is implemented and parked. Two errors
+        # now — the policy violation, plus the caller nothing exempts any more.
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/markets")\n'
+                'def b(self):\n    self._request("POST", "/account/leverage")\n',
+                "GET /markets\n",
+                code_only={("POST", "/account/leverage")},
+            ),
+            2,
+        )
+
+    def test_an_entry_without_a_caller_goes_red(self):
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/markets")\n',
+                "GET /markets\n",
+                code_only={("POST", "/account/leverage")},
+            ),
+            1,
+        )
+
+    def test_an_entry_the_manifest_also_lists_goes_red(self):
+        # Belt and braces: parking an op AND listing it is still a policy failure,
+        # so there is no arrangement of the two files that buys an exemption.
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/markets")\n',
+                "GET /markets\n",
+                code_only={("GET", "/markets")},
+            ),
+            1,
+        )
+
+    def test_the_check_reports_one_error_per_entry(self):
+        with allowlists(code_only={("GET", "/a"), ("POST", "/b")}):
+            self.assertEqual(_quiet(csd.check_allowlist_empty), 2)
+
+    def test_an_empty_allowlist_is_silent(self):
+        with allowlists():
+            self.assertEqual(_quiet(csd.check_allowlist_empty), 0)
 
 
 class TestUnattributableCalls(unittest.TestCase):
@@ -414,7 +426,7 @@ class TestUnattributableCalls(unittest.TestCase):
         with synthetic_package(client_body=client_body, manifest="GET /markets\n"):
             entries = csd.load_manifest(csd.ENDPOINTS_TXT)
             with allowlists():
-                return _quiet(csd.check_code_vs_manifest, entries, {("GET", "/markets")})
+                return _quiet(csd.check_code_vs_manifest, entries)
 
     def test_computed_path_fails(self):
         with self.assertRaises(SystemExit):
@@ -493,7 +505,6 @@ class TestModuleDiscovery(unittest.TestCase):
                 errors = _quiet(
                     csd.check_code_vs_manifest,
                     csd.load_manifest(csd.ENDPOINTS_TXT),
-                    csd.spec_ops(spec_of(("GET", "/x"), ("GET", "/api/v1/hidden"))),
                 )
         self.assertEqual(errors, 1)
 
@@ -550,17 +561,16 @@ class TestPinMatchesSpec(unittest.TestCase):
 class TestRealPackage(unittest.TestCase):
     """The same parsers over the real package — the regression pin.
 
-    The spec side is synthesized from the real manifest, so these assertions are
-    about code<->manifest agreement only and stay true as the SDK grows.
+    Nothing here reads the real spec (no network in these tests), so the assertions
+    are about code<->manifest agreement only and stay true as the SDK grows.
     """
 
     @classmethod
     def setUpClass(cls):
         cls.manifest = csd.load_manifest()
-        cls.spec = csd.spec_ops(spec_of(*cls.manifest))
 
     def test_real_code_and_manifest_agree(self):
-        self.assertEqual(_quiet(csd.check_code_vs_manifest, self.manifest, self.spec), 0)
+        self.assertEqual(_quiet(csd.check_code_vs_manifest, self.manifest), 0)
 
     def test_real_bridge_operations_are_requested_under_api_v1(self):
         with open(csd.CLIENT_PY) as f:
@@ -586,14 +596,18 @@ class TestRealPackage(unittest.TestCase):
             for m, p in self.manifest
         ]
         self.assertNotEqual(broken, self.manifest, "the manifest should contain bridge entries")
-        self.assertEqual(_quiet(csd.check_code_vs_manifest, broken, self.spec), 10)
+        self.assertEqual(_quiet(csd.check_code_vs_manifest, broken), 10)
 
-    def test_real_manifest_lists_no_operation_outside_the_contract(self):
-        # `GET /health` is requested by `health_check` but is not a spec operation,
-        # so it must live in CODE_ONLY_OPS rather than in the manifest — otherwise
-        # the coverage figure counts an operation no released spec defines.
-        self.assertNotIn(("GET", "/health"), self.manifest)
-        self.assertIn(("GET", "/health"), csd.CODE_ONLY_OPS)
+    def test_the_deleted_phantom_operations_are_gone(self):
+        # ENG-8618 deleted `set_leverage` and `health_check`: neither `POST
+        # /account/leverage` nor `GET /health` is in any released spec, so under the
+        # delete-only policy neither may be requested — nor listed, since invariant
+        # 1 would then fail against a spec that does not define it.
+        requested = csd.requested_ops(csd.package_modules(), "/api/v1")
+        for op in (("POST", "/account/leverage"), ("GET", "/health")):
+            self.assertNotIn(op, requested)
+            self.assertNotIn(op, self.manifest)
+        self.assertEqual(csd.CODE_ONLY_OPS, set())
 
 
 class TestCoverageCanonicalization(unittest.TestCase):

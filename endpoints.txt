@@ -5,11 +5,10 @@
 #
 # Machine-checked, both ways, by scripts/check_spec_drift.py on every PR: every
 # line here must exist in the pinned spec, and must have a caller in the client
-# code — no more, no less. An operation the client requests but that the pinned
-# spec does not define stays OUT of this file and is named in that script's
-# CODE_ONLY_OPS instead (today: POST /account/leverage, ahead of the spec, and
-# GET /health, an operational probe outside the contract). So every line here is
-# a real contract operation, and the coverage figure counts nothing else.
+# code — no more, no less. There is no third category: an operation the pinned
+# spec does not define is not implemented at all (ENG-8616), so the checker's
+# CODE_ONLY_OPS allowlist is empty and any entry in it fails the run. Every line
+# here is a real contract operation, and the coverage figure counts nothing else.
 #
 # Paths under /api/v1 are served by the direct backend service (host root, no
 # /api/exchange gateway prefix) as the gateway is retired (ENG-4740); the rest

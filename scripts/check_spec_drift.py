@@ -31,19 +31,19 @@ Three invariants are enforced:
 
 2. client code <-> endpoints.txt, by equality
    The set of operations the package actually requests must equal the manifest,
-   modulo two explicit, documented allowlists:
+   modulo one explicit, documented allowlist:
 
-     * CODE_ONLY_OPS    — implemented, deliberately NOT in the manifest because
-                          the pinned spec does not define the operation (listing
-                          it would correctly fail invariant 1).
      * NON_REST_TARGETS — listed in the manifest but reached WITHOUT a
                           `_request` call, so the AST cannot (and should not) see
-                          it.
+                          it. It is checked for staleness, so the exemption cannot
+                          outlive its reason: an entry the manifest no longer lists
+                          fails.
 
-   Both allowlists are checked for staleness, so an exemption cannot outlive its
-   reason: a CODE_ONLY_OPS entry that no longer has a caller, or that the pinned
-   spec has since gained, fails — as does a NON_REST_TARGETS entry the manifest no
-   longer lists.
+   Nothing is exempt in the other direction. `CODE_ONLY_OPS` used to be — an
+   operation implemented "ahead of the pinned spec" was parked there instead of in
+   the manifest — but the fleet-wide policy of 2026-08-20 (ENG-8616) deletes any
+   operation the contract does not define rather than parking it. The set is
+   permanently empty and any entry in it fails the run (ENG-8618).
 
 Usage: check_spec_drift.py <openapi.json>
 """
@@ -100,22 +100,29 @@ HTTP_SENDING_CALLS = frozenset(
     }
 )
 
-# Implemented by the client but deliberately absent from endpoints.txt, because the
-# pinned spec defines no such operation — listing one here would (correctly) fail
-# invariant 1. Two distinct reasons, both intentional:
+# Permanently EMPTY (ENG-8618), and kept as a named tripwire rather than deleted.
 #
-#   POST /account/leverage — AHEAD of the pinned spec. `set_leverage` ships against
-#     a route the spec has not published yet (ENG-5296). Move it into endpoints.txt
-#     once the pinned spec gains the operation; the staleness check below fails the
-#     build when that happens, so this cannot be forgotten.
-#   GET /health — OUTSIDE the contract. An operational probe of the legacy gateway
-#     (`health_check`), never a spec operation, and v0.7.1 replaced it upstream with
-#     `GET /status`. It stays out of the manifest so the coverage figure only ever
-#     counts real contract operations.
-CODE_ONLY_OPS = {
-    ("POST", "/account/leverage"),
-    ("GET", "/health"),
-}
+# This set used to exempt an operation from the manifest comparison on the grounds
+# that it was implemented "ahead of the pinned spec": listing it in endpoints.txt
+# would (correctly) fail invariant 1, so it was parked here instead. The fleet-wide
+# policy of 2026-08-20 (ENG-8616) ends that — an operation the pinned spec does not
+# define must not be implemented at all. No attribution, no parking, no release-lag
+# exception: an SDK that wants an operation waits for the published tag defining it.
+#
+# The two entries it used to hold, and where they went:
+#
+#   POST /account/leverage — `set_leverage`, deleted. The path routed nowhere, so it
+#     worked for nobody. api-module serves `POST /leverage`, being documented under
+#     ENG-7318; implement it at that path once a *published* spec version defines it.
+#   GET /health — `health_check`, deleted. An operational probe of the legacy
+#     gateway, never a contract operation, and dropped upstream in v0.7.1 in favour
+#     of `GET /status` (which this SDK does not implement — ENG-8618 deletes, it does
+#     not repoint).
+#
+# An entry here buys nothing: `check_code_vs_manifest` no longer subtracts it, so it
+# fails as a policy violation (`check_allowlist_empty`) and its caller — if it has
+# one — is still reported as an unlisted operation.
+CODE_ONLY_OPS: set[tuple[str, str]] = set()
 
 # Listed in endpoints.txt but reached WITHOUT a `_request` call, so no AST walk can
 # see a caller. Empty today, and deliberately kept as a named concept: rs uses it
@@ -434,36 +441,58 @@ def check_single_entry_point(modules):
     return errors
 
 
-def check_code_vs_manifest(manifest, available):
-    """Invariant 2: requested operations == manifest, modulo the two allowlists."""
+def check_allowlist_empty():
+    """The delete-only policy (ENG-8616): `CODE_ONLY_OPS` must be empty.
+
+    This replaces two staleness checks — the entry lost its caller, the pinned spec
+    gained the operation — and covers the hole they left. Both only fire when
+    something *changes*; an operation that has never appeared in any spec version,
+    and never will, satisfies neither and sits green forever. That is how both of
+    this SDK's entries survived several spec generations. A flat "must be empty" has
+    no such blind spot."""
+    if not CODE_ONLY_OPS:
+        return 0
+    print(
+        f"\nERROR: CODE_ONLY_OPS holds {len(CODE_ONLY_OPS)} entr(ies) and must be "
+        f"EMPTY (ENG-8616): an operation the pinned spec does not define must not be "
+        f"implemented. Delete the method — or, once a published spec version defines "
+        f"the operation, implement it against that path and list it in endpoints.txt:"
+    )
+    for m, p in sorted(CODE_ONLY_OPS):
+        print(f"  - {m} {p}")
+    return len(CODE_ONLY_OPS)
+
+
+def check_code_vs_manifest(manifest):
+    """Invariant 2: requested operations == manifest, modulo NON_REST_TARGETS.
+
+    Takes no spec argument: with `CODE_ONLY_OPS` empty by policy there is nothing
+    left in this invariant that depends on what the spec declares. Invariant 1 in
+    `main` is the one that compares against the spec."""
     with open(CLIENT_PY) as f:
         api_v1_prefix = read_api_v1_prefix(f.read())
     modules = package_modules()
     requested = requested_ops(modules, api_v1_prefix)
     requested_set = set(requested)
     manifest_norm = {(m, normalize_path(p)) for m, p in manifest}
-    available_norm = {(m, normalize_path(p)) for m, p in available}
 
-    errors = check_single_entry_point(modules)
+    errors = check_single_entry_point(modules) + check_allowlist_empty()
 
-    # (a) requested but unlisted, and not a documented code-only operation.
-    unlisted = sorted(requested_set - manifest_norm - CODE_ONLY_OPS)
+    # (a) requested but unlisted. No exemption: an operation the pinned spec does
+    #     not define is deleted, not parked (ENG-8616), so every request the client
+    #     issues must have a manifest line.
+    unlisted = sorted(requested_set - manifest_norm)
     # (b) listed but never requested, and not a documented non-REST target.
     uncalled = sorted(manifest_norm - requested_set - NON_REST_TARGETS)
-    # (c) an allowlisted code-only operation nothing requests any more.
-    orphaned = sorted(CODE_ONLY_OPS - requested_set)
-    # (d) an allowlisted code-only operation the pinned spec now defines: its
-    #     reason for being exempt is gone, so it belongs in the manifest.
-    now_in_spec = sorted(op for op in CODE_ONLY_OPS if op in available_norm)
-    # (e) a non-REST target the manifest no longer lists.
+    # (c) a non-REST target the manifest no longer lists.
     orphaned_non_rest = sorted(NON_REST_TARGETS - manifest_norm)
 
     if unlisted:
         errors += len(unlisted)
         print(
             f"\nERROR: {len(unlisted)} operation(s) the client requests are NOT in "
-            f"endpoints.txt (add them, or add to CODE_ONLY_OPS if the pinned spec "
-            f"does not define them):"
+            f"endpoints.txt (add the line if the pinned spec defines the operation; "
+            f"delete the method if it does not):"
         )
         for m, p in unlisted:
             print(f"  - {m} {p}   requested at {', '.join(requested[(m, p)])}")
@@ -478,25 +507,6 @@ def check_code_vs_manifest(manifest, available):
         for m, p in uncalled:
             print(f"  - {m} {p}")
 
-    if orphaned:
-        errors += len(orphaned)
-        print(
-            f"\nERROR: {len(orphaned)} CODE_ONLY_OPS entr(ies) are no longer requested "
-            f"by any method (remove them from the allowlist):"
-        )
-        for m, p in orphaned:
-            print(f"  - {m} {p}")
-
-    if now_in_spec:
-        errors += len(now_in_spec)
-        print(
-            f"\nERROR: {len(now_in_spec)} CODE_ONLY_OPS entr(ies) now EXIST in the "
-            f"pinned spec; move them into endpoints.txt (that is what the allowlist "
-            f"was waiting for) and drop them from CODE_ONLY_OPS:"
-        )
-        for m, p in now_in_spec:
-            print(f"  - {m} {p}")
-
     if orphaned_non_rest:
         errors += len(orphaned_non_rest)
         print(
@@ -508,10 +518,9 @@ def check_code_vs_manifest(manifest, available):
 
     if not errors:
         print(
-            f"\nOK: the client requests {len(requested_set)} operation(s); each is in "
-            f"endpoints.txt or CODE_ONLY_OPS, every endpoints.txt entry has a caller "
-            f"or is in NON_REST_TARGETS, and both allowlists are still earning their "
-            f"exemptions."
+            f"\nOK: the client requests {len(requested_set)} operation(s), each with an "
+            f"endpoints.txt line; every endpoints.txt entry has a caller or is in "
+            f"NON_REST_TARGETS; and CODE_ONLY_OPS is empty."
         )
     return errors
 
@@ -585,7 +594,7 @@ def main():
         print("\nOK: every endpoints.txt entry exists in the pinned spec.")
 
     # Invariant 2: client code <-> endpoints.txt.
-    failures += check_code_vs_manifest(manifest, available)
+    failures += check_code_vs_manifest(manifest)
 
     if failures:
         print(f"\nFAILED: {failures} drift error(s).")
