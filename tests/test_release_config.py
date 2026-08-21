@@ -111,6 +111,18 @@ def test_tags_are_bare_v_prefixed_semver(config: dict, package: dict) -> None:
     assert "tag-separator" not in config and "tag-separator" not in package
 
 
+def test_ci_is_dispatchable_for_the_release_pr() -> None:
+    # `main` requires CI as status checks, but a PR opened by the built-in
+    # GITHUB_TOKEN starts no workflow run, so `release-please.yml` dispatches
+    # ci.yml at the release branch instead. Drop `workflow_dispatch` from ci.yml
+    # and the release PR becomes permanently unmergeable with its required checks
+    # simply never started — a symptom that points nowhere near the cause.
+    ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
+    assert "\n  workflow_dispatch:" in ci, "ci.yml must stay dispatchable"
+    rp = (REPO_ROOT / ".github" / "workflows" / "release-please.yml").read_text()
+    assert "gh workflow run ci.yml" in rp
+
+
 def test_release_is_drafted_so_artifacts_land_before_it_is_public(config: dict) -> None:
     # release-please cuts the release before anything is built; release.yml
     # attaches the sdist/wheel and only then undrafts it. Without this, a

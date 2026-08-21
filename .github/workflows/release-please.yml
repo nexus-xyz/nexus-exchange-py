@@ -17,6 +17,14 @@ name: release-please
 # on that door). `tests/test_release_config.py` fails if either flag goes missing,
 # so the policy is enforced rather than remembered.
 #
+# Two things follow from running on the built-in GITHUB_TOKEN, and both are
+# worked around with `workflow_dispatch` — the documented exception to the rule
+# that a GITHUB_TOKEN-raised event starts no workflow run:
+#
+#   * The release PR gets no CI of its own, and `main` requires 9 status checks,
+#     so it would be unmergeable. We dispatch ci.yml at the release branch.
+#   * A tag push wouldn't wake release.yml. We dispatch that too.
+#
 # Handoff to release.yml, and why it takes two extra steps:
 #   * The release is created as a DRAFT (`"draft": true`). A published release
 #     with no artifacts must never exist, and release.yml is what verifies the
@@ -24,10 +32,7 @@ name: release-please
 #     sdist/wheel are attached.
 #   * GitHub does not materialise the underlying git tag for a draft release, so
 #     we create the ref ourselves — release.yml checks that tag out.
-#   * A `push: tags` event raised by the built-in GITHUB_TOKEN does not start a
-#     workflow run, so pushing the tag would not wake release.yml. We dispatch it
-#     explicitly instead: `workflow_dispatch` is the documented exception to that
-#     rule, which keeps this on GITHUB_TOKEN with no App token or PAT to manage.
+#   * The tag push wouldn't wake release.yml (see above), so we dispatch it.
 
 on:
   push:
@@ -50,7 +55,7 @@ jobs:
     permissions:
       contents: write # release commit, tag, draft release
       pull-requests: write # open/update the release PR
-      actions: write # dispatch release.yml
+      actions: write # dispatch ci.yml and release.yml
     steps:
       - uses: googleapis/release-please-action@v5
         id: release
@@ -58,6 +63,33 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+      # `main` requires 9 status checks, and a PR opened or updated by the
+      # built-in GITHUB_TOKEN starts no workflow run — so the release PR would
+      # sit with its required checks unstarted, permanently unmergeable. Dispatch
+      # CI at the release branch instead; check runs attach to the head commit,
+      # so they satisfy the PR's required checks. Runs on every update to the PR,
+      # since each one moves that head commit.
+      #
+      # (The -cli repo doesn't need this: it runs release-please under a GitHub
+      # App installation token, which triggers workflows like a PAT. Those
+      # secrets are repo-level there and absent here, so this stays on
+      # GITHUB_TOKEN and dispatches explicitly. If they are ever added to this
+      # repo, this step and the release.yml dispatch below both become
+      # deletable — but not the tag creation, which a draft release needs
+      # whatever the token.)
+      - name: Run CI on the release PR
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Raw JSON, parsed in the script — not interpolated through fromJSON,
+          # so a shape change fails loudly here rather than at expression time.
+          PR_JSON: ${{ steps.release.outputs.pr }}
+        run: |
+          set -euo pipefail
+          branch="$(jq -er '.headBranchName' <<<"$PR_JSON")"
+          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
+          echo "Dispatched ci.yml for release branch ${branch}."
 
       # Draft releases don't create the git tag, and release.yml checks the tag
       # out. Idempotent so a re-run is safe.
