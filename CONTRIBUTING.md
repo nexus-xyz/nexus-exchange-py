@@ -49,13 +49,21 @@ you write is the bump you get:
 
 | Subject | Bump from `0.4.0` |
 | -- | -- |
-| `feat!:` / `fix!:` (or a `BREAKING CHANGE:` footer) | `0.5.0` (minor) |
+| any type with `!` (or a `BREAKING CHANGE:` commit footer) | `0.5.0` (minor) |
 | `feat:` | `0.4.1` (patch) |
-| `fix:` | `0.4.1` (patch) |
-| `docs:`, `chore:`, `ci:`, `refactor:`, `test:` | none |
+| `fix:`, `perf:`, `revert:` | `0.4.1` (patch) |
+| `docs:`, `style:`, `chore:`, `refactor:`, `test:`, `build:`, `ci:` | none |
 
-A subject that doesn't parse doesn't count — it lands silently and contributes
-nothing to the version or the changelog, which is the failure mode to watch for.
+That last row is the whole list of non-releasing types, and anything outside both
+lists — an unrecognised type, or a subject that doesn't parse at all — is
+discarded the same way. So a subject that doesn't parse doesn't count: it lands
+silently and contributes nothing to the version or the changelog, which is the
+failure mode to watch for. (Dependabot's `deps:` prefix is in that discarded
+group, so dependency bumps don't cut releases on their own.)
+
+A period containing only non-releasing commits produces no release PR at all —
+the notes would be empty, and release-please skips rather than cutting an empty
+release.
 
 Two asymmetries are worth knowing:
 

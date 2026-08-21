@@ -39,8 +39,9 @@ The Python SDK for the Nexus Exchange API.
   release-please computes the version from Conventional Commit subjects on `main`
   and opens a release PR; merging it is the release. See CONTRIBUTING.md
   "Releasing".
-- The PR title is the squash commit subject, and therefore the bump. `feat!:` →
-  minor, `feat:`/`fix:` → patch, anything else → no release. An unparseable
+- The PR title is the squash commit subject, and therefore the bump. Any type
+  with `!` → minor; `feat:`/`fix:`/`perf:`/`revert:` → patch; everything else,
+  including an unrecognised or unparseable type, → no release. An unparseable
   subject contributes nothing and fails silently.
 - Three files carry the version and are rewritten together: `pyproject.toml`,
   `.release-please-manifest.json`, and the marked `_resolve_version` fallback
