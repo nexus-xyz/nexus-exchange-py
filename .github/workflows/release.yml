@@ -1,18 +1,31 @@
 name: Release
 
-# Cut a release in one action: push a `vX.Y.Z` tag (or run this manually with an
-# existing tag) and this builds the sdist/wheel, attaches them to a GitHub
-# release whose notes are the matching CHANGELOG section, and — once opted in —
-# publishes to PyPI via Trusted Publishing (OIDC).
+# The build half of the release. Given a `vX.Y.Z` tag, this builds the
+# sdist/wheel, attaches them to a GitHub release whose notes are the matching
+# CHANGELOG section, and — once opted in — publishes to PyPI via Trusted
+# Publishing (OIDC).
+#
+# It does not decide the version. `release-please.yml` does that from commit
+# history (ENG-7536) and then dispatches this workflow with the tag it cut; see
+# that file for the pre-1.0 policy and the reason the handoff is a dispatch
+# rather than a tag push. Pushing a `vX.Y.Z` tag by hand still works and takes
+# the same path, so this stays usable if release-please is ever removed.
 #
 # Safety model:
 #   * The tag version MUST equal pyproject.toml's version (guard below), so a
 #     release can never disagree with the code it ships.
+#   * A version >= 1.0.0 is refused unless the repo variable
+#     ALLOW_MAJOR_RELEASE=true. Pre-1.0 is what currently tells integrators
+#     "no compatibility guarantee"; leaving it has to be a deliberate act, not a
+#     bump that slipped through.
 #   * The full check suite (ruff/mypy/pytest) runs before anything is built, so a
-#     red tree is never released. Tags fire no other workflow, so this is the
-#     only gate.
+#     red tree is never released. Neither a tag push nor a dispatch runs CI, so
+#     this is the only gate on the released commit.
 #   * The CHANGELOG must contain a non-empty section for the version, or the run
 #     fails — no empty/placeholder release notes.
+#   * release-please creates its GitHub release as a DRAFT; this workflow
+#     undrafts it only after the artifacts are attached, so a published release
+#     with no artifacts never exists.
 #   * Least privilege: the default token is read-only; only the release job gets
 #     `contents: write` and only the publish job gets `id-token: write`.
 #   * PyPI publishing stays DORMANT until the maintainer sets the repo variable
@@ -80,9 +93,27 @@ jobs:
           echo "pyproject.toml version: $proj"
           echo "tag version:            $VERSION"
           if [ "$proj" != "$VERSION" ]; then
-            echo "::error::Tag $TAG does not match pyproject.toml version ($proj). Bump pyproject.toml and the CHANGELOG, commit, then tag."
+            echo "::error::Tag $TAG does not match pyproject.toml version ($proj). Merge the release-please PR (it bumps both) rather than tagging by hand."
             exit 1
           fi
+
+      # Second lock on the 1.0 door. release-please's bump-minor-pre-major +
+      # bump-patch-for-minor-pre-major cannot compute a 1.0.0, so reaching here
+      # with a major version means either those flags were dropped or someone
+      # tagged by hand — both fine, but only as a decision someone made on
+      # purpose. Setting ALLOW_MAJOR_RELEASE=true is that decision.
+      - name: Guard — crossing 1.0 must be deliberate
+        env:
+          VERSION: ${{ steps.resolve.outputs.version }}
+          ALLOW_MAJOR: ${{ vars.ALLOW_MAJOR_RELEASE }}
+        run: |
+          set -euo pipefail
+          major="${VERSION%%.*}"
+          if [ "$major" != "0" ] && [ "$ALLOW_MAJOR" != "true" ]; then
+            echo "::error::Refusing to release $VERSION: this SDK is pre-1.0 (see CONTRIBUTING.md 'Toward 1.0'). Committing to a stable surface means setting the repo variable ALLOW_MAJOR_RELEASE=true first."
+            exit 1
+          fi
+          echo "Version $VERSION passes the pre-1.0 policy check."
 
       - run: pip install -e ".[dev]" build twine
 
@@ -154,9 +185,15 @@ jobs:
         run: |
           set -euo pipefail
           if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
-            echo "Release $TAG already exists — refreshing notes and assets (re-run)."
-            gh release edit "$TAG" --repo "$REPO" --notes-file release-notes.md
+            # Either release-please's draft, or a re-run of this workflow.
+            echo "Release $TAG already exists — refreshing notes and assets."
+            # Assets first, `--draft=false` last: undrafting is what makes the
+            # release public, so it must be the final step. On a re-run of an
+            # already-published release `--draft=false` is a no-op.
             gh release upload "$TAG" --repo "$REPO" --clobber dist/*
+            gh release edit "$TAG" --repo "$REPO" \
+              --notes-file release-notes.md \
+              --draft=false
           else
             # --verify-tag: refuse to create a release for a tag that does not
             # exist in the repo.
@@ -168,7 +205,11 @@ jobs:
           fi
 
   pypi-publish:
-    needs: build
+    # Also gated on github-release: a PyPI version can never be unpublished and
+    # reused, so the irreversible step goes last — after the reversible one has
+    # made the release public. Without this ordering a failed undraft would leave
+    # the package on PyPI with no visible release to match it.
+    needs: [build, github-release]
     runs-on: ubuntu-latest
     # Dormant until opted in — see the header. Skipped entirely when the repo
     # variable is unset, so a normal release never touches PyPI.
