@@ -1,10 +1,13 @@
 """Unit tests for the Tier-3 trading methods (mocked httpx).
 
-Mirrors the Rust SDK's coverage of ``amend_order`` / ``adjust_margin`` /
-``set_leverage`` (ENG-5296): every method signs (asserted via the ``x-api-key``
-header on the captured request), the body/query serialize exactly what the API
-expects, money decodes as exact ``Decimal`` strings, and client-side validation
-rejects empty/invalid input before any request is made.
+Mirrors the Rust SDK's coverage of ``amend_order`` / ``adjust_margin``
+(ENG-5296): every method signs (asserted via the ``x-api-key`` header on the
+captured request), the body/query serialize exactly what the API expects, money
+decodes as exact ``Decimal`` strings, and client-side validation rejects
+empty/invalid input before any request is made.
+
+``set_leverage`` was covered here too until ENG-8618 deleted it: ``POST
+/account/leverage`` is in no released spec and routed nowhere.
 """
 
 from __future__ import annotations
@@ -17,7 +20,6 @@ import pytest
 from nexus_exchange import (
     AmendOrder,
     Client,
-    LeverageUpdate,
     MarginAdjustment,
     Network,
 )
@@ -111,28 +113,3 @@ def test_adjust_margin_rejects_nonpositive_amount() -> None:
     with _authed() as client:
         with pytest.raises(ValueError, match="positive"):
             client.adjust_margin("BTC-USDX-PERP", "add", Decimal("0"))
-
-
-# -- set_leverage ------------------------------------------------------------
-
-
-def test_set_leverage_signs_and_serializes(httpx_mock) -> None:
-    httpx_mock.add_response(
-        url="http://localhost:9090/account/leverage",
-        method="POST",
-        json={"market_id": "BTC-USDX-PERP", "leverage": 10},
-    )
-    with _authed() as client:
-        upd = client.set_leverage("BTC-USDX-PERP", 10)
-    assert isinstance(upd, LeverageUpdate)
-    assert upd.leverage == 10
-    assert upd.market_id == "BTC-USDX-PERP"
-    req = httpx_mock.get_request()
-    assert req.headers["x-api-key"] == "nx_test"
-    assert json.loads(req.content) == {"market_id": "BTC-USDX-PERP", "leverage": 10}
-
-
-def test_set_leverage_rejects_below_one() -> None:
-    with _authed() as client:
-        with pytest.raises(ValueError, match="at least 1"):
-            client.set_leverage("BTC-USDX-PERP", 0)

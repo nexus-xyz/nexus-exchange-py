@@ -52,8 +52,6 @@ from .types import (
     EquityPoint,
     Fill,
     FundingSample,
-    HealthStatus,
-    LeverageUpdate,
     MarginAdjustment,
     Market,
     MarketStatus,
@@ -554,8 +552,8 @@ class Client:
     # -- public market data ----------------------------------------------
     # Most market-data reads are served by the direct /api/v1 service
     # (``direct=True``). A handful have no /api/v1 equivalent yet and stay on
-    # the legacy gateway: ``GET /markets`` (the list route), ``/adl-events``,
-    # ``/account/{addr}/adl-history`` and ``/health``.
+    # the legacy gateway: ``GET /markets`` (the list route), ``/adl-events``
+    # and ``/account/{addr}/adl-history``.
     def fetch_markets(self) -> list[Market]:
         """``GET /markets`` — all tradable markets and their trading rules.
 
@@ -702,11 +700,6 @@ class Client:
         data = self._request("GET", f"/account/{quote(address, safe='')}/adl-history", query=query)
         rows = data if isinstance(data, list) else []
         return [AdlEvent.from_dict(e) for e in rows]
-
-    def health_check(self) -> HealthStatus:
-        """``GET /health`` — indexer health/status snapshot."""
-        data = self._request("GET", "/health")
-        return HealthStatus.from_dict(data if isinstance(data, dict) else {})
 
     # -- wallet-signed auth ----------------------------------------------
     def sign_in(self, signer: EthSigner) -> LoginResponse:
@@ -1139,28 +1132,6 @@ class Client:
             signed=True,
         )
         return MarginAdjustment.from_dict(data if isinstance(data, dict) else {})
-
-    def set_leverage(self, market_id: str, leverage: int) -> LeverageUpdate:
-        """``POST /account/leverage`` — set the leverage used for a market.
-
-        Requires credentials. ``leverage`` is the integer multiplier (e.g. ``10``
-        for 10x) and must be at least 1; the server rejects a value above the
-        market's ceiling.
-
-        Ahead of the pinned spec (a code-only op, like the Rust SDK), so it
-        stays on the legacy gateway and is not listed in ``endpoints.txt``.
-        """
-        if not market_id:
-            raise ValueError("market_id is required")
-        if leverage < 1:
-            raise ValueError("leverage must be at least 1")
-        data = self._request(
-            "POST",
-            "/account/leverage",
-            body={"market_id": market_id, "leverage": leverage},
-            signed=True,
-        )
-        return LeverageUpdate.from_dict(data if isinstance(data, dict) else {})
 
     def set_cancel_on_disconnect(self, enabled: bool) -> CancelOnDisconnectStatus:
         """``PUT /account/cancel-on-disconnect`` — opt the account in/out of COD.

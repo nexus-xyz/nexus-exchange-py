@@ -47,7 +47,6 @@ No credentials are needed for market data. See `examples/public_market_data.py`.
 | OHLCV candles — `GET /markets/{id}/candles` | ✅ implemented |
 | Funding / mark price / status — `GET /markets/{id}/{funding,mark-price,status}` | ✅ implemented |
 | ADL events — `GET /markets/{id}/adl-events`, `/account/{addr}/adl-history` | ✅ implemented |
-| Health — `GET /health` | ✅ implemented |
 | HMAC request signing (the plumbing for authed calls) | ✅ implemented |
 | Wallet-signed auth — `sign_in` (EIP-191) + `register_agent` (EIP-712) | ✅ implemented |
 | CCXT-compatible adapter — public market data | ✅ implemented |
@@ -228,10 +227,9 @@ host is the bare origin. The client appends `/api/v1` to `direct_base_url`, so
 that field carries whichever base applies. The migrated market-data and
 account/trading routes now target this direct service; the HMAC signature covers
 the full path (e.g. `/api/v1/orders`), independent of the base. Routes with no
-`/api/v1` equivalent yet — `GET /markets`, `/health`, ADL history, `GET
-/orders/{id}`, deposits, keys/agents, WS tokens and admin tiers — stay on the
-legacy gateway. This split is internal; method names and signatures are
-unchanged. A custom `base_url` overrides both bases; pass `direct_base_url`
+`/api/v1` equivalent yet — `GET /markets`, ADL history, `GET /orders/{id}`,
+deposits, keys/agents, WS tokens and admin tiers — stay on the legacy gateway.
+This split is internal; method names and signatures are unchanged. A custom `base_url` overrides both bases; pass `direct_base_url`
 alongside it to target a deploy that serves the two surfaces apart.
 
 **Either topology is accepted.** A gateway-prefixed `direct_base_url` used to be
@@ -542,7 +540,7 @@ mypy src        # types
 ```
 
 `tests/test_integration_smoke.py` stands up a real local HTTP server and drives
-a real `Client` against it (`fetch_markets` / `fetch_ticker` / `health_check`),
+a real `Client` against it (`fetch_markets` / `fetch_ticker` / `fetch_order_book`),
 mirroring the Rust SDK's wiremock tests — so the transport, URL building, and
 JSON decoding are exercised end to end, not just the mock layer.
 

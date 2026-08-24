@@ -365,33 +365,6 @@ class AdlEvent:
         )
 
 
-@dataclass(frozen=True)
-class HealthStatus:
-    """Indexer health/status snapshot (``GET /health``). Unauthenticated.
-
-    Unknown fields are ignored and kept on ``raw``, so this stays
-    forward-compatible as the snapshot grows.
-    """
-
-    events_received: int
-    fills_total: int
-    uptime_seconds: int
-    connected: bool
-    health: str | None
-    raw: dict[str, Any]
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> HealthStatus:
-        return cls(
-            events_received=int(d.get("events_received", 0)),
-            fills_total=int(d.get("fills_total", 0)),
-            uptime_seconds=int(d.get("uptime_seconds", 0)),
-            connected=bool(d.get("connected", False)),
-            health=d.get("health"),
-            raw=d,
-        )
-
-
 # -- account & trading models ---------------------------------------------
 
 
@@ -1206,26 +1179,6 @@ class MarginAdjustment:
             market_id=str(d.get("market_id", "")),
             allocated_margin=to_decimal(d.get("allocated_margin", 0)),
             collateral=to_decimal(d.get("collateral", 0)),
-            raw=d,
-        )
-
-
-@dataclass(frozen=True)
-class LeverageUpdate:
-    """Result of setting a market's leverage (``POST /account/leverage``).
-
-    Mirrors the Rust SDK's ``LeverageUpdate``.
-    """
-
-    market_id: str
-    leverage: int
-    raw: dict[str, Any]
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> LeverageUpdate:
-        return cls(
-            market_id=str(d.get("market_id", "")),
-            leverage=int(d.get("leverage", 0)),
             raw=d,
         )
 
