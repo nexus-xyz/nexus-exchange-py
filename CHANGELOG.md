@@ -15,29 +15,6 @@ future release below it. To improve the wording of a release, edit
 below `0.4.0` predate this and follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
-### Removed
-
-- **`set_leverage` and `health_check` are deleted, and `CODE_ONLY_OPS` is now
-  permanently empty (ENG-8618).** **Breaking.** Both methods, and their
-  `LeverageUpdate` / `HealthStatus` types, requested an operation no released
-  spec defines. The fleet-wide policy (ENG-8616) is that an endpoint outside the
-  contract is not implemented at all — no attribution, no parking, no
-  release-lag exception — so `scripts/check_spec_drift.py` now fails on **any**
-  `CODE_ONLY_OPS` entry, and the allowlist grants no exemption even if one is
-  added: the operation is reported as unlisted as well.
-  - `set_leverage` sent `POST /account/leverage`, which routes nowhere, so it
-    worked for nobody. api-module serves `POST /leverage`; that route is being
-    documented under ENG-7318, and this SDK will implement it at the correct
-    path once a *published* spec version defines it.
-  - `health_check` probed `GET /health`, an operational route of the legacy
-    gateway that the API dropped in v0.7.1 in favour of `GET /status`. `GET
-    /status` is not implemented here — it now shows up in the drift check's
-    "not yet implemented" list as the real backlog item it is.
-  - The exemption was self-policing only against *change*: an entry that lost
-    its caller failed, and one the spec caught up with failed. An operation no
-    spec version has ever defined tripped neither and stayed green
-    indefinitely, which is how both survived several spec generations.
-
 ## [0.4.0] - 2026-08-20
 
 ### Changed
