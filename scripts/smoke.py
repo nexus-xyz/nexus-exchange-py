@@ -8,8 +8,8 @@ public API still answers the shapes the SDK expects.
 
 Usage::
 
-    python scripts/smoke.py                  # default: stable public gateway
-    python scripts/smoke.py --network beta
+    python scripts/smoke.py                  # default: testnet, play funds
+    python scripts/smoke.py --network local
     python scripts/smoke.py --base-url http://localhost:9090
 
 It is read-only and unauthenticated: it lists markets, then fetches a ticker and
@@ -21,15 +21,23 @@ from __future__ import annotations
 import argparse
 import sys
 
-from nexus_exchange import Client, Network
+from nexus_exchange import Client, Funds, Network
 
 
 def run(network: Network, base_url: str | None) -> int:
+    # `--base-url` overrides the network, so the bundled label and funds stop
+    # describing what is actually being hit: a caller-supplied URL declares
+    # nothing about what is behind it. That is `Funds.UNKNOWN`, not play money —
+    # naming the network here would print the one wrong answer that costs money.
+    if base_url:
+        label, funds = "explicit base URL", Funds.UNKNOWN
+    else:
+        label, funds = network.label, network.funds
     target = base_url or network.base_url
-    print(
-        f"smoke: hitting {target} ({network.label}, "
-        f"{'REAL FUNDS' if network.real_funds else 'play funds'})"
-    )
+    # Say REAL FUNDS positively and let every other state name itself, so an
+    # UNKNOWN target is never displayed as play.
+    described = "REAL FUNDS" if funds is Funds.REAL else f"{funds.value} funds"
+    print(f"smoke: hitting {target} ({label}, {described})")
     with Client(network=network, base_url=base_url) as client:
         markets = client.fetch_markets()
         print(f"  fetch_markets: {len(markets)} markets")
