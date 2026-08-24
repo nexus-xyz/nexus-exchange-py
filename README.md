@@ -85,19 +85,33 @@ Each member bundles its config — REST bases, both WebSocket bases, funds
 semantics and the EIP-712 signing domain:
 
 ```python
-from nexus_exchange import Client, Network
+from nexus_exchange import Client, Funds, Network
 
 Network.TESTNET.ws_market_data_url  # 'wss://api.testnet.nexus.xyz/stream'
 Network.TESTNET.ws_authenticated_url  # 'wss://api.testnet.nexus.xyz/ws'
-Network.MAINNET.real_funds  # True — branch on this, never on the host string
+Network.MAINNET.funds  # Funds.REAL — branch on this, never on the host string
 
 with Client(Network.TESTNET) as client:
     ...
 ```
 
+`funds` is a **tri-state**, not a boolean: `Funds.REAL`, `Funds.PLAY`, or
+`Funds.UNKNOWN` for a target whose funds were never declared. Guard on `PLAY`
+**positively** so an undeclared target fails closed:
+
+```python
+if client.network.funds is not Funds.PLAY:  # correct — UNKNOWN is refused
+    refuse()
+if client.network.funds is Funds.REAL:  # WRONG — UNKNOWN slips through
+    refuse()
+```
+
+Whether a faucet exists is tracked separately (`has_faucet`): "not real money"
+does not imply "can mint more of it".
+
 The two WebSocket bases and `published_rest_base` are the spec's **durable**
 per-network values, recorded here so they live in one place. The hosted ones do
-not resolve yet (DNS is ENG-8155), and this SDK ships no WebSocket client, so
+not resolve yet (DNS is not configured), and this SDK ships no WebSocket client, so
 treat them as published targets rather than something to connect to today. What
 the client actually sends to is `base_url` / `direct_base_url`.
 
@@ -117,45 +131,152 @@ Three things worth knowing before you pick one:
   verification or produces a signature valid on a *different* network.
 
 The retired `stable` / `beta` release channels were never networks. `stable`
-became `Network.TESTNET` (same target); `beta` is now an explicit override:
+became `Network.TESTNET` (same target); `beta` is now a custom target:
 
 ```python
 Client(
-    base_url="https://beta.exchange.nexus.xyz/api/exchange",
-    direct_base_url="https://beta.exchange.nexus.xyz",
+    NetworkConfig.custom(
+        label="beta",
+        funds=Funds.UNKNOWN,  # that deploy's funds are not ours to assert
+        base_url="https://beta.exchange.nexus.xyz/api/exchange",
+        # direct_base_url defaults to base_url, which is the right shape for a
+        # gateway deploy: the /api/v1 surface is mounted under the prefix, not at
+        # the host root. Only set it if you have measured that deploy serving the
+        # two surfaces apart.
+    )
 )
 ```
 
+#### Custom targets
+
+For a deployment this SDK ships no hostname for, build the config yourself and
+pass it wherever a `Network` goes. It carries the **whole bundle**, not just a
+URL — that is what stops a client reporting play-funds guardrails while pointed
+somewhere else:
+
+```python
+from nexus_exchange import Client, Funds, NetworkConfig
+
+config = NetworkConfig.custom(
+    label="dev",  # required
+    funds=Funds.PLAY,  # required — no default
+    base_url="https://exchange.example.com",
+    direct_base_url="https://exchange.example.com",  # optional; defaults to base_url
+    has_faucet=False,  # absent until declared
+    chain_id=None,  # unknown ⇒ signing refuses
+)
+
+with Client(config) as client:
+    ...
+```
+
+`label` and `funds` are required and have no defaults. There is no safe default
+for `funds`: assuming play makes every guardrail lie on a real-funds deployment,
+and assuming real makes a dev target unusable. Pass `Funds.UNKNOWN` when it truly
+is unknown — the guards treat that as unsafe, which is the honest answer.
+
+`label` is validated (`[A-Za-z0-9._-]`, max 64, no `.` or `..`) because it is a
+**key**: it is what stored credentials are namespaced under across these SDKs, so
+a label that can escape a directory or split a keyring entry would let one target
+address another's credentials.
+
+Both base URLs are validated for scheme and host, and refused if they carry
+**userinfo** or a query or fragment. The request path is appended to the base, so
+`https://host?a=1` would be sent *and signed* as
+`https://host?a=1/api/v1/orders`, and `https://api.nexus.xyz@evil.com` reads as
+the published host to anyone skimming a config file while the requests — and the
+API keys — go to `evil.com`. A **path** is accepted: a base under
+`/api/exchange` is a real, working topology. The same checks apply to a raw
+`base_url` / `direct_base_url` override, including the one mainnet requires.
+
+**A bare `base_url` with no network named is deprecated** ([#61][pr61]) — build
+the config instead. Both reach the same host; only the config says what is
+behind it, so the bare form yields `Funds.UNKNOWN` and no faucet, and every
+guard treats that as unsafe:
+
+```python
+Client(base_url="https://exchange.example.com")  # deprecated: UNKNOWN, no faucet
+Client(NetworkConfig.custom(label="dev", funds=Funds.PLAY, base_url="https://exchange.example.com"))
+```
+
+It still works, unchanged, and **does not warn at runtime** — the marker each
+SDK carries was chosen per ecosystem, and Python's is prose. So if
+you do not read this section you get no signal at all, which is exactly why **a
+release that warns has to come before one that removes it**: a real
+`DeprecationWarning`, which Python shows by default when the caller is
+`__main__`, i.e. in the local scripts and notebooks this form exists for.
+Nothing is removed here, and nothing is removed before that runway has shipped.
+
+What is deprecated is the *selector* — a URL that picks the target on its own.
+`direct_base_url` is a modifier and stays, and so does a URL passed alongside a
+named network, which keeps that network's semantics because the caller has
+declared them:
+
+```python
+Client(Network.LOCAL, base_url="http://127.0.0.1:8080")  # stays play funds + faucet
+Client(Network.MAINNET, base_url="https://api.nexus.xyz")  # stays real funds
+```
+
+Custom configs are never added to the network map and are not addressable by
+name — `Network("dev")` still raises.
+
 ### Routing: direct `/api/v1` service vs. legacy gateway
 
-As the REST gateway is retired (ENG-4740), backend services expose their own
-REST API under an **`/api/v1`** prefix served at the host root
-(`https://exchange.nexus.xyz`), rather than the `…/api/exchange` gateway. The
-migrated market-data and account/trading routes now target this direct service;
-the HMAC signature covers the full path (e.g. `/api/v1/orders`). Routes with no
+As the REST gateway is retired, backend services expose their own
+REST API under an **`/api/v1`** prefix. That prefix is a *path*, not a host: it
+is mounted wherever the deployment serves the direct service, which on the
+hosted deploy is under the `…/api/exchange` gateway prefix
+(`https://exchange.nexus.xyz/api/exchange/api/v1/…`) and on a direct indexer
+host is the bare origin. The client appends `/api/v1` to `direct_base_url`, so
+that field carries whichever base applies. The migrated market-data and
+account/trading routes now target this direct service; the HMAC signature covers
+the full path (e.g. `/api/v1/orders`), independent of the base. Routes with no
 `/api/v1` equivalent yet — `GET /markets`, `/health`, ADL history, `GET
 /orders/{id}`, deposits, keys/agents, WS tokens and admin tiers — stay on the
 legacy gateway. This split is internal; method names and signatures are
-unchanged. A custom `base_url` overrides both bases, so on its own point it at
-the service root (e.g. `http://localhost:9090`), not a `/api/exchange` URL — a
-gateway base reaching the direct surface is rejected at construction, since it
-would send *and HMAC-sign* `/api/exchange/api/v1/…`. Pass `direct_base_url`
-alongside it to target a deploy that keeps the split.
+unchanged. A custom `base_url` overrides both bases; pass `direct_base_url`
+alongside it to target a deploy that serves the two surfaces apart.
+
+**Either topology is accepted.** A gateway-prefixed `direct_base_url` used to be
+rejected at construction, on the premise that `/api/v1` is served only at the
+host root. Production measurement says otherwise ([rs#131][rs131]):
+`…/api/exchange/api/v1/markets/summary` answers `200 application/json` while
+`…/api/v1/markets/summary` answers `404 text/html`, and junk segments under the
+gateway prefix answer a JSON `NOT_FOUND` — so the gateway mounts `/api/v1`
+specifically rather than routing permissively. A direct indexer host plausibly
+serves it at the root too, so both are real and which applies is a property of
+the URL, not something this client can assert. The rejection made the working
+configuration unreachable on the deploy targeted by default, so it is gone
+([#60][pr60]).
+
+[rs131]: https://github.com/nexus-xyz/nexus-exchange-rs/pull/131
+[pr60]: https://github.com/nexus-xyz/nexus-exchange-py/pull/60
+[pr61]: https://github.com/nexus-xyz/nexus-exchange-py/pull/61
 
 #### If you are coming from another Nexus SDK
 
 The field names differ, so line them up before copying a base URL across — the
-two-URL split here is one field in the TypeScript client:
+two-URL split here is one field in the TypeScript client. Every field below
+holds a **deployment base with no `/api/v1`** — Python, TypeScript and Rust all
+append that prefix themselves, on the direct routes only:
 
-| Surface | Python | TypeScript | Resolves to (testnet) |
-| --- | --- | --- | --- |
-| Direct `/api/v1` service | `direct_base_url` (host root; the `/api/v1` prefix is added per request) | `baseUrl` (prefix included in the base) | `https://exchange.nexus.xyz/api/v1` |
-| Legacy `/api/exchange` gateway | `base_url` | *not modelled* | `https://exchange.nexus.xyz/api/exchange` |
+| Surface | Python | TypeScript | Base value (testnet) | Composed URL |
+| --- | --- | --- | --- | --- |
+| Direct `/api/v1` service | `direct_base_url` | `baseUrl` | `https://exchange.nexus.xyz/api/exchange` | `…/api/exchange/api/v1/orders` |
+| Legacy `/api/exchange` gateway | `base_url` | *not modelled* | `https://exchange.nexus.xyz/api/exchange` | `…/api/exchange/ws/token` |
 
-So Python's `base_url` and TypeScript's `baseUrl` are **not** the same field
-despite the name, while `direct_base_url` plus the prefix and `baseUrl` are
-byte-identical. Copying a Python `base_url` into `baseUrl` is the mistake both
-SDKs now reject.
+On this deploy all of these hold the **same string**, because the direct surface
+is mounted under the gateway prefix — so copying a base across the three SDKs
+gives the right answer today, and Python's two fields stay separate only so a
+deploy that *does* serve the surfaces apart can still say so.
+
+What does not survive the copy is a base that already carries **`/api/v1`** —
+including the value `Network.TESTNET.direct_base_url` composes to, and TypeScript
+`baseUrl`'s own pre-0.3 default. Every SDK appends the prefix itself, so such a
+base sends `/api/v1/api/v1/orders` while signing the correct `/api/v1/orders`:
+a routing failure whose signature looks fine. TypeScript rejects it at
+construction; Python does not check, so strip the prefix before pasting a URL
+into `base_url` or `direct_base_url`.
 
 ## Authentication
 

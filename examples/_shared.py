@@ -26,23 +26,29 @@ import os
 import sys
 from urllib.parse import urlparse
 
-from nexus_exchange import Client, Network
+from nexus_exchange import Client, Funds, Network
 
 #: Hosts a *signed* example is allowed to point at. Loopback, plus every host
-#: reachable from a network whose funds are not real.
+#: reachable from a network that declares **play** funds.
 #:
 #: Derived from the ``Network`` enum rather than written out, so a new play-funds
 #: network is allowed automatically and a new real-funds one is not. That
 #: direction matters: the failure mode worth designing against is someone adding
 #: a network and forgetting to update a list, and here forgetting refuses rather
 #: than permits.
+#:
+#: Tested positively against :attr:`Funds.PLAY`, never by negating
+#: :attr:`Funds.REAL` (ENG-9826 made funds tri-state). A network whose funds are
+#: ``UNKNOWN`` contributes no host: undeclared is not the same as safe, and
+#: negating ``REAL`` would have let it through — the exact inversion the
+#: tri-state exists to prevent, and the one that costs money here.
 _LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", ""})
 
 
 def _play_funds_hosts() -> frozenset[str]:
     hosts = set(_LOOPBACK_HOSTS)
     for network in Network:
-        if network.real_funds:
+        if network.funds is not Funds.PLAY:
             continue
         for url in (network.config.base_url, network.config.direct_base_url):
             if url:
@@ -127,10 +133,20 @@ def make_signed_client() -> Client:
     # Deliberately not overridable by another env var. An example is a teaching
     # artifact someone runs while reading; a real-funds trading script should be
     # written on purpose, not reached by exporting one variable.
-    if network.real_funds:
+    # Positive test on PLAY rather than `is Funds.REAL` (ENG-9826): funds are
+    # tri-state now, and a target that never declared them must refuse here. The
+    # negated form reads as "only mainnet is dangerous", which is how an
+    # UNKNOWN-funds target would have walked through a guard that exists to stop
+    # exactly that.
+    if network.funds is not Funds.PLAY:
+        reason = (
+            "moves real funds"
+            if network.funds is Funds.REAL
+            else f"does not declare whose funds it moves (funds={network.funds.value!r})"
+        )
         print(
-            f"refusing to run a signed example against {network.value!r}, which moves "
-            "real funds. Use NEXUS_NETWORK=local (default) or testnet.\n"
+            f"refusing to run a signed example against {network.value!r}, which "
+            f"{reason}. Use NEXUS_NETWORK=local (default) or testnet.\n"
             "If you genuinely mean to trade real funds, write a script that says so "
             "rather than pointing an example at mainnet.",
             file=sys.stderr,

@@ -7,9 +7,62 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-08-20
+
+### Changed
+
+- **`NetworkConfig.real_funds` (bool) is now `funds` (tri-state) (#60).**
+  **Breaking.** `Funds.REAL` / `Funds.PLAY` / `Funds.UNKNOWN`, on both
+  `NetworkConfig` and `Network`. A boolean cannot express a target whose funds
+  were never declared, and that state has to exist — a caller-supplied URL says
+  nothing about what is behind it. It is deliberately **not** kept as a derived
+  boolean: `real_funds is False` would read as "play money" for an undeclared
+  target, which is the one wrong answer that costs money. Guard on `PLAY`
+  positively (`funds is not Funds.PLAY`), never by negating `REAL`.
+- **`Client.network` returns the `NetworkConfig`, not the `Network` member.**
+  **Breaking.** A named network and a custom target now expose the same fields,
+  so every guard reads one shape. Compare against `Network.TESTNET.config`.
+- **A bare `base_url` with no network named now reports undeclared funds.**
+  **Breaking (behavioural).** It builds a custom config with `Funds.UNKNOWN` and
+  no faucet, so `claim_credit` refuses where it previously inherited testnet's
+  faucet. Previously the override changed transport only and left whichever
+  network was default supplying the funds semantics — which is exactly how a
+  client pointed at a real-funds deployment kept reporting play-funds
+  guardrails. Naming the network alongside the URL keeps its semantics
+  (`Client(Network.LOCAL, base_url=…)`), and mainnet's required override is
+  unaffected.
+- **A raw `base_url` / `direct_base_url` override is now validated (#60).**
+  **Breaking (behavioural).** Naming a network keeps its config, so an override
+  passed alongside one never reached `NetworkConfig.custom`'s checks: it was
+  stripped of trailing slashes and then used to build *and sign* requests. Both
+  doors now share one validator, so an override gets the scheme, host, userinfo
+  and query/fragment checks too. This was the only path to mainnet, which makes
+  it the one place a malformed or hostile base could not be caught. A blank
+  override still means "unset" and defers to the network's default — validation
+  runs on what survives that fallback, not on the raw argument.
+
 ### Added
 
-- **Cursor pagination on the five paginated list endpoints (ENG-8081).** Spec
+- **`NetworkConfig.custom(...)` — a caller-supplied network target (#60).**
+  Reaches a deployment this SDK ships no hostname for, and carries the whole
+  bundle rather than a bare URL: both bases, funds semantics, faucet, signing
+  domain and a label. Accepted anywhere a `Network` is — `Client(config)` —
+  while the shipped network map stays immutable and a custom target stays
+  un-addressable by name. `label` and `funds` are required and have no defaults.
+  `label` is charset-validated (`[A-Za-z0-9._-]`, max 64, no `.` or `..`)
+  because it is the key credentials are namespaced under across these SDKs; an
+  unvalidated one could let one target address another's. `has_faucet` defaults
+  to absent, and a real-funds target with a faucet is refused outright as
+  incoherent. `chain_id` defaults to unknown, so signing refuses rather than
+  guessing — the same rule the named networks follow. Both base URLs are
+  validated for scheme and host, and rejected if they carry userinfo or a query
+  or fragment: the request path is appended to the base, so `https://host?a=1`
+  would be signed as `https://host?a=1/api/v1/orders`, and
+  `https://exchange.nexus.xyz@evil.com` reads as the published host while
+  sending API keys somewhere else. A path is deliberately still accepted — that
+  is the gateway topology this variant exists to reach (#60).
+
+- **Cursor pagination on the five paginated list endpoints (#46).** Spec
   v0.7.2 added a `cursor` query parameter and an `X-Next-Cursor` response header
   to trades, fills, order history, closed positions and equity history. The SDK
   now threads them: `iter_trades` / `iter_my_trades` and the other `iter_*`
@@ -23,7 +76,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   is indistinguishable from "that was the last page", which would hand the
   caller a truncated history it believes is complete.
 - **`/orders/history`, `/positions/closed` and `/account/equity-history`
-  (ENG-8082).** Three endpoints the SDK did not reach. Each has a
+  (#47).** Three endpoints the SDK did not reach. Each has a
   `fetch_*` (one page), a `*_page` (page plus next cursor) and an `iter_*`
   (walks every page), with `OrderHistoryEntry`, `ClosedPosition` and
   `EquityPoint` models and the per-endpoint page-size maxima
@@ -36,7 +89,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   flat", and an absent `closed_at_ms` plotted at 1970. An explicitly `null`
   field and an omitted one now agree, where previously one raised and the
   other returned zero.
-- **`RestrictedJurisdictionError` for the jurisdiction `403` (ENG-9635).** Spec
+- **`RestrictedJurisdictionError` for the jurisdiction `403` (#54).** Spec
   v0.7.3 declares this refusal on every state-changing operation — placing,
   amending and batching orders, deposits, margin adjustments, credits, the
   faucet — and, for the sanctions code, on reads as well. It is **permanent for
@@ -53,7 +106,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and the other `403`s in the contract (`credits_frozen`, the admin-secret
   refusal) deliberately stay plain `ApiError`s — those can lift, this one does
   not.
-- **The network axis `{Mainnet, Testnet, Local}` (ENG-6454).** `Network` now
+- **The network axis `{Mainnet, Testnet, Local}` (#51).** `Network` now
   names a *network* — which chain, and whose money — instead of a release
   channel, and each member bundles its whole config in one frozen
   `NetworkConfig`: both REST bases, the market-data and authenticated
@@ -62,7 +115,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   EIP-712 `SigningDomain`. The host map is spelled out with mainnet as a named
   case — `api.nexus.xyz`, never `api.mainnet.nexus.xyz` — because interpolating
   the network name resolves for every environment that can be tested and breaks
-  only on real funds. Mirrors the spec's `x-nexus-networks` (ENG-6442).
+  only on real funds. Mirrors the spec's `x-nexus-networks` (#51).
 - **`direct_base_url` on `Client`.** Targets a deploy that keeps the
   gateway/direct split, which a single `base_url` collapses. This is what the
   retired `beta` channel becomes.
@@ -75,7 +128,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Pass `direct_base_url` alongside it; `base_url` itself may still be a gateway
   URL, as the network defaults are.
 
-- **Portfolio-parity endpoints and fields (ENG-6459).** Surfaces the
+- **Portfolio-parity endpoints and fields (#43).** Surfaces the
   portfolio-parity additions from Exchange API v0.7.2:
   - `fetch_account_state` (`GET /api/v1/account/state`) — the consolidated
     single-call snapshot (`AccountState`: summary aggregates + every open
@@ -113,7 +166,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bare `ValueError`) and `ValueError` (so existing handlers keep working). A
   plain `ValueError` now means *caller* error — a bad `window` or `limit`,
   raised before the request is signed — so the two are distinguishable by type.
-- **Account cancel-on-disconnect methods (ENG-6132).** `fetch_cancel_on_disconnect`
+- **Account cancel-on-disconnect methods (#38).** `fetch_cancel_on_disconnect`
   (`GET /api/v1/account/cancel-on-disconnect`) and `set_cancel_on_disconnect`
   (`PUT /api/v1/account/cancel-on-disconnect`, body `{"enabled": <bool>}`) wrap
   the account COD endpoints added in Exchange API v0.7.1. Both are signed calls
@@ -121,14 +174,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   which distinguishes the account's own opt-in (`enabled`) from whether COD will
   actually fire (`active` — opt-in *and* the exchange-side feature switch) and
   exposes the disconnect `grace_secs` window.
-- **`TrailingLimit` order placement (ENG-6131).** `OrderRequest.trailing_limit(...)`
+- **`TrailingLimit` order placement (#39).** `OrderRequest.trailing_limit(...)`
   models the request side of the `TrailingLimit` order type (a variant of
   `POST /api/v1/orders`). It requires both `trailing_offset_bps` (the trailing
   trigger) and `limit_offset_bps` (the fire-time limit offset) as positive
   integers (basis points; 1 bp = 0.01%) and carries no `price` — the limit
   price is computed server-side at fire time. The `Order` model now also echoes
   the nullable `limit_offset_bps` integer.
-- **Release automation (ENG-6135).** A `release` workflow cuts a release from a
+- **Release automation (#40).** A `release` workflow cuts a release from a
   `vX.Y.Z` tag push (or manual `workflow_dispatch` on an existing tag): it guards
   that the tag equals `pyproject.toml`'s version, runs the full check suite
   (lint/types/tests) so a red tree is never shipped, builds the sdist + wheel
@@ -139,7 +192,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   environment, so releases never fail on unconfigured PyPI. Distribution stays
   git-source until PyPI is live; the README install line is unchanged.
 
-- **Spec-drift verification (ENG-7960).** `scripts/check_spec_drift.py`, wired as
+- **Spec-drift verification (#50).** `scripts/check_spec_drift.py`, wired as
   the `spec-drift` CI job on **every** PR — including the pin-bump PR, where the
   pin *is* the change and a trigger gated on spec-file diffs would verify nothing.
   It enforces both directions against the pinned spec: every `endpoints.txt` entry
@@ -152,8 +205,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   exemption can't outlive its reason. `scripts/test_check_spec_drift.py` (40 cases,
   hermetic, run in the same job) proves the checker goes red when defeated — a
   green run is only evidence if red is reachable.
-- **`spec-autobump` workflow (ENG-7960).** Replaces `api-version-sync` with the
-  design nexus-exchange-rs established (ENG-3563): dispatch from the api repo on
+- **`spec-autobump` workflow (#50).** Replaces `api-version-sync` with the
+  design nexus-exchange-rs established: dispatch from the api repo on
   release, a daily poll as the self-healing fallback, and manual dispatch. It
   classifies old-pin → new with a **pinned** oasdiff (`breaking --fail-on ERR`) and
   labels the PR `spec-autobump` or `breaking · needs-SDK-update`, requesting review
@@ -163,10 +216,77 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   says plainly in the PR that a human must merge, rather than arming auto-merge
   into a silent no-op.
 
+### Deprecated
+
+- **A bare `base_url` with no network named — use `NetworkConfig.custom(...)`
+  (#61).** Now that every client has landed a custom target,
+  the raw override is sugar over it, and the sugar cannot say what it is
+  pointed at. Both forms reach the same host; only the config declares the
+  funds, the faucet and the signing domain, which is why the bare form has to
+  fall back to `Funds.UNKNOWN` and no faucet. Nothing changes at runtime: the
+  bare form still works, still builds the same undeclared-funds config, and the
+  guarded paths still refuse.
+  - **No `DeprecationWarning` is raised** — this is a documentation-only
+    deprecation, decided across the five SDKs rather than per-repo.
+    The mechanisms deliberately differ by ecosystem idiom, and so does how loud
+    they are: Rust carries `#[deprecated]` and warns on every build, the MCP
+    server prints a notice on stderr every run, while Python and TypeScript
+    mark this in prose only. Python and TypeScript callers therefore get **no
+    runtime signal at all** from this release, which is the tradeoff being
+    made, not an oversight.
+  - **Removal requires a release that warns first.** Because this one is
+    silent, the bare selector cannot go straight from here to removed: a real
+    `DeprecationWarning` — which Python shows by default when the caller is
+    `__main__`, i.e. in exactly the local scripts and notebooks this form
+    exists for — has to ship, and ship in a release, before removal. Removal is
+    itself a breaking change and needs its own release after that. Recorded
+    here rather than only in the PR that decided it.
+  - The **selector** is what is deprecated — a URL that picks the target on its
+    own. `direct_base_url` is a modifier and is untouched, and so is a URL
+    passed *alongside* a named network (`Client(Network.LOCAL, base_url=…)`,
+    and mainnet's required override): those refine a target whose funds the
+    caller has already declared.
+  - The retired-`beta` migration message and the README now suggest
+    `NetworkConfig.custom(...)` rather than the bare override. The suggestion
+    declares `Funds.UNKNOWN`, not the play funds that deploy once had: this SDK
+    cannot check what that host serves today, and guessing low is the direction
+    that costs money.
+
+### Fixed
+
+- **`Network.TESTNET.direct_base_url` changed from
+  `https://exchange.nexus.xyz` to `https://exchange.nexus.xyz/api/exchange`,
+  which fixes every `direct=True` route on a default testnet client**
+  (#62, [rs#131](https://github.com/nexus-xyz/nexus-exchange-rs/pull/131)). The
+  client composes `direct_base_url + "/api/v1" + path`, so the old value built
+  `https://exchange.nexus.xyz/api/v1/...`, which answers `404 text/html` — the
+  frontend, not the API. The working URL is
+  `https://exchange.nexus.xyz/api/exchange/api/v1/...`: on this deploy the
+  `/api/v1` service is mounted *under* the `/api/exchange` gateway prefix rather
+  than at the host root, so the direct base has to carry that prefix too. All
+  ~36 direct routes (market data, account, trading) were unreachable; only the
+  legacy gateway routes worked. `_resolve_base` had already stopped rejecting a
+  gateway base for this field on the strength of that measurement, but the
+  default was never moved to match. No caller change is required — code that was
+  failing starts working — though anyone asserting the old literal will see it
+  change. The two fields stay separate for a deploy that does serve the surfaces
+  apart; on this one they are equal. The README's SDK-comparison table
+  documented the old, broken URL as the expected result and is corrected here.
+
+- **A gateway-prefixed `direct_base_url` is no longer rejected (#60).**
+  The validation asserted that the direct `/api/v1` surface is served only at
+  the host root; production measurement found the opposite
+  ([rs#131](https://github.com/nexus-xyz/nexus-exchange-rs/pull/131)) — the
+  gateway mounts `/api/v1` under its own prefix and answers `200`, while the
+  host root answers `404 text/html`. Both topologies are real, so the
+  unconditional rejection made the working configuration unreachable on
+  the deploy this SDK targets by default. Which one applies is a property of the
+  URL, and is now left to the URL.
+
 ### Changed
 
 - **BREAKING: `fetch_trades` and `fetch_my_trades` now reject an out-of-range
-  `limit` locally instead of forwarding it (ENG-8081).** The paginated endpoints
+  `limit` locally instead of forwarding it (#46).** The paginated endpoints
   declare a `maximum` (1000 for trades and fills), and the SDK now validates
   against it before the request — and, on a signed route, before signing —
   raising `ValueError`. Previously the value went to the server, which clamped
@@ -184,7 +304,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   first `next()`, so both forms of the same call now report a caller's own
   mistake at the same moment.
 
-- **BREAKING: `Network.STABLE` and `Network.BETA` are removed (ENG-6454).** They
+- **BREAKING: `Network.STABLE` and `Network.BETA` are removed (#51).** They
   were release channels, not networks, and the old enum had no way to name
   mainnet at all.
   - `Network.STABLE` → **`Network.TESTNET`**, which is also the new default for
@@ -214,7 +334,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `POST /account/credit` testnet/local-only, so a mainnet call now fails locally
   instead of spending a signed request against a real-funds host.
 - **Corrected `endpoints.txt`: five bridge operations were listed without their
-  `/api/v1` prefix (ENG-7960).** `GET|POST /bridge/deposit-addresses`,
+  `/api/v1` prefix (#50).** `GET|POST /bridge/deposit-addresses`,
   `GET /bridge/assets`, `GET /bridge/deposits` and `GET /bridge/deposits/{id}` are
   requested with `direct=True`, so the client has always called them at
   `/api/v1/bridge/...` — the paths the spec defines. The manifest claimed the bare
@@ -233,14 +353,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   of an `AttributeError` from library internals. Applies to all models, not just
   the new ones. Optional and nullable fields still decode to `None` exactly as
   before.
-- **Bounded `ruff` to one minor in the `dev` extra (ENG-7728).** `ruff>=0.6`
+- **Bounded `ruff` to one minor in the `dev` extra (#49).** `ruff>=0.6`
   became `ruff>=0.16,<0.17`. CI installs the formatter only through this extra,
   so an unbounded spec made a formatting change in any ruff release fail
   whichever unrelated PR happened to open first after it — as 0.16.0 did by
   formatting Python inside Markdown. Development-only: no runtime dependency and
   no API change. Dependabot now opens ruff bumps individually rather than inside
   the grouped minor PR, so the reformat one requires is the diff under review.
-- **Pinned the Exchange API spec to `v0.7.2` (was `v0.7.1`) (ENG-6459).** The
+- **Pinned the Exchange API spec to `v0.7.2` (was `v0.7.1`) (#43).** The
   spec release that adds the portfolio-parity surface above. Bumps
   `.api-version`, the baked `DEFAULT_API_VERSION` constant sent as
   `X-Nexus-Api-Version`, and the bot-managed README line. v0.7.2 is purely
@@ -252,15 +372,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-- **Request identity headers (ENG-5955).** Every REST request now sends
+- **Request identity headers (#34).** Every REST request now sends
   `X-Nexus-Api-Version: <spec tag>` (defaulting to the pinned `.api-version`,
   overridable via `Client(api_version=…)`) and a normalized
   `User-Agent: nexus-exchange-py/<package version>`, so the edge can pin the
   request to a contract version and segment per-key usage metrics by client +
-  version (ENG-5350 / ENG-4804). Both headers are also sent on a
+  version. Both headers are also sent on a
   caller-supplied `http_client`. Adds `DEFAULT_API_VERSION` to the public API.
 
-- **Tier-3 trading methods (ENG-5296).** Brings the Python surface to parity
+- **Tier-3 trading methods (#28).** Brings the Python surface to parity
   with the Rust SDK: `amend_order` (`PATCH /orders/{order_id}` on the `/api/v1`
   surface — `market_id` rides as a signed query param and an empty amend is
   rejected client-side), `adjust_margin` (`POST /account/margin`, add/remove
@@ -270,15 +390,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Pinned the Exchange API spec to `v0.7.1` (was `v0.6.2`) (ENG-6037).** Bumps
+- **Pinned the Exchange API spec to `v0.7.1` (was `v0.6.2`) (#35).** Bumps
   `.api-version`, the bot-managed README line, and the baked `DEFAULT_API_VERSION`
   constant (the `X-Nexus-Api-Version` header value) in lockstep, clearing spec
-  drift. `v0.7.1` adds surface — the `TrailingLimit` order type (ENG-6131),
-  account cancel-on-disconnect (ENG-6132), and `/v1/bridge` Phase A (#32) —
+  drift. `v0.7.1` adds surface — the `TrailingLimit` order type (#39),
+  account cancel-on-disconnect (#38), and `/v1/bridge` Phase A (#32) —
   tracked as separate parity follow-ups (py drift treats uncovered routes as
   informational).
 
-- **Typed `create_orders` return value (ENG-3976).** `Client.create_orders`
+- **Typed `create_orders` return value (#25).** `Client.create_orders`
   (`POST /orders/batch`) now returns `list[BatchOrderResult]` — the spec's
   per-order tagged union (`outcome == "ok"` with `order`/`fills`, or
   `outcome == "err"` with `error`/`message`) — instead of the raw decoded
@@ -297,8 +417,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **`/api/v1` direct-service routing (ENG-4946).** As the REST gateway is
-  retired (ENG-4740), the migrated market-data and account/trading routes now
+- **`/api/v1` direct-service routing (#26).** As the REST gateway is
+  retired, the migrated market-data and account/trading routes now
   target each backend service directly under an `/api/v1` prefix at the host
   root (`https://exchange.nexus.xyz`) instead of the `…/api/exchange` gateway.
   The HMAC signature now covers the full path including the prefix (e.g.

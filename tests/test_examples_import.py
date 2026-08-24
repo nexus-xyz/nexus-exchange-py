@@ -199,25 +199,24 @@ def test_signed_examples_allow_loopback_base_urls(
         "https://exchange.nexus.xyz/api/exchange",
     ],
 )
-def test_gateway_style_urls_pass_the_guard_and_fail_later(
-    url: str, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_gateway_style_urls_pass_the_guard(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
     """Gateway-style hosts must not be refused as real-funds targets.
 
     Both URLs are play-funds: the first is what `beta` became (this module's
     docstring), the second is `Network.TESTNET.config.base_url` itself. Neither may
     be mistaken for mainnet.
 
-    Asserted on the guard rather than on a working client, because neither can
-    currently build one. `_shared.py` passes only `base_url`, `Client` falls
-    `direct_base_url` back to it, and a direct base containing `/api/exchange` is
-    rejected -- so *any* gateway-style `NEXUS_BASE_URL` raises, including the SDK's
-    own testnet default. That is ENG-10095, a pre-existing defect in how the
-    override is plumbed, and not this guard's business.
+    This asserted a `ValueError` rather than a working client until #62. `_shared.py`
+    passes only `base_url`, `Client` fell `direct_base_url` back to it, and a direct
+    base containing `/api/exchange` was rejected -- so *any* gateway-style
+    `NEXUS_BASE_URL` raised, the SDK's own testnet default included (ENG-10095).
+    Pointing testnet's direct base at the gateway-mounted `/api/v1` ended that, so
+    the assertion is now the property the docstring always wanted: the guard admits
+    these and a client is built.
 
-    The assertion is therefore narrow on purpose: the failure must be that
-    `ValueError`, NOT the guard's `SystemExit(2)`. If a change ever starts treating
-    these hosts as real-funds, this flips to SystemExit and fails here.
+    If a change ever starts treating these hosts as real-funds -- or as funds it
+    cannot vouch for, which now refuses too -- this fails on the guard's
+    `SystemExit(2)` instead.
     """
     monkeypatch.setenv("NEXUS_API_KEY", "nx_test")
     monkeypatch.setenv("NEXUS_API_SECRET", "00" * 32)
@@ -225,12 +224,36 @@ def test_gateway_style_urls_pass_the_guard_and_fail_later(
     monkeypatch.delenv("NEXUS_NETWORK", raising=False)
     shared = _shared_module()
 
-    with pytest.raises(ValueError) as exc:
-        shared.make_signed_client()
-    assert "direct_base_url" in str(exc.value)
+    with shared.make_signed_client() as client:
+        assert client is not None
 
 
-def test_signed_examples_allow_the_non_real_funds_networks(
+def test_the_signed_guard_tests_play_positively_not_real_negatively() -> None:
+    """`funds is not Funds.PLAY`, never `funds is Funds.REAL` (ENG-9826, #60).
+
+    The two forms are indistinguishable across today's built-ins -- MAINNET is
+    REAL, TESTNET and LOCAL are PLAY, and none is UNKNOWN -- so no runtime test
+    in this file can tell them apart. That is exactly why this one reads the
+    source. The difference appears the moment a target declares nothing, which
+    `NetworkConfig.custom(funds=Funds.UNKNOWN)` already permits and a future
+    network could: the negated form reads undeclared funds as safe and lets a
+    signed example place live orders against it, which is the inversion the
+    `Funds` docstring calls out by name.
+
+    Both sites are pinned -- the refusal in `make_signed_client` and the
+    allowlist in `_play_funds_hosts` -- because a host allowlist built by
+    negating REAL admits an undeclared target just as quietly.
+    """
+    source = (EXAMPLES_DIR / "_shared.py").read_text(encoding="utf-8")
+    assert source.count("is not Funds.PLAY") == 2, (
+        "both the refusal and the host allowlist must test PLAY positively"
+    )
+    # A trailing colon makes this the control-flow form; the ternary that picks
+    # the refusal *message* legitimately asks whether funds are REAL.
+    assert "if network.funds is Funds.REAL:" not in source
+
+
+def test_signed_examples_allow_the_play_funds_networks(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """The converse, so the guard above cannot pass by refusing everything."""

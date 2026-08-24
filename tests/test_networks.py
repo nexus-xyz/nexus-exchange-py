@@ -9,7 +9,14 @@ guessed domain, a faucet call aimed at mainnet.
 
 import pytest
 
-from nexus_exchange import AuthError, Client, EthSigner, Network, SigningDomain
+from nexus_exchange import (
+    AuthError,
+    Client,
+    EthSigner,
+    Funds,
+    Network,
+    SigningDomain,
+)
 
 # A throwaway key; these tests never touch the network.
 _KEY = "11" * 32
@@ -63,11 +70,17 @@ class TestHostMap:
             assert "exchange.nexus.xyz" not in network.ws_market_data_url
 
     def test_funds_and_faucet_semantics(self) -> None:
-        assert Network.MAINNET.real_funds is True
+        assert Network.MAINNET.funds is Funds.REAL
         assert Network.MAINNET.has_faucet is False
-        assert Network.TESTNET.real_funds is False
+        assert Network.TESTNET.funds is Funds.PLAY
         assert Network.TESTNET.has_faucet is True
-        assert Network.LOCAL.real_funds is False
+        assert Network.LOCAL.funds is Funds.PLAY
+
+    def test_no_named_network_reports_undeclared_funds(self) -> None:
+        # UNKNOWN is for targets this SDK ships no hostname for. A named network
+        # always knows whose money it moves.
+        for network in Network:
+            assert network.funds is not Funds.UNKNOWN
 
     def test_config_is_immutable_and_shared(self) -> None:
         # Frozen and identical per access, so a live client cannot have its
@@ -85,9 +98,9 @@ class TestClientTargeting:
         # and testnet's bases are byte-identical to the old `STABLE` ones, so
         # existing code keeps hitting exactly the same URLs.
         with Client() as client:
-            assert client.network is Network.TESTNET
+            assert client.network is Network.TESTNET.config
             assert client._base_url == "https://exchange.nexus.xyz/api/exchange"
-            assert client._direct_base_url == "https://exchange.nexus.xyz"
+            assert client._direct_base_url == "https://exchange.nexus.xyz/api/exchange"
 
     def test_mainnet_without_an_explicit_base_refuses_at_construction(self) -> None:
         # Its host is published but not resolvable. Guessing one would mean
@@ -104,7 +117,15 @@ class TestClientTargeting:
     def test_mainnet_with_an_explicit_base_is_allowed(self) -> None:
         with Client(Network.MAINNET, base_url="https://api.nexus.xyz") as client:
             assert client._base_url == "https://api.nexus.xyz"
-            assert client.network.real_funds is True
+            assert client.network.funds is Funds.REAL
+
+    def test_naming_mainnet_with_an_override_keeps_real_funds(self) -> None:
+        # Mainnet has no default base, so an override is the *only* way to reach
+        # it. If naming a network plus a URL degraded to undeclared funds, the one
+        # path to real funds would be the one that lost the real-funds flag.
+        with Client(Network.MAINNET, base_url="https://api.nexus.xyz") as client:
+            assert client.network.funds is Funds.REAL
+            assert client.network.funds is not Funds.UNKNOWN
 
     def test_retired_beta_channel_is_reachable_via_the_two_overrides(self) -> None:
         # Beta is demoted to an explicit override. It keeps the gateway/direct
@@ -121,33 +142,39 @@ class TestClientTargeting:
             assert client._base_url == "http://127.0.0.1:8080"
             assert client._direct_base_url == "http://127.0.0.1:8080"
 
-    def test_a_lone_gateway_base_url_is_refused(self) -> None:
-        # The half-copied beta migration, and the value most likely to be on
-        # hand. Falling back to it for the direct surface would send *and sign*
-        # /api/exchange/api/v1/orders — a 404 that reads as an auth failure.
-        with pytest.raises(ValueError, match="must not point at the legacy"):
-            Client(base_url="https://beta.exchange.nexus.xyz/api/exchange")
+    def test_a_lone_gateway_base_url_is_accepted(self) -> None:
+        # Was refused, on the premise that /api/v1 is served only at the host
+        # root. rs#131 measured the opposite in production: the gateway mounts
+        # /api/v1 under its own prefix and answers 200, while the host root
+        # answers 404 HTML. The rejection made the working topology unreachable
+        # on the deploy this SDK targets by default (ENG-10095).
+        with Client(base_url="https://beta.exchange.nexus.xyz/api/exchange") as client:
+            assert client._base_url == "https://beta.exchange.nexus.xyz/api/exchange"
+            assert client._direct_base_url == "https://beta.exchange.nexus.xyz/api/exchange"
 
-    def test_the_gateway_refusal_names_the_host_root_to_pass(self) -> None:
-        with pytest.raises(ValueError) as exc:
-            Client(base_url="https://beta.exchange.nexus.xyz/api/exchange")
-        assert "'https://beta.exchange.nexus.xyz'" in str(exc.value)
+    def test_an_explicit_gateway_direct_base_is_accepted_too(self) -> None:
+        # Both topologies are real, so which one applies is a property of the URL
+        # rather than an invariant this client can assert.
+        with Client(
+            base_url="https://beta.exchange.nexus.xyz/api/exchange",
+            direct_base_url="https://beta.exchange.nexus.xyz/api/exchange/",
+        ) as client:
+            assert client._direct_base_url == "https://beta.exchange.nexus.xyz/api/exchange"
 
-    def test_an_explicit_gateway_direct_base_is_refused_too(self) -> None:
-        # Nothing serves /api/v1 under the gateway prefix, so there is no deploy
-        # for which this is the right value.
-        with pytest.raises(ValueError, match="must not point at the legacy"):
-            Client(
-                base_url="https://beta.exchange.nexus.xyz/api/exchange",
-                direct_base_url="https://beta.exchange.nexus.xyz/api/exchange/",
-            )
+    def test_both_surfaces_share_the_gateway_base_on_testnet(self) -> None:
+        # There is no split to preserve on this deploy: the /api/v1 surface is
+        # mounted under the gateway prefix, so both bases are the same value.
+        # The two fields stay separate for a deploy that does split them.
+        with Client(Network.TESTNET) as client:
+            assert client._base_url == "https://exchange.nexus.xyz/api/exchange"
+            assert client._direct_base_url == "https://exchange.nexus.xyz/api/exchange"
 
     def test_the_default_gateway_base_url_is_not_caught_by_the_guard(self) -> None:
         # The guard covers the direct surface only. Testnet's own base_url is a
         # gateway URL, and must stay one.
         with Client() as client:
             assert client._base_url == "https://exchange.nexus.xyz/api/exchange"
-            assert client._direct_base_url == "https://exchange.nexus.xyz"
+            assert client._direct_base_url == "https://exchange.nexus.xyz/api/exchange"
 
     def test_a_host_containing_the_word_exchange_is_not_a_gateway(self) -> None:
         # The check is on path segments, so `exchange.nexus.xyz` and a path like
@@ -172,7 +199,7 @@ class TestClientTargeting:
 
     def test_string_network_is_accepted_and_validated(self) -> None:
         with Client("local") as client:
-            assert client.network is Network.LOCAL
+            assert client.network is Network.LOCAL.config
         with pytest.raises(ValueError):
             Client("stable")
 
