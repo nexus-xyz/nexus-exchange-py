@@ -44,7 +44,7 @@ from types import ModuleType
 
 import pytest
 
-from nexus_exchange import Network
+from nexus_exchange import Funds, Network
 
 EXAMPLES_DIR = Path(__file__).resolve().parent.parent / "examples"
 
@@ -345,6 +345,60 @@ def test_the_readme_documents_only_real_network_names() -> None:
             if defines:
                 assert "stable" not in line.lower(), f"{doc.name}: {line.strip()}"
                 assert Network.TESTNET.value in line.lower(), f"{doc.name}: {line.strip()}"
+
+
+def test_the_docs_do_not_sell_a_bare_base_url_as_a_target_selector() -> None:
+    """ENG-10095: a URL says nothing about whose money is behind it.
+
+    Both docs used to present `NEXUS_BASE_URL` as the thing that "overrides
+    NEXUS_NETWORK", with `https://beta.exchange.nexus.xyz/api/exchange` as the
+    way to reach that deploy. Two things went stale under it. The `Custom`
+    network (ENG-9823/9826) made a declared-funds config the documented way to
+    name a deployment, and ENG-10955 deprecated the bare `base_url` *selector*
+    in favour of it -- so a URL offered as the way to pick a target now teaches
+    the shortcut that resolves to `Funds.UNKNOWN`.
+
+    It was also not what these factories do: both pass the override alongside a
+    named network, which keeps that network's funds. So the old wording named a
+    behaviour the code does not have, in the direction that reads as safer than
+    it is -- see `test_a_base_url_override_keeps_the_named_networks_funds` for
+    the semantics the replacement claims.
+    """
+    for doc in (EXAMPLES_DIR / "README.md", EXAMPLES_DIR / "_shared.py"):
+        flat = doc.read_text(encoding="utf-8").lower().replace("`", "")
+        assert "overrides nexus_network" not in flat, (
+            f"{doc.name}: NEXUS_BASE_URL is a modifier on the named network, not a "
+            f"selector that overrides it -- the funds stay the network's (ENG-10095)"
+        )
+        assert "networkconfig.custom" in flat, (
+            f"{doc.name}: should point at NetworkConfig.custom() for a deployment "
+            f"whose funds have to be declared, not at a bare URL (ENG-10955)"
+        )
+
+
+def test_a_base_url_override_keeps_the_named_networks_funds(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The semantics the docs now claim, pinned so the prose cannot drift off them.
+
+    ENG-10095. `make_client` passes `NEXUS_BASE_URL` *with* `Network.TESTNET`, so
+    only the send target moves -- the config keeps testnet's funds, faucet and
+    signing domain. The deprecated bare selector (a URL and no network) would
+    instead resolve to `Funds.UNKNOWN`, and that difference is the whole point of
+    the section: an override cannot make the guardrails match the far end.
+
+    Asserted on `_base_url` because the override lands on the client, not on the
+    config -- `client.network` is testnet entire, which is exactly the surprise
+    worth pinning.
+    """
+    monkeypatch.delenv("NEXUS_NETWORK", raising=False)
+    monkeypatch.setenv("NEXUS_BASE_URL", "http://localhost:9090")
+    shared = _shared_module()
+
+    with shared.make_client() as client:
+        assert client._base_url == "http://localhost:9090"
+        assert client.network.funds is Funds.PLAY
+        assert client.network.label == Network.TESTNET.config.label
 
 
 def test_the_readme_catalog_matches_the_examples_directory() -> None:

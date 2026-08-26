@@ -7,15 +7,39 @@ its configuration from the environment — no secrets in source.
 
 | Variable | Purpose |
 | --- | --- |
-| `NEXUS_BASE_URL` | Explicit base URL; overrides `NEXUS_NETWORK` (e.g. `http://localhost:9090`). |
+| `NEXUS_BASE_URL` | URL override for the network named below — a modifier, not a selector (e.g. `http://localhost:9090`). |
 | `NEXUS_NETWORK` | Named network: `mainnet` \| `testnet` (default) \| `local`. Signed examples default to `local` and **refuse** `mainnet` outright — it moves real funds. |
 | `NEXUS_API_KEY` | HMAC key id (signed examples only). |
 | `NEXUS_API_SECRET` | HMAC secret, hex (signed examples only). |
 
-> `beta` is no longer a value here. It named a release *channel*, and ENG-6454
-> replaced that axis with a network axis — which chain, and whose money. What
-> `beta` meant is now an explicit base URL:
-> `NEXUS_BASE_URL=https://beta.exchange.nexus.xyz/api/exchange`.
+> **A base URL does not declare whose money is behind it** (ENG-10095). These
+> factories always pass `NEXUS_BASE_URL` *alongside* the network named above, so
+> the client keeps that network's funds, faucet and signing domain and only sends
+> somewhere else — an override with `NEXUS_NETWORK` unset still reports testnet's
+> play-funds guardrails, whatever is actually at the far end. A URL passed with a
+> declared network is a modifier and stays; a URL *on its own* is the deprecated
+> selector that resolves to undeclared funds (#61, ENG-10955).
+
+When the funds semantics have to be right, name them rather than implying them
+with a URL:
+
+```python
+from nexus_exchange import Client, Funds, NetworkConfig
+
+beta = NetworkConfig.custom(
+    label="beta",
+    funds=Funds.UNKNOWN,  # that deploy's funds are not ours to assert
+    base_url="https://beta.exchange.nexus.xyz/api/exchange",
+)
+
+with Client(beta) as client:
+    ...
+```
+
+`beta` is no longer a value here: it named a release *channel*, and ENG-6454
+replaced that axis with a network axis — which chain, and whose money. The config
+above is what it became. Pointing `NEXUS_BASE_URL` at the same host still reaches
+it from these examples, but under the named network's funds rather than its own.
 
 Run from the repo root so each program can import its sibling `_shared.py`:
 
