@@ -276,21 +276,3 @@ def test_fetch_account_adl_history_sends_limit(httpx_mock) -> None:
     )
     with Client(Network.LOCAL) as client:
         assert client.fetch_account_adl_history("0xabc", limit=5) == []
-
-
-def test_health_check_parses_status(httpx_mock) -> None:
-    httpx_mock.add_response(
-        url="http://localhost:9090/health",
-        json={
-            "events_received": 12345,
-            "fills_total": 678,
-            "uptime_seconds": 4242,
-            "connected": True,
-            "health": "healthy",
-        },
-    )
-    with Client(Network.LOCAL) as client:
-        health = client.health_check()
-    assert health.connected is True
-    assert health.events_received == 12345
-    assert health.health == "healthy"

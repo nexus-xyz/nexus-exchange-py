@@ -4,9 +4,10 @@ build-backend = "hatchling.build"
 
 [project]
 name = "nexus-exchange"
-# Keep in sync with the `_resolve_version` fallback literal in
-# src/nexus_exchange/client.py (used only when running from an uninstalled
-# source tree).
+# Set by release-please from commit history — don't hand-edit; merge the release
+# PR instead (see CONTRIBUTING.md "Releasing"). The same commit rewrites the
+# `_resolve_version` fallback literal in src/nexus_exchange/client.py and
+# .release-please-manifest.json, so all three stay in step.
 version = "0.4.0"
 description = "Official Python SDK for the Nexus Exchange API (experimental)"
 readme = "README.md"

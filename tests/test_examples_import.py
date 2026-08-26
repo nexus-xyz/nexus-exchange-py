@@ -82,6 +82,23 @@ def _example_paths() -> list[Path]:
     return sorted(p for p in EXAMPLES_DIR.glob("*.py") if p.name != "_shared.py")
 
 
+def _readme_catalog_names() -> set[str]:
+    """The `Example` column of the `## Programs` table in `examples/README.md`.
+
+    Reads the table itself rather than a hand-maintained list, so this stays a
+    pin against the directory and not another copy that can drift on its own.
+    """
+    text = (EXAMPLES_DIR / "README.md").read_text()
+    _, _, section = text.partition("## Programs")
+    names = set()
+    for line in section.splitlines():
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        first = cells[0] if cells else ""
+        if first.startswith("`") and first.endswith("`"):
+            names.add(first.strip("`"))
+    return names
+
+
 def test_the_examples_directory_is_actually_populated() -> None:
     """Guard the guard: a glob that matches nothing would make every test below vacuous."""
     paths = _example_paths()
@@ -170,6 +187,31 @@ def test_signed_examples_refuse_an_unrecognised_base_url_host(
     with pytest.raises(SystemExit) as exc:
         shared.make_signed_client()
     assert exc.value.code == 2
+
+
+def test_the_loopback_allowlist_does_not_admit_an_unparseable_host() -> None:
+    """`""` must not be a member of the play-funds host allowlist.
+
+    PR #18 review (@Luc-Campos): `urlparse(base_url).hostname` falls back to
+    `""` in `make_signed_client` for a `NEXUS_BASE_URL` the guard cannot pull a
+    host out of, and `_LOOPBACK_HOSTS` used to include `""` -- so that value
+    would satisfy `host in allowed` and pass the allowlist check that exists to
+    refuse exactly what it does not recognise.
+
+    Asserted directly against the allowlist rather than through
+    `make_signed_client()`: every URL that makes `urlparse(...).hostname` empty
+    also has an empty ``netloc``, which `Client`'s own `_clean_base_url`
+    independently rejects before this guard's answer would matter (confirmed by
+    hand: `NEXUS_BASE_URL=http:///no/host` raises there, not here). Routing the
+    test through `make_signed_client()` would therefore pass today regardless of
+    whether this allowlist itself was fixed -- it would be exercising the
+    *other* guard and calling it coverage of this one. Testing the allowlist's
+    own data is what actually pins the gap Luc flagged, independent of whatever
+    a caller upstream happens to also block.
+    """
+    shared = _shared_module()
+    assert "" not in shared._LOOPBACK_HOSTS
+    assert "" not in shared._play_funds_hosts()
 
 
 def test_signed_examples_allow_loopback_base_urls(
@@ -303,6 +345,31 @@ def test_the_readme_documents_only_real_network_names() -> None:
             if defines:
                 assert "stable" not in line.lower(), f"{doc.name}: {line.strip()}"
                 assert Network.TESTNET.value in line.lower(), f"{doc.name}: {line.strip()}"
+
+
+def test_the_readme_catalog_matches_the_examples_directory() -> None:
+    """The catalog half of the same drift class as the README-network-names test.
+
+    #69 deleted `examples/health_check.py`; the merge was clean and nothing
+    imported or lint-checked the README's `## Programs` table, so the stale
+    `health_check.py` row survived undetected (PR #18 review, @Luc-Campos) --
+    the same three structurally-blind guards this module's docstring already
+    describes, just aimed at the catalog instead of a helper's attribute.
+    `paginate_fills.py` had *also* drifted out of the table by the time this
+    landed, with nothing to catch that either.
+
+    So: pin the table to the directory itself, not to today's file list. A
+    fixed set of expected names would only re-encode the same drift risk one
+    level up -- add a tenth example and this test would need editing right
+    alongside the one it exists to make unnecessary.
+    """
+    documented = _readme_catalog_names()
+    on_disk = {p.name for p in _example_paths()}
+    assert documented == on_disk, (
+        "examples/README.md's Programs table has drifted from examples/: "
+        f"documented but missing from disk={sorted(documented - on_disk)}, "
+        f"on disk but undocumented={sorted(on_disk - documented)}"
+    )
 
 
 def test_examples_are_not_covered_by_mypy_so_this_file_is_the_substitute() -> None:

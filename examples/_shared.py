@@ -42,7 +42,15 @@ from nexus_exchange import Client, Funds, Network
 #: ``UNKNOWN`` contributes no host: undeclared is not the same as safe, and
 #: negating ``REAL`` would have let it through — the exact inversion the
 #: tri-state exists to prevent, and the one that costs money here.
-_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1", ""})
+#:
+#: Deliberately excludes ``""``. ``urlparse(base_url).hostname`` falls back to
+#: ``""`` below for a URL the guard cannot make sense of — e.g. one with no
+#: netloc — and this set exists to refuse hosts it does not recognise, not to
+#: wildcard the one it could not parse (PR #18 review, @Luc-Campos). Not
+#: reachable through `Client` today, which rejects a schemeless
+#: ``NEXUS_BASE_URL`` before this guard runs, but the guard should not depend on
+#: that to stay closed.
+_LOOPBACK_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 
 def _play_funds_hosts() -> frozenset[str]:

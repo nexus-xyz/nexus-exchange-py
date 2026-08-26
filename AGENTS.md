@@ -33,6 +33,25 @@ The Python SDK for the Nexus Exchange API.
   surfaces separately.
 - Pre-1.0: bump minor on breaking changes, patch on features and fixes.
 
+## Versioning
+
+- **Never hand-edit `version` in `pyproject.toml`, and never push a version tag.**
+  release-please computes the version from Conventional Commit subjects on `main`
+  and opens a release PR; merging it is the release. See CONTRIBUTING.md
+  "Releasing".
+- The PR title is the squash commit subject, and therefore the bump. Any type
+  with `!` → minor; `feat:`/`fix:`/`perf:`/`revert:` → patch; everything else,
+  including an unrecognised or unparseable type, → no release. An unparseable
+  subject contributes nothing and fails silently.
+- Three files carry the version and are rewritten together: `pyproject.toml`,
+  `.release-please-manifest.json`, and the marked `_resolve_version` fallback
+  literal in `src/nexus_exchange/client.py`. Adding a fourth means adding it to
+  `extra-files` in `release-please-config.json` with a `x-release-please-version`
+  marker comment — and never writing that marker text in prose, since every line
+  carrying it gets rewritten.
+- `DEFAULT_API_VERSION` is the spec tag from `.api-version`, not a package
+  version. It is not release-please's business.
+
 ## Networks
 
 - `src/nexus_exchange/networks.py` is the **only** place hosts live. Add or

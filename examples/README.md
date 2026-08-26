@@ -31,13 +31,13 @@ looking for a flow that is already here.
 
 | Example | Auth | Endpoints exercised |
 | --- | --- | --- |
-| `health_check.py` | none | `health` |
 | `single_ticker.py` | none | `ticker` (one market) |
 | `public_market_data.py` | none | `markets`, `ticker`, `orderbook`, `trades`, `candles` |
 | `ccxt_market_data.py` | none | CCXT adapter: `load_markets`, `fetch_ticker`, `fetch_order_book`, `fetch_trades`, `fetch_ohlcv` |
 | `account_and_positions.py` | HMAC | `account`, `positions`, `account/rate-limit` |
 | `place_and_cancel_order.py` | HMAC | `POST /orders`, `GET /orders/{id}`, `GET /orders`, `DELETE /orders/{id}` |
 | `fills_and_withdrawals.py` | HMAC | `fills`, `withdrawals` |
+| `paginate_fills.py` | HMAC | `fills` (cursor pagination via `iter_my_trades` / `fetch_my_trades_page`) |
 | `bridge_deposit.py` | HMAC | `bridge/assets`, `bridge/deposit-addresses`, `bridge/deposits` |
 | `signed_request.py` | HMAC | low-level signed-request escape hatch (no typed method) |
 | `wallet_auth.py` | wallet signature | `POST /auth/login` (EIP-191), `POST /agents/register` (EIP-712) |
