@@ -458,9 +458,12 @@ class Client:
         direct = (direct_base_url or "").strip()
         if not gateway and not direct:
             return Network.TESTNET.config
-        return NetworkConfig.custom(
-            label="custom",
-            funds=Funds.UNKNOWN,
+        # ENG-11134: through `_legacy_bare_url`, not `custom(label="custom")`.
+        # `custom()` now refuses the reserved built-in labels, and `"custom"` is
+        # one of them precisely BECAUSE this path has always stored credentials
+        # under it — so this is the one caller entitled to hold it, and the label
+        # is a constant here rather than caller input.
+        return NetworkConfig._legacy_bare_url(
             base_url=gateway or direct,
             direct_base_url=direct or gateway,
         )
