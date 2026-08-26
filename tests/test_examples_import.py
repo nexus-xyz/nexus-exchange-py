@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import importlib.util
 import os
+import re
 import sys
 from pathlib import Path
 from types import ModuleType
@@ -234,6 +235,37 @@ def test_signed_examples_allow_loopback_base_urls(
             assert client is not None
 
 
+def test_a_blank_base_url_env_var_means_unset_not_an_empty_override(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """`NEXUS_BASE_URL=` (set but empty) must fall back to the network default.
+
+    PR #18 review (08-26): before this, `os.environ.get("NEXUS_BASE_URL")` on an
+    empty-but-set var returned `""`, and both factories treated `""` differently
+    from `None` in ways that didn't agree with each other or with the Client's own
+    handling: `make_client` happened to fall back correctly (the print statement's
+    `base_url or network.base_url` masked it), but `make_signed_client`'s
+    play-funds host guard checked `if base_url is not None`, so `""` entered the
+    guard, `urlparse("").hostname` produced `""`, and — once the loopback
+    allowlist's own `""` entry was removed (the same review round) — every signed
+    example refused with "'' is not a known play-funds host" instead of falling
+    back to `Network.LOCAL` like an actually-unset var would.
+    """
+    monkeypatch.setenv("NEXUS_API_KEY", "nx_test")
+    monkeypatch.setenv("NEXUS_API_SECRET", "00" * 32)
+    monkeypatch.delenv("NEXUS_NETWORK", raising=False)
+    monkeypatch.setenv("NEXUS_BASE_URL", "")
+    shared = _shared_module()
+
+    with shared.make_signed_client() as client:
+        assert client is not None
+
+    monkeypatch.delenv("NEXUS_BASE_URL")
+    monkeypatch.setenv("NEXUS_BASE_URL", "")
+    with shared.make_client() as client:
+        assert client is not None
+
+
 @pytest.mark.parametrize(
     "url",
     [
@@ -332,19 +364,57 @@ def test_the_readme_documents_only_real_network_names() -> None:
     A README naming `stable` sends a reader to a `SystemExit`, and the docstring
     in `_shared.py` had the same list. Asserting on the docs is what stops them
     drifting from the enum again.
+
+    Covers `README.md`, `_shared.py`, AND every per-example docstring — PR #18
+    review (08-26) found `examples/public_market_data.py` still documenting
+    `NEXUS_NETWORK (stable|beta|local)` after this test already existed, because
+    the "defines" predicate only matched a line *starting with* the marker
+    (`"| `NEXUS_NETWORK`"` / `"NEXUS_NETWORK "`), and a per-example docstring
+    states it mid-sentence instead ("...or NEXUS_NETWORK (stable|beta|local).").
+    The predicate here instead requires the line to both mention `NEXUS_NETWORK`
+    and enumerate a `|`-delimited value list — matching every real vocabulary
+    statement seen across these files without also matching prose that merely
+    mentions the variable (e.g. "NEXUS_NETWORK is honored...").
     """
-    for doc in (EXAMPLES_DIR / "README.md", EXAMPLES_DIR / "_shared.py"):
+    # README.md and _shared.py are the two docs that have always documented the
+    # variable's vocabulary and are the floor this test guards. Every example is
+    # scanned too — not all of them mention NEXUS_NETWORK at all (most rely on
+    # _shared.py's central docs), so they aren't part of the vacuity floor, but
+    # any that *does* state a vocabulary (like public_market_data.py) is held to
+    # the same rule.
+    required_docs = [EXAMPLES_DIR / "README.md", EXAMPLES_DIR / "_shared.py"]
+    all_docs = [*required_docs, *_example_paths()]
+    checked_by_doc: dict[str, int] = {}
+    for doc in all_docs:
         text = doc.read_text()
-        marker = "NEXUS_NETWORK" if doc.suffix == ".py" else "`NEXUS_NETWORK`"
-        assert marker in text, f"{doc.name} should document NEXUS_NETWORK"
-        # The line documenting the variable must not offer a retired channel as a
-        # value. `beta` is allowed to APPEAR — both files explain what it became —
-        # so this checks the documented value list, not the whole file.
         for line in text.splitlines():
-            defines = line.strip().startswith(("| `NEXUS_NETWORK`", "NEXUS_NETWORK "))
-            if defines:
-                assert "stable" not in line.lower(), f"{doc.name}: {line.strip()}"
-                assert Network.TESTNET.value in line.lower(), f"{doc.name}: {line.strip()}"
+            # A vocabulary statement: names the variable, enumerates values
+            # pipe-separated (e.g. "mainnet | testnet (default) | local" or
+            # "(mainnet|testnet|local)"), AND actually names a network value as
+            # its own word. The word-boundary match matters twice over: README's
+            # own `NEXUS_BASE_URL` row mentions `NEXUS_NETWORK` in passing inside
+            # a markdown table (pipes as cell delimiters, not an enumeration),
+            # and a substring check on "local" alone matches inside
+            # "http://localhost:9090" in that same row. Prose that just mentions
+            # the variable without a value list (e.g. "NEXUS_NETWORK is
+            # honored...") doesn't match either, so this cannot false-fail on
+            # _shared.py's own explanation of what `beta` became.
+            words = set(re.findall(r"[a-z]+", line.lower()))
+            network_words = {"local", "testnet", "mainnet", "stable", "beta"}
+            if "NEXUS_NETWORK" not in line or "|" not in line or not (words & network_words):
+                continue
+            checked_by_doc[doc.name] = checked_by_doc.get(doc.name, 0) + 1
+            assert "stable" not in line.lower(), f"{doc.name}: {line.strip()}"
+            assert Network.TESTNET.value in line.lower(), f"{doc.name}: {line.strip()}"
+    # Guard the guard: README.md and _shared.py are known to carry at least one
+    # real vocabulary statement today, so zero matches on either means the
+    # predicate silently stopped matching anything — a vacuous pass, not a
+    # clean one.
+    for doc in required_docs:
+        assert checked_by_doc.get(doc.name, 0) >= 1, (
+            f"expected at least one NEXUS_NETWORK vocabulary line in {doc.name}, "
+            "found none — the predicate may have gone vacuous"
+        )
 
 
 def test_the_readme_catalog_matches_the_examples_directory() -> None:

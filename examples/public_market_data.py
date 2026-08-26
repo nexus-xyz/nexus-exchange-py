@@ -5,8 +5,8 @@ fetch its ticker, order-book top of book, recent trades, and recent candles.
 
     python examples/public_market_data.py
 
-Targets the stable public gateway by default. Override with NEXUS_BASE_URL
-(e.g. http://localhost:9090) or NEXUS_NETWORK (stable|beta|local).
+Targets the public testnet gateway by default. Override with NEXUS_BASE_URL
+(e.g. http://localhost:9090) or NEXUS_NETWORK (mainnet|testnet|local).
 """
 
 from __future__ import annotations

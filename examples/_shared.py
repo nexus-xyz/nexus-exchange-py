@@ -105,7 +105,11 @@ def _network_from_env(default: Network) -> Network:
 
 def make_client() -> Client:
     """Unauthenticated client for public market-data examples."""
-    base_url = os.environ.get("NEXUS_BASE_URL")
+    # `or None` treats a set-but-blank NEXUS_BASE_URL as unset, matching how the
+    # client itself treats an empty base URL -- otherwise `NEXUS_BASE_URL=`
+    # (no value) silently pins the empty string as an explicit override instead
+    # of falling through to the network default.
+    base_url = os.environ.get("NEXUS_BASE_URL") or None
     network = _network_from_env(Network.TESTNET)
     print(f"-> {base_url or network.base_url}")
     return Client(network=network, base_url=base_url)
@@ -122,7 +126,8 @@ def make_signed_client() -> Client:
             file=sys.stderr,
         )
         raise SystemExit(2)
-    base_url = os.environ.get("NEXUS_BASE_URL")
+    # See make_client's comment on `or None` -- same reasoning, same fix.
+    base_url = os.environ.get("NEXUS_BASE_URL") or None
     # NEXUS_NETWORK is honored; the default differs from make_client (LOCAL, not
     # TESTNET) on purpose — a signed/trading example should default to local so it
     # can't accidentally place orders against a shared network.
