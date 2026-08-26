@@ -22,12 +22,17 @@ so nothing in this file can accidentally reach a real deployment.
 
 from __future__ import annotations
 
+import dataclasses
 import warnings
 
 import pytest
 
 from nexus_exchange import Client, Funds, Network, NetworkConfig
-from nexus_exchange.networks import _CONFIGS
+from nexus_exchange.networks import (
+    _CONFIGS,
+    _RESERVED_LABELS,
+    LEGACY_BASE_URL_LABEL,
+)
 
 _BASE = "https://exchange.example.invalid"
 
@@ -471,3 +476,139 @@ class TestCustomTargetsStayOutOfTheSharedMap:
         with Client(config) as a, Client(config) as b:
             assert a.network is b.network
             assert a.network == _custom()
+
+
+# ── Reserved labels (ENG-11134) ──────────────────────────────────────────────
+#
+# The label-is-a-key premise above has one hole the charset rule cannot close:
+# `mainnet` is a perfectly legal label. So a custom target could call itself
+# `mainnet` and, on any consumer that keys stored credentials by label, address
+# the built-in network's secrets.
+#
+# `nexus-exchange-rs` already refused this (`RESERVED_LABELS` in its
+# `config.rs`); this SDK stated the same threat model and enforced everything
+# except the collision. These tests are the enforcement.
+
+
+class TestReservedLabels:
+    @pytest.mark.parametrize(
+        "label",
+        [
+            "mainnet",
+            "testnet",
+            "local",
+            # The legacy bare-`base_url` path stores credentials under this one.
+            "custom",
+            # Case-folded, because the storage this keys is often
+            # case-insensitive: on macOS and Windows `Mainnet` and `mainnet`
+            # reach the same entry, so reserving one spelling reserves nothing.
+            "Mainnet",
+            "MAINNET",
+            "Custom",
+            "TestNet",
+        ],
+    )
+    def test_reserved_label_is_refused(self, label: str) -> None:
+        with pytest.raises(ValueError) as excinfo:
+            NetworkConfig.custom(
+                label=label,
+                base_url="https://stage.example.invalid",
+                funds=Funds.PLAY,
+            )
+        message = str(excinfo.value)
+        assert "reserved" in message
+        # The error has to say WHY, or the next reader assumes it is a style
+        # rule and picks `mainnet2`, which is fine, rather than understanding
+        # that the label reaches a credential store.
+        assert "credential" in message
+
+    def test_a_label_merely_containing_a_reserved_name_is_allowed(self) -> None:
+        # The rule is collision, not resemblance. `mainnet-shadow` keys its own
+        # entry, so refusing it would cost real names for no security gain.
+        for label in ("mainnet-shadow", "my-testnet", "local2", "customer"):
+            assert (
+                NetworkConfig.custom(
+                    label=label,
+                    base_url="https://stage.example.invalid",
+                    funds=Funds.PLAY,
+                ).label
+                == label
+            )
+
+    def test_reserved_set_covers_every_built_in_network(self) -> None:
+        # The load-bearing guard, mirroring rs's
+        # `reserved_labels_cover_every_built_in_network`. A network added to
+        # `Network` later without touching `_RESERVED_LABELS` would silently
+        # become claimable — and nothing else in this file would notice, because
+        # every test above names its label as a literal.
+        for network in Network:
+            assert network.value.casefold() in _RESERVED_LABELS, (
+                f"Network.{network.name} is not reserved: a custom target could "
+                f"claim its credential-storage key"
+            )
+            assert network.config.label.casefold() in _RESERVED_LABELS, (
+                f"the label of Network.{network.name} ({network.config.label!r}) is not reserved"
+            )
+
+    def test_the_built_ins_still_construct_under_their_own_labels(self) -> None:
+        # The check belongs to `custom()`, not to `_clean_label`: the built-in
+        # configs run their labels through the latter at import time and those
+        # case-fold straight into the reserved set. Enforcing it there would
+        # refuse the very networks the set protects — an import-time failure of
+        # the whole package.
+        assert [n.config.label for n in Network] == ["Mainnet", "Testnet", "Local"]
+
+    def test_the_legacy_bare_url_path_keeps_its_label(self) -> None:
+        # `"custom"` is reserved BECAUSE this path stores credentials under it,
+        # so the fix must not break the thing it is protecting. The label is a
+        # constant on this path, not caller input.
+        config = NetworkConfig._legacy_bare_url(
+            base_url="https://gateway.example.invalid",
+            direct_base_url="https://direct.example.invalid",
+        )
+        assert config.label == LEGACY_BASE_URL_LABEL == "custom"
+        # And it stays UNKNOWN-funds: a bare URL says nothing about what is
+        # behind it, which is the pre-existing behaviour this must preserve.
+        assert config.funds is Funds.UNKNOWN
+
+    def test_no_public_method_relabels_a_config(self) -> None:
+        # `with_label` was public, and `__post_init__` re-runs `_clean_label` but
+        # deliberately NOT `_reject_reserved_label` — the legacy path exists to
+        # hold a reserved label — so one public call undid the rule above:
+        # `custom(label="dev", ...).with_label("mainnet")` returned a config
+        # labelled `mainnet`, in any casing. A reserved set is only as strong as
+        # the narrowest way to set a label, so the relabeler is private now.
+        assert not hasattr(NetworkConfig, "with_label")
+        public_relabelers = [
+            name
+            for name in dir(NetworkConfig)
+            if not name.startswith("_")
+            and "label" in name
+            and callable(getattr(NetworkConfig, name, None))
+        ]
+        assert public_relabelers == []
+
+    def test_post_init_stores_the_cleaned_label_rather_than_validating_a_copy(self) -> None:
+        # `_clean_label` returns a STRIPPED copy. Validating that return while
+        # leaving `self.label` alone left a path that passed every check and then
+        # held the raw value — the precise harm `_LABEL_PATTERN`'s \A/\Z anchors
+        # exist to prevent, which is carrying a newline into whatever consumes
+        # the credential key.
+        config = NetworkConfig.custom(
+            label="dev",
+            base_url="https://stage.example.invalid",
+            funds=Funds.PLAY,
+        )
+        assert config._with_label("dev\n").label == "dev"
+        # `dataclasses.replace` is the generic form of the same route, and it
+        # runs `__post_init__` too.
+        assert dataclasses.replace(config, label="  spaced  ").label == "spaced"
+        # The ordinary public constructor, for completeness.
+        assert (
+            NetworkConfig.custom(
+                label="  padded  ",
+                base_url="https://stage.example.invalid",
+                funds=Funds.PLAY,
+            ).label
+            == "padded"
+        )

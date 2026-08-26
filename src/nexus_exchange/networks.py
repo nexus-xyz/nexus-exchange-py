@@ -36,6 +36,7 @@ above stays the complete list of hosts this package ships.
 
 from __future__ import annotations
 
+import dataclasses
 import re
 from collections.abc import Mapping
 from dataclasses import dataclass
@@ -81,6 +82,33 @@ class Funds(str, Enum):
 #: before a trailing newline, so ``"dev\n"`` would pass an anchored ``^...$``
 #: and carry the newline into whatever consumes the key.
 _LABEL_PATTERN = re.compile(r"\A[A-Za-z0-9._-]+\Z")
+
+#: The label the legacy bare-``base_url`` client path stores credentials under.
+#:
+#: Exported as a constant, not spelled inline, because two places must agree: the
+#: reserved set below and :meth:`_legacy_bare_url`, which is the one caller
+#: entitled to hold it (`Client._resolve_config` reaches it only by calling
+#: `_legacy_bare_url`, never by naming the constant itself). `nexus-exchange-rs`
+#: shares the same value under the same reasoning (`LEGACY_BASE_URL_LABEL` in its
+#: `config.rs`).
+LEGACY_BASE_URL_LABEL = "custom"
+
+#: Labels a caller may not claim for a custom target (ENG-11134).
+#:
+#: The label keys stored credentials — see :func:`_clean_label`. So a custom
+#: target allowed to call itself ``mainnet`` addresses mainnet's keyring entry or
+#: credential path, which is the collision the charset rule above exists to
+#: prevent and does not cover: every one of these is already a legal label.
+#:
+#: Compared case-folded, because the storage this keys is frequently
+#: case-insensitive (macOS and Windows filesystems both are), so ``Mainnet``
+#: reaches the same entry as ``mainnet`` and reserving only one spelling reserves
+#: nothing. `nexus-exchange-rs` refuses both spellings for the same reason.
+#:
+#: A test derives the built-in half of this set from :class:`Network` and asserts
+#: coverage, so a network added later cannot silently become claimable — the same
+#: guard rs states as `reserved_labels_cover_every_built_in_network`.
+_RESERVED_LABELS = frozenset({"mainnet", "testnet", "local", LEGACY_BASE_URL_LABEL})
 
 #: Upper bound on a custom label, so it cannot overflow a filesystem or keyring
 #: key. Chosen to match the sibling SDKs (ENG-9823) rather than any local limit.
@@ -144,6 +172,25 @@ def _clean_label(label: object) -> str:
             f"label {label!r} must contain only ASCII letters, digits, '.', '_' or '-'. "
             f"It keys stored credentials, so a path separator, whitespace, a control "
             f"character or a non-ASCII character could let one target address another's."
+        )
+    return cleaned
+
+
+def _reject_reserved_label(cleaned: str) -> str:
+    """Refuse a label that a built-in network already stores credentials under.
+
+    Applied by :meth:`NetworkConfig.custom` only, NOT by :func:`_clean_label`.
+    The built-in configs run their own labels (``"Mainnet"``, ``"Testnet"``,
+    ``"Local"``) through `_clean_label` at construction, and those case-fold
+    straight into this set — enforcing it there would refuse the very networks
+    the set exists to protect, at import time.
+    """
+    if cleaned.casefold() in _RESERVED_LABELS:
+        raise ValueError(
+            f"label {cleaned!r} is reserved for a built-in network. The label keys "
+            f"stored credentials, so a custom target using it would address that "
+            f"network's secrets. Reserved (case-insensitively): "
+            f"{', '.join(sorted(_RESERVED_LABELS))}."
         )
     return cleaned
 
@@ -297,8 +344,17 @@ class NetworkConfig:
         direct ``NetworkConfig(...)`` would otherwise be a way to smuggle in an
         unvalidated label — the one field whose validation is a security
         boundary rather than tidiness.
+
+        The cleaned label is **stored**, not merely checked. `_clean_label`
+        returns a stripped copy, so validating its return while keeping
+        ``self.label`` left a construction path that passed every check and then
+        held the raw value — ``label="dev\n"`` validated as ``"dev"`` and stored
+        the newline, which is the precise harm `_LABEL_PATTERN`'s ``\\A``/``\\Z``
+        anchors exist to prevent: carrying it into whatever consumes the key.
+        `object.__setattr__` because the dataclass is frozen; the assignment is
+        idempotent, so re-running it on a `dataclasses.replace` copy is a no-op.
         """
-        _clean_label(self.label)
+        object.__setattr__(self, "label", _clean_label(self.label))
         _check_chain_id(self.signing_domain.chain_id)
         # Not `isinstance`: `Funds` subclasses `str`, so a bare "real" would pass
         # an isinstance check against `str` and then fail every `is` comparison.
@@ -317,6 +373,47 @@ class NetworkConfig:
                 f"{self.label!r} declares real funds and a faucet: a faucet mints "
                 f"synthetic funds, so it cannot exist on a real-funds target."
             )
+
+    @classmethod
+    def _legacy_bare_url(
+        cls,
+        *,
+        base_url: str,
+        direct_base_url: str,
+    ) -> NetworkConfig:
+        """The config the legacy bare-``base_url`` client path uses (ENG-11134).
+
+        Exists so `custom()` can refuse :data:`LEGACY_BASE_URL_LABEL` for
+        everybody else while the path that has always stored credentials under it
+        keeps doing so. It is not a bypass of the label rules — the label is a
+        constant here, not caller input, which is exactly the distinction the
+        reserved set draws.
+
+        Private: a caller who wants a custom target calls `custom()` and names it.
+        """
+        return cls.custom(
+            label="_legacy",
+            funds=Funds.UNKNOWN,
+            base_url=base_url,
+            direct_base_url=direct_base_url,
+        )._with_label(LEGACY_BASE_URL_LABEL)
+
+    def _with_label(self, label: str) -> NetworkConfig:
+        """This config under a different label. Internal to the legacy path above.
+
+        `dataclasses.replace` rather than a mutation: the config is frozen, and
+        every other field has already been validated by the constructor it came
+        from.
+
+        Private, and load-bearing that it is: `__post_init__` re-runs
+        `_clean_label` but deliberately not `_reject_reserved_label` — the legacy
+        path's whole purpose is to hold a reserved label — so as a public method
+        this was a one-call bypass of the rule `custom()` enforces
+        (``custom(label="dev", …).with_label("mainnet")`` produced a config
+        labelled ``mainnet``, any casing). The reserved set is only as strong as
+        the narrowest way to set a label.
+        """
+        return dataclasses.replace(self, label=label)
 
     @classmethod
     def custom(
@@ -385,8 +482,11 @@ class NetworkConfig:
         if not isinstance(has_faucet, bool):
             raise TypeError(f"has_faucet must be True or False (got {has_faucet!r})")
         _check_chain_id(chain_id)
+        # The reserved-label check lives HERE, on the caller-facing constructor,
+        # and not inside `_clean_label` — see `_reject_reserved_label` for why
+        # putting it there would refuse the built-ins at import time.
         return cls(
-            label=_clean_label(label),
+            label=_reject_reserved_label(_clean_label(label)),
             funds=resolved_funds,
             has_faucet=has_faucet,
             published_rest_base=cleaned_base,
