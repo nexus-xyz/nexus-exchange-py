@@ -552,6 +552,37 @@ class Client:
         """
         return self._network
 
+    @property
+    def base_url(self) -> str:
+        """The gateway base every non-``direct`` request is actually sent to.
+
+        **Not necessarily** ``network.base_url``. That is the config's default;
+        this is what survived a ``base_url=`` override, so the two differ exactly
+        when a caller pointed a named network somewhere else — the case
+        :meth:`_resolve_config` keeps deliberately, where the funds, faucet and
+        signing domain stay the network's and only the send target moves. Read
+        this one to answer "where does traffic go", and ``network`` to answer
+        "whose money is behind it"; conflating them is the confusion ENG-10095
+        removed from the examples' docs.
+
+        Already normalised by :func:`~nexus_exchange.networks._clean_base_url`,
+        so it is the exact prefix :meth:`_send` concatenates a path onto — no
+        trailing slash — rather than the string that was passed in.
+        """
+        return self._base_url
+
+    @property
+    def direct_base_url(self) -> str:
+        """The base the ``/api/v1`` direct-service requests are sent to.
+
+        Separate from :attr:`base_url` because the two surfaces can live on
+        different hosts, and equal to it whenever a lone ``base_url`` override
+        covered both (see :meth:`__init__`). The ``/api/v1`` prefix is *not*
+        included here — :meth:`_send` appends it — so this is the origin the
+        prefix hangs off, whichever topology the deploy uses (ENG-10063).
+        """
+        return self._direct_base_url
+
     # -- public market data ----------------------------------------------
     # Most market-data reads are served by the direct /api/v1 service
     # (``direct=True``). A handful have no /api/v1 equivalent yet and stay on
