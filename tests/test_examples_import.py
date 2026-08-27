@@ -457,16 +457,20 @@ def test_a_base_url_override_keeps_the_named_networks_funds(
     instead resolve to `Funds.UNKNOWN`, and that difference is the whole point of
     the section: an override cannot make the guardrails match the far end.
 
-    Asserted on `_base_url` because the override lands on the client, not on the
-    config -- `client.network` is testnet entire, which is exactly the surprise
-    worth pinning.
+    Asserted on the public `client.base_url` rather than `client.network.base_url`
+    because the override lands on the client, not on the config -- `client.network`
+    is testnet entire, which is exactly the surprise worth pinning. Those two
+    properties disagreeing IS the behaviour under test, so reading the public one
+    keeps this test pinned to the contract instead of to an attribute name
+    (@collinjackson in review on #73).
     """
     monkeypatch.delenv("NEXUS_NETWORK", raising=False)
     monkeypatch.setenv("NEXUS_BASE_URL", "http://localhost:9090")
     shared = _shared_module()
 
     with shared.make_client() as client:
-        assert client._base_url == "http://localhost:9090"
+        assert client.base_url == "http://localhost:9090"
+        assert client.network.base_url != client.base_url
         assert client.network.funds is Funds.PLAY
         assert client.network.label == Network.TESTNET.config.label
 

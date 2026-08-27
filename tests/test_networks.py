@@ -210,6 +210,73 @@ class TestClientTargeting:
                 client.network = Network.MAINNET  # type: ignore[misc]
 
 
+class TestPublicBaseUrls:
+    """`base_url` / `direct_base_url` as public, read-only properties (#73).
+
+    The effective target used to be reachable only as `client._base_url`, so
+    every caller — and every test — that wanted to know where traffic actually
+    goes had to read a private attribute that an internal rename would break
+    (@collinjackson in review). These expose it without exposing the setter:
+    the target is fixed for the client's lifetime for the same reason
+    `network` is, since credentials are per-network.
+    """
+
+    def test_they_report_the_config_default_when_nothing_is_overridden(self) -> None:
+        with Client(Network.TESTNET) as client:
+            assert client.base_url == Network.TESTNET.config.base_url
+            assert client.direct_base_url == Network.TESTNET.config.direct_base_url
+
+    def test_they_report_the_override_not_the_configs_default(self) -> None:
+        # The distinction the properties exist to make, and the one ENG-10095
+        # took out of the examples' docs: naming a network and overriding the
+        # URL moves the send target *without* moving the funds, so the client
+        # and its config genuinely disagree about the base. Reading
+        # `network.base_url` to answer "where does traffic go" is the bug.
+        with Client(Network.LOCAL, base_url="https://beta.exchange.nexus.xyz") as client:
+            assert client.base_url == "https://beta.exchange.nexus.xyz"
+            assert client.network.base_url == Network.LOCAL.config.base_url
+            assert client.base_url != client.network.base_url
+            assert client.network.funds is Network.LOCAL.config.funds
+
+    def test_they_stay_distinct_when_the_deploy_splits_the_two_surfaces(self) -> None:
+        # The pair is only worth exposing as two properties if it can hold two
+        # values: on a split deploy the gateway and the /api/v1 service are
+        # different hosts. Aliasing one to the other passes every same-host case
+        # above, so this is the assertion that catches it.
+        with Client(
+            Network.LOCAL,
+            base_url="https://beta.exchange.nexus.xyz/api/exchange",
+            direct_base_url="https://beta.exchange.nexus.xyz",
+        ) as client:
+            assert client.base_url == "https://beta.exchange.nexus.xyz/api/exchange"
+            assert client.direct_base_url == "https://beta.exchange.nexus.xyz"
+            assert client.base_url != client.direct_base_url
+
+    def test_they_mirror_the_private_attributes_they_replace(self) -> None:
+        # Pins them as accessors rather than a second resolution path, so the
+        # ~20 assertions still reading `_base_url` cannot drift from these.
+        with Client(Network.LOCAL, base_url="http://127.0.0.1:8080/") as client:
+            assert client.base_url == client._base_url
+            assert client.direct_base_url == client._direct_base_url
+
+    def test_they_are_normalised_like_the_private_attributes(self) -> None:
+        # The trailing slash is gone: these are the exact prefixes a path is
+        # concatenated onto, not the strings that were passed in.
+        with Client(Network.LOCAL, base_url="http://127.0.0.1:8080/") as client:
+            assert client.base_url == "http://127.0.0.1:8080"
+            assert client.direct_base_url == "http://127.0.0.1:8080"
+
+    def test_they_are_readonly(self) -> None:
+        # Same reason `network` is: credentials are per-network, so retargeting
+        # a live client must mean building a new one. A settable base would also
+        # skip `_clean_base_url`, i.e. every scheme/userinfo check.
+        with Client(Network.LOCAL) as client:
+            with pytest.raises(AttributeError):
+                client.base_url = "http://evil.example"  # type: ignore[misc]
+            with pytest.raises(AttributeError):
+                client.direct_base_url = "http://evil.example"  # type: ignore[misc]
+
+
 class TestNetworkRestrictedOperations:
     def test_claim_credit_is_refused_on_a_faucet_less_network(self) -> None:
         # `POST /account/credit` is marked testnet/local-only in the spec. Better
