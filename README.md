@@ -56,19 +56,26 @@ from the environment — no secrets in source).
 | Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
 | Account reads — `GET /account`, `/positions`, `/positions/closed`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
 | Portfolio — `GET /account/state` (summary + positions, incl. `withdrawable`), `/account/summary`, `/account/fees`, `/account/portfolio-history`, `/account/equity-history` | ✅ implemented |
-| Trading — `POST /orders`, `/orders/batch`; `GET /orders`, `/orders/{id}`, `/orders/history`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
-| Funds — `POST /account/deposit`, `/account/credit` | ✅ implemented |
-| Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses` | ✅ implemented |
-| Keys / agents / WS token — `GET /keys`, `DELETE /keys/{id}`, `/agents`, `POST /ws-tokens` | ✅ implemented |
+| Trading — `POST /orders`, `/orders/batch`, `/orders/preview`; `GET /orders`, `/orders/{id}`, `/orders/history`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
+| Funds — `POST /account/deposit`, `/account/credit`, `/deposits`, `/faucet`; `GET /deposits`, `/funding` | ✅ implemented |
+| Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses`, `/bridge/wallets`; `POST /bridge/wallets/challenge` | ✅ implemented |
+| Keys / agents / WS token — `GET /keys`, `DELETE /keys/{id}`, `/agents`, `POST /ws-tokens`, `/ws/token` | ✅ implemented |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
 | Cursor pagination — `cursor` + `X-Next-Cursor` on all five paginated GETs | ✅ implemented |
-| Create API key — `POST /keys` | ❌ not yet (needs a `POST /auth/login` session token; `sign_in` is now available) |
-| WebSocket streaming | ❌ not yet |
+| Create API key — `POST /keys` | ✅ implemented (session-token authenticated: pass `sign_in().token` to `create_api_key`) |
+| Venue / market info — `GET /stats`, `/stats/history`, `/status`, `/markets/{id}/risk-params`, `/markets/{id}/funding-samples` | ✅ implemented |
+| WebSocket streaming — the `GET /ws` and `GET /stream` upgrades themselves | ❌ not yet (mint the token with `create_ws_token`, then bring your own socket) |
 | Rate-limit-aware retry (`429` / `Retry-After`, token bucket) | ❌ not yet |
 | OAuth auth | ❌ not yet |
 
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
 Anything not listed there is not wrapped yet — contributions welcome.
+
+Against the pinned spec (`.api-version`), that is **66 of 68 operations**. The two
+uncovered ones are `GET /ws` and `GET /stream`: both answer `101 Switching
+Protocols` rather than a JSON body, so they are WebSocket upgrades rather than
+REST operations this client can wrap. Mint a token with `create_ws_token()` and
+open the socket with a WebSocket library of your choice.
 
 ### Networks
 

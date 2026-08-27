@@ -15,7 +15,17 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any
 
-from ._parse import opt_decimal, opt_int, opt_str, to_decimal, to_dict_list, to_int, to_str
+from ._parse import (
+    opt_bool,
+    opt_decimal,
+    opt_int,
+    opt_str,
+    to_bool,
+    to_decimal,
+    to_dict_list,
+    to_int,
+    to_str,
+)
 from .errors import DecodeError
 
 
@@ -1550,3 +1560,460 @@ class BridgeDeposit:
             updated_at=opt_int(d.get("updated_at")),
             raw=d,
         )
+
+
+@dataclass(frozen=True)
+class FundingPremiumSample:
+    """One premium-index observation between settlements
+    (``GET /markets/{market_id}/funding-samples``).
+
+    **Not** :class:`FundingSample`, and the spec keeps them apart deliberately.
+    A settled funding rate, mark price and oracle price are properties of a
+    settled *window*; this is an intra-window sample and the event it is folded
+    from carries neither. Read ``GET /markets/{market_id}/funding``
+    (:meth:`Client.fetch_funding_rate_history`) for those.
+
+    ``premium_index`` reads ``0`` until the market has traded: with no trade
+    reference the value falls back to the oracle price, making the numerator
+    exactly zero. A long run of zeros means "has not traded", **not** parity
+    with spot — so do not read a flat series as a tight basis.
+
+    Both fields are spec-``required`` and decode strictly.
+    """
+
+    timestamp: int
+    premium_index: Decimal
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> FundingPremiumSample:
+        return cls(
+            timestamp=to_int(d.get("timestamp"), "timestamp"),
+            premium_index=to_decimal(d.get("premium_index"), "premium_index"),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class MarketRiskParams:
+    """Per-market margin requirements and leverage cap
+    (``GET /markets/{market_id}/risk-params``).
+
+    Populated by the indexer from the engine's market registry. The margin rates
+    are decimal *ratios*, not percentages: ``0.05`` is 5%.
+
+    Every field is optional in the spec, so each decodes to ``None`` when absent
+    rather than to a fabricated ``0`` — a zero maintenance-margin rate would
+    read as "no margin required", which is the dangerous direction to guess in.
+    """
+
+    market_id: str | None
+    max_leverage: int | None
+    initial_margin_rate: Decimal | None
+    maintenance_margin_rate: Decimal | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> MarketRiskParams:
+        return cls(
+            market_id=opt_str(d.get("market_id")),
+            max_leverage=opt_int(d.get("max_leverage"), "max_leverage"),
+            initial_margin_rate=opt_decimal(d.get("initial_margin_rate"), "initial_margin_rate"),
+            maintenance_margin_rate=opt_decimal(
+                d.get("maintenance_margin_rate"), "maintenance_margin_rate"
+            ),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class StatsSnapshot:
+    """Aggregate venue statistics (``GET /stats``).
+
+    ``unique_traders_*`` are rolling DAU/WAU/MAU and are documented as present on
+    ``/stats`` specifically. Every field is optional, so absence stays ``None``.
+
+    ``events_per_sec`` is a JSON *number* on the wire and is parsed through
+    ``Decimal(str(...))``, so it carries the text that arrived rather than a
+    float re-rendering — see :mod:`nexus_exchange._parse`.
+    """
+
+    events_received: int | None
+    fills_total: int | None
+    liquidations_total: int | None
+    gap_count: int | None
+    connected: bool | None
+    last_event_ms: int | None
+    uptime_seconds: int | None
+    events_per_sec: Decimal | None
+    health: str | None
+    highest_sequence_seen: int | None
+    unique_traders_24h: int | None
+    unique_traders_7d: int | None
+    unique_traders_30d: int | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> StatsSnapshot:
+        return cls(
+            events_received=opt_int(d.get("events_received"), "events_received"),
+            fills_total=opt_int(d.get("fills_total"), "fills_total"),
+            liquidations_total=opt_int(d.get("liquidations_total"), "liquidations_total"),
+            gap_count=opt_int(d.get("gap_count"), "gap_count"),
+            connected=opt_bool(d.get("connected"), "connected"),
+            last_event_ms=opt_int(d.get("last_event_ms"), "last_event_ms"),
+            uptime_seconds=opt_int(d.get("uptime_seconds"), "uptime_seconds"),
+            events_per_sec=opt_decimal(d.get("events_per_sec"), "events_per_sec"),
+            health=opt_str(d.get("health")),
+            highest_sequence_seen=opt_int(d.get("highest_sequence_seen"), "highest_sequence_seen"),
+            unique_traders_24h=opt_int(d.get("unique_traders_24h"), "unique_traders_24h"),
+            unique_traders_7d=opt_int(d.get("unique_traders_7d"), "unique_traders_7d"),
+            unique_traders_30d=opt_int(d.get("unique_traders_30d"), "unique_traders_30d"),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class ThroughputSample:
+    """One point in the venue throughput ring buffer (``GET /stats/history``).
+
+    1s cadence, capped at 3600 points.
+
+    ``timestamp`` is **Unix seconds**, not milliseconds — the one timestamp on
+    this SDK's surface that is not ``TimestampMs``. The spec types it as a plain
+    ``int64`` rather than the shared ``TimestampMs`` schema; do not feed it to
+    something expecting the millisecond convention every other model uses.
+    """
+
+    timestamp: int | None
+    fills: int | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ThroughputSample:
+        return cls(
+            timestamp=opt_int(d.get("timestamp"), "timestamp"),
+            fills=opt_int(d.get("fills"), "fills"),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class ServiceHealth:
+    """Aggregate health for the indexer/engine/oracle/bots (``GET /status``).
+
+    ``status`` is the worst-of across all components (``ok`` | ``degraded`` |
+    ``down`` | ``starting``), and is the field to branch on. :attr:`services`
+    carries per-component detail that the spec explicitly marks informational
+    and free to evolve, so it stays an untyped mapping rather than a model that
+    would go stale — read it for display, not for control flow.
+    """
+
+    status: str | None
+    timestamp_ms: int | None
+    services: dict[str, Any]
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ServiceHealth:
+        services = d.get("services")
+        return cls(
+            status=opt_str(d.get("status")),
+            timestamp_ms=opt_int(d.get("timestamp_ms"), "timestamp_ms"),
+            services=dict(services) if isinstance(services, dict) else {},
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class FundsEntry:
+    """A deposit / withdrawal / faucet ledger entry (``GET /deposits``).
+
+    ``kind`` is one of ``deposit`` | ``withdrawal`` | ``faucet`` and ``status``
+    one of ``pending`` | ``confirmed`` | ``failed``. Both stay open ``str`` —
+    an enum member the SDK does not know about must still decode.
+    """
+
+    id: int | None
+    kind: str | None
+    account: str | None
+    amount: Decimal | None
+    asset: str | None
+    timestamp: int | None
+    status: str | None
+    tx_hash: str | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> FundsEntry:
+        return cls(
+            id=opt_int(d.get("id"), "id"),
+            kind=opt_str(d.get("kind")),
+            account=opt_str(d.get("account")),
+            amount=opt_decimal(d.get("amount"), "amount"),
+            asset=opt_str(d.get("asset")),
+            timestamp=opt_int(d.get("timestamp"), "timestamp"),
+            status=opt_str(d.get("status")),
+            tx_hash=opt_str(d.get("tx_hash")),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class AccountFunding:
+    """A funding payment for the account (``GET /funding``).
+
+    :attr:`amount` is *signed*, and :attr:`direction` (``paid`` | ``received``)
+    reports the same fact redundantly. Prefer the sign of ``amount``: it is one
+    value rather than two that can disagree, and it is what arithmetic over a
+    series needs.
+    """
+
+    market_id: str | None
+    amount: Decimal | None
+    direction: str | None
+    funding_rate: Decimal | None
+    position_size: Decimal | None
+    timestamp: int | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> AccountFunding:
+        return cls(
+            market_id=opt_str(d.get("market_id")),
+            amount=opt_decimal(d.get("amount"), "amount"),
+            direction=opt_str(d.get("direction")),
+            funding_rate=opt_decimal(d.get("funding_rate"), "funding_rate"),
+            position_size=opt_decimal(d.get("position_size"), "position_size"),
+            timestamp=opt_int(d.get("timestamp"), "timestamp"),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class DepositResponse:
+    """Engine acknowledgement of a submitted deposit (``POST /deposits``).
+
+    Distinct from :class:`DepositResult`, which is ``POST /account/deposit``.
+    The two are separate spec operations: this one submits a
+    (testnet/synthetic) deposit, that one deposits USDX collateral. They are
+    not interchangeable — see :meth:`Client.create_deposit` and
+    :meth:`Client.deposit`.
+
+    The spec marks this schema ``additionalProperties: true`` and requires
+    nothing, so :attr:`balance` decodes to ``None`` when absent and the full
+    forwarded payload stays on :attr:`raw`.
+    """
+
+    balance: Decimal | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> DepositResponse:
+        return cls(balance=opt_decimal(d.get("balance"), "balance"), raw=d)
+
+
+@dataclass(frozen=True)
+class FaucetResponse:
+    """Testnet faucet credit result (``POST /faucet``).
+
+    :attr:`available_at_ms` is the earliest the faucet may be claimed again —
+    the cooldown, in Unix milliseconds. A claim before then is refused with
+    ``429``, so schedule against this rather than retrying blind.
+    """
+
+    amount: Decimal | None
+    available_at_ms: int | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> FaucetResponse:
+        return cls(
+            amount=opt_decimal(d.get("amount"), "amount"),
+            available_at_ms=opt_int(d.get("available_at_ms"), "available_at_ms"),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class PreviewResponse:
+    """Projected margin/equity/fee impact of an order (``POST /orders/preview``).
+
+    Nothing is submitted. :attr:`accepted` is the projection's own verdict, with
+    :attr:`reject_reason` set when it is false.
+
+    A preview is a projection against the book and account *at the time of the
+    call*, not a quote or a reservation: nothing here is guaranteed by the
+    subsequent :meth:`Client.create_order`. :attr:`expected_fill_vwap` and
+    :attr:`projected_post_trade_liquidation_price` are explicitly nullable —
+    a market with no resting liquidity on the taking side has no VWAP to
+    project, and a position that closes flat has no liquidation price.
+
+    Every field is optional in the spec: ``None`` means the server did not
+    project it, which is not the same as zero.
+    """
+
+    accepted: bool | None
+    reject_reason: str | None
+    required_initial_margin: Decimal | None
+    projected_post_trade_equity: Decimal | None
+    projected_post_trade_liquidation_price: Decimal | None
+    projected_post_trade_leverage: Decimal | None
+    expected_fill_vwap: Decimal | None
+    projected_fees: Decimal | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> PreviewResponse:
+        return cls(
+            accepted=opt_bool(d.get("accepted"), "accepted"),
+            reject_reason=opt_str(d.get("reject_reason")),
+            required_initial_margin=opt_decimal(
+                d.get("required_initial_margin"), "required_initial_margin"
+            ),
+            projected_post_trade_equity=opt_decimal(
+                d.get("projected_post_trade_equity"), "projected_post_trade_equity"
+            ),
+            projected_post_trade_liquidation_price=opt_decimal(
+                d.get("projected_post_trade_liquidation_price"),
+                "projected_post_trade_liquidation_price",
+            ),
+            projected_post_trade_leverage=opt_decimal(
+                d.get("projected_post_trade_leverage"), "projected_post_trade_leverage"
+            ),
+            expected_fill_vwap=opt_decimal(d.get("expected_fill_vwap"), "expected_fill_vwap"),
+            projected_fees=opt_decimal(d.get("projected_fees"), "projected_fees"),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class BridgeWallet:
+    """An ownership-proven wallet that withdrawals can be paid to
+    (``GET``/``POST /api/v1/bridge/wallets``).
+
+    All three fields are spec-``required`` and decode strictly.
+
+    The spec is explicit that :attr:`verified` and :attr:`is_default` are
+    **always true in this cut** and must not be branched on: a failed ownership
+    check returns ``400`` rather than storing an unproven record, and an account
+    holds at most one registered wallet. They exist now so that the
+    wallet-lifecycle follow-up — several wallets, a movable default, records not
+    yet proven — does not churn every generated SDK. Treat a ``False`` from a
+    future server as meaningful; do not write logic today that assumes it.
+    """
+
+    address: str
+    verified: bool
+    is_default: bool
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BridgeWallet:
+        return cls(
+            address=to_str(d.get("address"), "address"),
+            verified=to_bool(d.get("verified"), "verified"),
+            is_default=to_bool(d.get("is_default"), "is_default"),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class BridgeWalletsResponse:
+    """The account's registered withdrawal wallets (``GET /api/v1/bridge/wallets``).
+
+    ``wallets`` is spec-``required``, so a payload missing it is a decode
+    failure rather than an empty list — "no wallets registered" and "the server
+    did not send the field" are different facts, and only the first should read
+    as an empty account.
+    """
+
+    wallets: list[BridgeWallet]
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BridgeWalletsResponse:
+        return cls(
+            wallets=[BridgeWallet.from_dict(w) for w in to_dict_list(d.get("wallets"), "wallets")],
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class BridgeWalletChallenge:
+    """A message proving control of a wallet
+    (``POST /api/v1/bridge/wallets/challenge``).
+
+    Sign :attr:`message` — **not** :attr:`nonce` — with EIP-191
+    ``personal_sign``, then echo the same ``message`` verbatim to
+    :meth:`Client.register_bridge_wallet`. Its format is server-defined, so
+    treat it as opaque: do not reformat, re-encode or trim it. The server keeps
+    no state between the two calls and re-derives the signed bytes from what you
+    send back, so any edit invalidates the proof.
+
+    Not single-use: until :attr:`expires_at` the same signature can be replayed,
+    which is a no-op because it only re-registers the same address for the same
+    account.
+
+    All four fields are spec-``required`` and decode strictly — a challenge
+    missing its message or expiry is unusable, and defaulting either would send
+    a signature over fabricated bytes.
+    """
+
+    address: str
+    nonce: str
+    message: str
+    expires_at: int
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> BridgeWalletChallenge:
+        return cls(
+            address=to_str(d.get("address"), "address"),
+            nonce=to_str(d.get("nonce"), "nonce"),
+            message=to_str(d.get("message"), "message"),
+            expires_at=to_int(d.get("expires_at"), "expires_at"),
+            raw=d,
+        )
+
+
+@dataclass(frozen=True)
+class ApiKeyCreated:
+    """A freshly minted HMAC API key and its secret (``POST /keys``).
+
+    **The secret is returned once and never again** — it is not stored by the
+    exchange and cannot be re-fetched. Persist it at the moment of the call or
+    the key is unusable and has to be deleted and re-created.
+
+    :meth:`__repr__` renders the secret as ``<redacted>`` (the same treatment
+    :class:`~nexus_exchange.LoginResponse` gives its session token) so a logged
+    object, a traceback frame or a debugger dump cannot leak a live credential.
+    Read ``.secret`` explicitly to use it.
+
+    The pinned spec documents this response by example only — it declares no
+    schema — so both fields are decoded leniently and the payload stays on
+    :attr:`raw`.
+
+    The key is bound to the network of the host that minted it. There is no
+    network field in the request or the response, and any other host refuses it
+    with an opaque ``401``: mint against the host you intend to trade on, and
+    mint a separate key per network rather than reusing one.
+    """
+
+    key_id: str | None
+    secret: str | None
+    raw: dict[str, Any]
+
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> ApiKeyCreated:
+        return cls(
+            key_id=opt_str(d.get("key_id")),
+            secret=opt_str(d.get("secret")),
+            raw=d,
+        )
+
+    def __repr__(self) -> str:
+        # Never render the secret. A marker rather than an omitted field, so it
+        # is clear one is present but withheld.
+        secret = "<redacted>" if self.secret else repr(self.secret)
+        return f"ApiKeyCreated(key_id={self.key_id!r}, secret={secret})"

@@ -7,7 +7,10 @@ describing reality — the bug it was written for included: `endpoints.txt` list
 five bridge operations WITHOUT the `/api/v1` prefix the client actually sends
 (`direct=True`), so all five were absent from every released spec while the code
 was correct all along. TestRealPackage pins exactly that: strip the prefix back off
-the real manifest and the real client goes red, ten errors, both directions.
+the real manifest and the real client goes red — two errors per mangled line, in
+both directions. (The bridge surface has grown past those five since; the count is
+derived from the manifest rather than hardcoded, so adding an operation cannot
+turn this test red on arithmetic alone.)
 
 Everything is hermetic — no network, no spec download. The synthetic-package tests
 build a throwaway package + manifest so the contract holds regardless of which
@@ -588,15 +591,27 @@ class TestRealPackage(unittest.TestCase):
             self.assertNotIn((op[0], op[1].replace("/api/v1", "", 1)), requested)
 
     def test_dropping_the_api_v1_prefix_from_the_manifest_goes_red(self):
-        # Defeat the fix the way it was originally broken: five bridge lines
-        # without the prefix the client sends. Ten errors — five requests with no
-        # manifest line, five manifest lines with no request.
+        # Defeat the fix the way it was originally broken: the bridge lines
+        # without the prefix the client sends. Each mangled line costs two
+        # errors — one request with no manifest line, one manifest line with no
+        # request.
+        #
+        # The expected count is DERIVED from how many lines actually changed,
+        # not hardcoded. It used to be a literal `10` for the five bridge
+        # operations of the day, which made this test fail the moment a sixth
+        # was added (ENG-9200 added three) — a green-to-red flip that says
+        # nothing about the checker and everything about the arithmetic. What is
+        # being asserted is the *ratio*: two errors per mangled line, in both
+        # directions. That is what must not change.
         broken = [
             (m, p.replace("/api/v1/bridge/", "/bridge/", 1)) if "/bridge/" in p else (m, p)
             for m, p in self.manifest
         ]
+        mangled = sum(
+            1 for before, after in zip(self.manifest, broken, strict=True) if before != after
+        )
         self.assertNotEqual(broken, self.manifest, "the manifest should contain bridge entries")
-        self.assertEqual(_quiet(csd.check_code_vs_manifest, broken), 10)
+        self.assertEqual(_quiet(csd.check_code_vs_manifest, broken), 2 * mangled)
 
     def test_the_deleted_phantom_operations_are_gone(self):
         # ENG-8618 deleted `set_leverage` and `health_check`: neither `POST
