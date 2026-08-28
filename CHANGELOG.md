@@ -15,6 +15,60 @@ future release below it. To improve the wording of a release, edit
 below `0.4.0` predate this and follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.0](https://github.com/nexus-xyz/nexus-exchange-py/compare/v0.5.0...v0.6.0) (2026-08-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **networks:** `NetworkConfig.custom()` now raises `ValueError` for a label that case-insensitively matches a built-in network name (`mainnet`, `testnet`, `local`, `custom`). Any caller that deliberately named a custom target after a built-in must rename it.
+* **client:** delete the off-contract ops and empty CODE_ONLY_OPS (ENG-8618) ([#69](https://github.com/nexus-xyz/nexus-exchange-py/issues/69))
+* **networks:** `NetworkConfig.real_funds` / `Network.real_funds` are replaced by `funds` (tri-state); `Client.network` returns the `NetworkConfig` rather than the `Network` member; and a bare `base_url` now reports undeclared funds, so `claim_credit` refuses where it previously inherited testnet's faucet.
+* **client:** `Network.STABLE` and `Network.BETA` are removed. `STABLE` becomes `Network.TESTNET` (identical targets, and the new default); `BETA` becomes `Client(base_url="https://beta.exchange.nexus.xyz/api/exchange", direct_base_url="https://beta.exchange.nexus.xyz")`. Both raise a `ValueError` carrying their migration. `Client(Network.MAINNET)` requires an explicit `base_url`, and `register_agent` now rejects a missing or non-positive `chain_id`.
+
+### Features
+
+* add release/publish automation (tag → build → GitHub release) (ENG-6135) ([#40](https://github.com/nexus-xyz/nexus-exchange-py/issues/40)) ([2c03f24](https://github.com/nexus-xyz/nexus-exchange-py/commit/2c03f242424a447b9860b14d9853d9377d5c9041))
+* auto-sync pinned API spec version with exchange-api releases ([#14](https://github.com/nexus-xyz/nexus-exchange-py/issues/14)) ([c4c3cb8](https://github.com/nexus-xyz/nexus-exchange-py/commit/c4c3cb809f896605ee885e3480cbb82501a16568))
+* CCXT-compatible adapter — public market data (first increment) ([#12](https://github.com/nexus-xyz/nexus-exchange-py/issues/12)) ([6001429](https://github.com/nexus-xyz/nexus-exchange-py/commit/60014294f853dc9b9c7d4476c179adf4f05ca447))
+* **ci:** spec-pin lifecycle — drift verification, then oasdiff autobump (ENG-7960) ([#50](https://github.com/nexus-xyz/nexus-exchange-py/issues/50)) ([c5d718b](https://github.com/nexus-xyz/nexus-exchange-py/commit/c5d718b56005a837b5d2d032bc86989c23a042c3))
+* **client:** adopt the {mainnet, testnet, local} network axis (ENG-6454) ([f124f71](https://github.com/nexus-xyz/nexus-exchange-py/commit/f124f71fb435dcf9236dff09bc3a46a9e3f95006))
+* **client:** expose base_url/direct_base_url, and stop selling a bare NEXUS_BASE_URL (ENG-10095) ([#73](https://github.com/nexus-xyz/nexus-exchange-py/issues/73)) ([bb77a1b](https://github.com/nexus-xyz/nexus-exchange-py/commit/bb77a1bcd701e5e29048fc230e7928a43c0ba8f5))
+* **client:** implement the remaining 15 spec operations, 51 -&gt; 66 of 68 (ENG-9200) ([#74](https://github.com/nexus-xyz/nexus-exchange-py/issues/74)) ([a1fc4b9](https://github.com/nexus-xyz/nexus-exchange-py/commit/a1fc4b95b967542a89186a8ce4dbf89714bcc5b6))
+* document post-only ("PostOnly") time-in-force ([#24](https://github.com/nexus-xyz/nexus-exchange-py/issues/24)) ([ff6f88e](https://github.com/nexus-xyz/nexus-exchange-py/commit/ff6f88e762ad31b470039072e1fb3a4314b3e5a3))
+* **errors:** type the jurisdiction 403 as RestrictedJurisdictionError (ENG-9635) ([#54](https://github.com/nexus-xyz/nexus-exchange-py/issues/54)) ([4bb6969](https://github.com/nexus-xyz/nexus-exchange-py/commit/4bb6969605754d0e7a1436b53dd6846b10ba9876))
+* expose portfolio-parity endpoints/fields in the Python SDK (ENG-6459) ([#43](https://github.com/nexus-xyz/nexus-exchange-py/issues/43)) ([53d1de5](https://github.com/nexus-xyz/nexus-exchange-py/commit/53d1de5622fdc4460d9594add0893a4945e56149))
+* implement /orders/history, /positions/closed and /account/equity-history (ENG-8082) ([#47](https://github.com/nexus-xyz/nexus-exchange-py/issues/47)) ([6ec5e69](https://github.com/nexus-xyz/nexus-exchange-py/commit/6ec5e69f13a90ff5b3a560a670bf1aa831592b9e))
+* model TrailingLimit order type (ENG-6131) ([#39](https://github.com/nexus-xyz/nexus-exchange-py/issues/39)) ([7f0b93a](https://github.com/nexus-xyz/nexus-exchange-py/commit/7f0b93a4397b901646be638288edc93470b0767b))
+* **networks:** add a caller-supplied Custom network target (ENG-9826) ([#60](https://github.com/nexus-xyz/nexus-exchange-py/issues/60)) ([36f19f7](https://github.com/nexus-xyz/nexus-exchange-py/commit/36f19f7d3e6223807a55b2a75f89bd392e5741e1))
+* route migrated surface to the direct /api/v1 service (ENG-4946) ([#26](https://github.com/nexus-xyz/nexus-exchange-py/issues/26)) ([540fd3c](https://github.com/nexus-xyz/nexus-exchange-py/commit/540fd3cbffdb8a0cf6a6b8bcede74ccf98203bda))
+* send X-Nexus-Api-Version header + normalize User-Agent (ENG-5955) ([#34](https://github.com/nexus-xyz/nexus-exchange-py/issues/34)) ([a9b06c5](https://github.com/nexus-xyz/nexus-exchange-py/commit/a9b06c5cdac5ca917028ab1456bb82190894b6bd))
+* Tier-3 trading parity — order amend + set leverage/margin (ENG-5296) ([#28](https://github.com/nexus-xyz/nexus-exchange-py/issues/28)) ([cc7fa52](https://github.com/nexus-xyz/nexus-exchange-py/commit/cc7fa52ff4fd3f783f08c69513db5e5783dbbda7))
+* type create_orders (POST /orders/batch) return value (ENG-3976) ([#25](https://github.com/nexus-xyz/nexus-exchange-py/issues/25)) ([cd5a45e](https://github.com/nexus-xyz/nexus-exchange-py/commit/cd5a45e4fd93011483d4ac9416b1b58a5d72365d))
+* typed account, orders, and admin endpoint coverage ([#9](https://github.com/nexus-xyz/nexus-exchange-py/issues/9)) ([6e535bc](https://github.com/nexus-xyz/nexus-exchange-py/commit/6e535bcf2a77da31998ceb1941f2748972678a06))
+* typed market-data endpoint coverage ([#8](https://github.com/nexus-xyz/nexus-exchange-py/issues/8)) ([2b5b0dd](https://github.com/nexus-xyz/nexus-exchange-py/commit/2b5b0dde4bc1ddaa80171f896ad2d6a1dc3a0736))
+* wallet-signed auth — EIP-191 sign_in + EIP-712 register_agent ([#11](https://github.com/nexus-xyz/nexus-exchange-py/issues/11)) ([38ea2ee](https://github.com/nexus-xyz/nexus-exchange-py/commit/38ea2eef81799f67765d06cead433a70a7e6ba57))
+* wrap /v1/bridge Phase A (assets, deposit-addresses, deposits) ([#32](https://github.com/nexus-xyz/nexus-exchange-py/issues/32)) ([6b8d084](https://github.com/nexus-xyz/nexus-exchange-py/commit/6b8d084886ba9eff883da8d7e41609f6cca19d0e))
+* wrap account cancel-on-disconnect endpoints (ENG-6132) ([#38](https://github.com/nexus-xyz/nexus-exchange-py/issues/38)) ([91957ee](https://github.com/nexus-xyz/nexus-exchange-py/commit/91957eef5f79c0cf7a37a007816e5bd0d28b3ee5))
+
+
+### Bug Fixes
+
+* **ci:** count spec coverage by operation, not by path spelling (ENG-11847) ([#65](https://github.com/nexus-xyz/nexus-exchange-py/issues/65)) ([212e086](https://github.com/nexus-xyz/nexus-exchange-py/commit/212e08692bf6f9e808528d88b301ff9a215ad97c))
+* **client:** delete the off-contract ops and empty CODE_ONLY_OPS (ENG-8618) ([#69](https://github.com/nexus-xyz/nexus-exchange-py/issues/69)) ([7376540](https://github.com/nexus-xyz/nexus-exchange-py/commit/73765404677eec86ce447ef39fa87f8586f2eb74))
+* **networks:** point testnet's direct base at the gateway-mounted /api/v1 ([#62](https://github.com/nexus-xyz/nexus-exchange-py/issues/62)) ([d7bc99b](https://github.com/nexus-xyz/nexus-exchange-py/commit/d7bc99b21377501ba9ba72923a866c22d6d68f68))
+* **networks:** reserve the built-in network labels against custom targets ([#64](https://github.com/nexus-xyz/nexus-exchange-py/issues/64)) ([35cbea2](https://github.com/nexus-xyz/nexus-exchange-py/commit/35cbea21d5dbd6748964ee608a73cbe47ce99507))
+
+
+### Documentation
+
+* add AGENTS.md with merge-safety guardrails (ENG-5319) ([#31](https://github.com/nexus-xyz/nexus-exchange-py/issues/31)) ([9dab6df](https://github.com/nexus-xyz/nexus-exchange-py/commit/9dab6df6eb154b80d6afe98190d268594cab2825))
+* add compatibility & deprecation policy ([#4](https://github.com/nexus-xyz/nexus-exchange-py/issues/4)) ([121dc27](https://github.com/nexus-xyz/nexus-exchange-py/commit/121dc27ea79c66e5fc498ab6d5da76778435e43e))
+* add contributor scaffolding (CONTRIBUTING, templates, examples) ([#13](https://github.com/nexus-xyz/nexus-exchange-py/issues/13)) ([94ae3cd](https://github.com/nexus-xyz/nexus-exchange-py/commit/94ae3cdae67a4bf94c1a84355911b1be3c991680))
+* add license badge to README ([#10](https://github.com/nexus-xyz/nexus-exchange-py/issues/10)) ([61c6222](https://github.com/nexus-xyz/nexus-exchange-py/commit/61c6222281f95cbd961e25761ad3754b8a57f626))
+* **contributing:** document how a PR lands, and why the title is not load-bearing here yet ([#48](https://github.com/nexus-xyz/nexus-exchange-py/issues/48)) ([b9326c2](https://github.com/nexus-xyz/nexus-exchange-py/commit/b9326c29464045566ec91cdea3185496a7488931))
+* **networks:** deprecate the bare `base_url` selector in favour of `NetworkConfig.custom()` (ENG-10955) ([#61](https://github.com/nexus-xyz/nexus-exchange-py/issues/61)) ([f26d5a5](https://github.com/nexus-xyz/nexus-exchange-py/commit/f26d5a59727397c7b6fc8b918903ec043e1aba9f))
+* replace Linear refs with GitHub refs in the published README and CHANGELOG ([#66](https://github.com/nexus-xyz/nexus-exchange-py/issues/66)) ([6a5fbc9](https://github.com/nexus-xyz/nexus-exchange-py/commit/6a5fbc94757722aeb2cf1607ef460c9d99f28087))
+
 ## [0.5.0](https://github.com/nexus-xyz/nexus-exchange-py/compare/v0.4.0...v0.5.0) (2026-08-28)
 
 
