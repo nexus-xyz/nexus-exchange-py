@@ -186,3 +186,36 @@ def to_dict_list(value: Any, field: str, *, required: bool = True) -> list[dict[
             )
     # A copy, so a caller mutating the returned list cannot reach into `raw`.
     return list(value)
+
+
+def to_bool(value: Any, field: str | None = None) -> bool:
+    """Coerce a *required* wire boolean to ``bool``.
+
+    Raises :class:`~nexus_exchange.DecodeError` when ``value`` is ``None``
+    (missing or sent ``null``), and also when it is any non-``bool`` — the one
+    place this file refuses to coerce rather than parse.
+
+    ``bool(value)`` is the trap this exists to avoid: every JSON scalar a server
+    might send for a flag is truthy under it, so ``"false"``, ``"0"`` and
+    ``"no"`` all decode to ``True``. A flag that reads the opposite of what the
+    payload says is worse than a decode failure, because nothing downstream can
+    detect it — the same reasoning that makes :func:`to_decimal` refuse to
+    default a missing amount to zero.
+    """
+    if value is None:
+        raise DecodeError(f"{_describe(field, 'boolean')} is missing or null")
+    if not isinstance(value, bool):
+        raise DecodeError(f"{_describe(field, 'boolean')} is not a boolean: {value!r}")
+    return value
+
+
+def opt_bool(value: Any, field: str | None = None) -> bool | None:
+    """Coerce an optional/nullable boolean; ``None`` (or missing) stays ``None``.
+
+    Lets a caller tell "the server did not report this flag" from a real
+    ``False``. A *present* non-boolean still raises, for the reason
+    :func:`to_bool` gives.
+    """
+    if value is None:
+        return None
+    return to_bool(value, field)

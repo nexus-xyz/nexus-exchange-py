@@ -14,7 +14,7 @@ import hmac
 import json
 import time
 from collections.abc import Iterator
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from importlib import metadata
 from typing import Any
 from urllib.parse import quote, urlencode
@@ -34,26 +34,36 @@ from .networks import Funds, Network, NetworkConfig, SigningDomain, _clean_base_
 from .pagination import NEXT_CURSOR_HEADER, Page, iter_items
 from .types import (
     AccountFees,
+    AccountFunding,
     AccountPortfolioSummary,
     AccountState,
     AccountSummary,
     AdlEvent,
     AgentInfo,
     AmendOrder,
+    ApiKeyCreated,
     ApiKeyInfo,
     BatchOrderResult,
     BridgeAssetsResponse,
     BridgeDeposit,
     BridgeDepositAddress,
+    BridgeWallet,
+    BridgeWalletChallenge,
+    BridgeWalletsResponse,
     CancelOnDisconnectStatus,
     ClosedPosition,
     CreditResult,
+    DepositResponse,
     DepositResult,
     EquityPoint,
+    FaucetResponse,
     Fill,
+    FundingPremiumSample,
     FundingSample,
+    FundsEntry,
     MarginAdjustment,
     Market,
+    MarketRiskParams,
     MarketStatus,
     MarketSummary,
     MarkPrice,
@@ -66,7 +76,11 @@ from .types import (
     PortfolioHistory,
     PortfolioWindow,
     Position,
+    PreviewResponse,
     RateLimitStatus,
+    ServiceHealth,
+    StatsSnapshot,
+    ThroughputSample,
     Ticker,
     TierOverride,
     Trade,
@@ -181,6 +195,57 @@ CLOSED_POSITIONS_LIMIT_MAX = 200
 #: reject a request the server accepts by default.
 EQUITY_HISTORY_LIMIT_MAX = 720
 
+#: Upper bound the spec puts on ``limit`` for ``GET /deposits`` (``maximum: 100``),
+#: which is also that endpoint's default — unusually, asking for more than the
+#: default is not possible here at all.
+DEPOSITS_LIMIT_MAX = 100
+
+#: Upper bound the spec puts on ``limit`` for ``GET /funding`` (``maximum: 1000``,
+#: default 100) — the account's own funding payments, not a market's history.
+ACCOUNT_FUNDING_LIMIT_MAX = 1000
+
+#: Upper bound the spec puts on ``limit`` for
+#: ``GET /markets/{id}/funding-samples`` (``maximum: 480``), which is also its
+#: default: one page already covers the full retained window, so omitting
+#: ``limit`` asks for 480 samples rather than 100.
+FUNDING_SAMPLES_LIMIT_MAX = 480
+
+
+def _bearer_token(token: str, param: str = "session_token") -> str:
+    """Validate a session bearer token before it becomes a header value.
+
+    Two distinct failures, both caught here rather than at the transport:
+
+    * **Blank.** An empty or whitespace-only token would go out as a
+      well-formed ``Authorization: Bearer`` header carrying no credential, and
+      come back as an opaque ``401`` indistinguishable from a wrong or expired
+      token. Refusing names the real mistake.
+    * **Embedded whitespace or control characters.** A token containing ``\\r``
+      or ``\\n`` is a header-injection vector: concatenated into a header value
+      it could terminate the header and start another. ``httpx`` rejects such
+      values itself, but that is a downstream implementation detail rather than
+      a guarantee this SDK makes, and no legal token contains whitespace — the
+      credential ``POST /auth/login`` mints is hex. Checking the whole string
+      (not just the ends) means a token is never *repaired* into something
+      sendable: stripping would silently alter a credential, and a token that
+      needs altering is not the token the caller holds.
+
+    Returns the token unchanged, so nothing here can rewrite a credential.
+    """
+    if not isinstance(token, str):
+        raise TypeError(f"{param} must be a string (got {type(token).__name__})")
+    if not token.strip():
+        raise ValueError(
+            f"{param} is empty: pass the `token` from `sign_in()` "
+            f"(`LoginResponse.token`), which this SDK does not store for you"
+        )
+    if any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in token):
+        raise ValueError(
+            f"{param} contains whitespace or control characters, which no valid "
+            f"session token does; refusing to build an Authorization header from it"
+        )
+    return token
+
 
 def _portfolio_window(window: PortfolioWindow | str | None) -> str | None:
     """Validate a portfolio ``window`` and return its wire string.
@@ -253,6 +318,14 @@ def _page_limit(limit: int | None, maximum: int, endpoint: str) -> int | None:
     ``minimum``, but ``limit=0`` would return an empty page, which for a
     cursor-paginated endpoint reads as "no more results" and would silently end a
     walk at zero items. Rejecting it is friendlier than that.
+
+    Also used by the *un*-paginated ``limit`` endpoints (``GET /deposits``,
+    ``GET /funding``, ``GET /markets/{id}/funding-samples`` — ENG-9200). The
+    range check is the same rule from the same source, so they share it rather
+    than growing a near-identical copy. Only the lower-bound *rationale* above
+    is pagination-specific: on those three a ``limit=0`` is merely an empty
+    list, not a truncated walk. Rejecting it there is a smaller favour, but
+    still a favour, and one behaviour for one parameter name beats two.
 
     Rejects ``bool`` explicitly — it is an ``int`` subclass, and letting it
     through would send ``limit=True``.
@@ -735,6 +808,85 @@ class Client:
         rows = data if isinstance(data, list) else []
         return [AdlEvent.from_dict(e) for e in rows]
 
+    def fetch_market_risk_params(self, market_id: str) -> MarketRiskParams:
+        """``GET /markets/{market_id}/risk-params`` — margin rates and leverage cap.
+
+        Public. The margin rates are decimal *ratios* (``0.05`` is 5%), not
+        percentages.
+
+        Overlaps :meth:`fetch_markets`, which carries the same three values per
+        market inside its trading rules. This route is the per-market read, and
+        is served by the indexer straight from the engine's market registry — so
+        prefer it when you want one market's risk terms without pulling the
+        whole market list.
+
+        Not in the ``/api/v1`` spec; stays on the legacy gateway.
+        """
+        if not market_id:
+            raise ValueError("market_id is required")
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/risk-params")
+        return MarketRiskParams.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_funding_samples(
+        self, market_id: str, limit: int | None = None
+    ) -> list[FundingPremiumSample]:
+        """``GET /markets/{market_id}/funding-samples`` — premium-index samples.
+
+        Public. Intra-window observations of the premium index, **not** settled
+        funding: :meth:`fetch_funding_rate_history` is the settled series, and
+        the two are different shapes for a reason (see
+        :class:`~nexus_exchange.FundingPremiumSample`).
+
+        ``limit`` defaults to 480 server-side, which is also its maximum
+        (:data:`FUNDING_SAMPLES_LIMIT_MAX`) — one page covers the whole retained
+        window, so omitting it asks for everything rather than a short page.
+        """
+        if not market_id:
+            raise ValueError("market_id is required")
+        limit = _page_limit(limit, FUNDING_SAMPLES_LIMIT_MAX, "funding-samples")
+        query = _query(limit=limit)
+        data = self._request(
+            "GET",
+            f"/markets/{quote(market_id, safe='')}/funding-samples",
+            query=query,
+            direct=True,
+        )
+        return [FundingPremiumSample.from_dict(s) for s in (data if isinstance(data, list) else [])]
+
+    def fetch_stats(self) -> StatsSnapshot:
+        """``GET /stats`` — aggregate venue statistics. Public.
+
+        Includes the rolling unique-trader counts (DAU/WAU/MAU) that the bare
+        snapshot schema marks as present on this route.
+        """
+        data = self._request("GET", "/stats", direct=True)
+        return StatsSnapshot.from_dict(data if isinstance(data, dict) else {})
+
+    def fetch_stats_history(self) -> list[ThroughputSample]:
+        """``GET /stats/history`` — venue throughput ring buffer. Public.
+
+        1s cadence, capped at 3600 points. Note each sample's ``timestamp`` is
+        Unix **seconds**, unlike every other timestamp on this surface — see
+        :class:`~nexus_exchange.ThroughputSample`.
+        """
+        data = self._request("GET", "/stats/history", direct=True)
+        return [ThroughputSample.from_dict(s) for s in (data if isinstance(data, list) else [])]
+
+    def fetch_service_health(self) -> ServiceHealth:
+        """``GET /status`` — aggregate service health. Public.
+
+        Branch on ``status`` (worst-of across components); the per-component
+        ``services`` detail is informational and free to change shape.
+
+        This is the contract's health operation. It replaced the legacy
+        gateway's ``GET /health`` probe, which was never a contract operation
+        and was dropped upstream in v0.7.1 (ENG-8618).
+
+        Not in the ``/api/v1`` spec; stays on the legacy gateway.
+        """
+        data = self._request("GET", "/status")
+        return ServiceHealth.from_dict(data if isinstance(data, dict) else {})
+
     # -- wallet-signed auth ----------------------------------------------
     def sign_in(self, signer: EthSigner) -> LoginResponse:
         """``POST /auth/login`` — EIP-191 session login.
@@ -1040,6 +1192,43 @@ class Client:
         data = self._request("GET", "/withdrawals", signed=True)
         return [Withdrawal.from_dict(w) for w in (data if isinstance(data, list) else [])]
 
+    def fetch_deposits(self, limit: int | None = None) -> list[FundsEntry]:
+        """``GET /deposits`` — the account's funds ledger. Requires credentials.
+
+        Despite the path, entries are not deposits only: each carries a ``kind``
+        of ``deposit`` | ``withdrawal`` | ``faucet``, so this is the combined
+        movements ledger. Filter on ``kind`` if you want one of them.
+
+        Distinct from :meth:`fetch_bridge_deposits`, which tracks *cross-chain*
+        deposits through the watcher and reports confirmation progress. This is
+        the account-side ledger; that one is the bridge pipeline.
+
+        ``limit`` maxes out at :data:`DEPOSITS_LIMIT_MAX`, which is also the
+        server default.
+
+        Not in the ``/api/v1`` spec; stays on the legacy gateway.
+        """
+        limit = _page_limit(limit, DEPOSITS_LIMIT_MAX, "deposits")
+        query = _query(limit=limit)
+        data = self._request("GET", "/deposits", query=query, signed=True)
+        return [FundsEntry.from_dict(e) for e in (data if isinstance(data, list) else [])]
+
+    def fetch_account_funding(self, limit: int | None = None) -> list[AccountFunding]:
+        """``GET /funding`` — funding payments for the account. Requires credentials.
+
+        The account-side counterpart of :meth:`fetch_funding_rate_history`,
+        which is a *market's* funding series and takes no credentials. Amounts
+        are signed; prefer the sign over the redundant ``direction`` field.
+
+        ``limit`` maxes out at :data:`ACCOUNT_FUNDING_LIMIT_MAX` (default 100).
+
+        Not in the ``/api/v1`` spec; stays on the legacy gateway.
+        """
+        limit = _page_limit(limit, ACCOUNT_FUNDING_LIMIT_MAX, "funding")
+        query = _query(limit=limit)
+        data = self._request("GET", "/funding", query=query, signed=True)
+        return [AccountFunding.from_dict(f) for f in (data if isinstance(data, list) else [])]
+
     # -- bridge (deposits) ---------------------------------------------------
 
     def fetch_bridge_assets(self) -> BridgeAssetsResponse:
@@ -1089,6 +1278,77 @@ class Client:
             direct=True,
         )
         return BridgeDeposit.from_dict(data if isinstance(data, dict) else {})
+
+    # -- bridge (withdrawal wallets) -----------------------------------------
+    # Registering a payout address is a two-step proof: mint a challenge, sign
+    # its `message` with the wallet's key, hand both back. The server keeps no
+    # state between the calls — it re-derives the signed bytes from the message
+    # echoed back — so the message must survive the round trip byte for byte.
+
+    def list_bridge_wallets(self) -> BridgeWalletsResponse:
+        """``GET /bridge/wallets`` — registered withdrawal wallets. Requires credentials.
+
+        Only a verified wallet can receive a withdrawal. In this cut an account
+        holds at most one, and both its flags are always true — see
+        :class:`~nexus_exchange.BridgeWallet` before branching on either.
+        """
+        data = self._request("GET", "/bridge/wallets", signed=True, direct=True)
+        return BridgeWalletsResponse.from_dict(data if isinstance(data, dict) else {})
+
+    def create_bridge_wallet_challenge(self, address: str) -> BridgeWalletChallenge:
+        """``POST /bridge/wallets/challenge`` — mint a wallet-registration challenge.
+
+        Requires credentials. Step 1 of 2: sign the returned ``message`` with
+        ``address``'s own key (EIP-191 ``personal_sign``), then pass the message
+        and signature to :meth:`register_bridge_wallet`.
+
+        ``address`` is the wallet being registered, which need not be the
+        account's own address — that is the point of proving control of it.
+        """
+        if not address:
+            raise ValueError("address is required")
+        data = self._request(
+            "POST",
+            "/bridge/wallets/challenge",
+            body={"address": address},
+            signed=True,
+            direct=True,
+        )
+        return BridgeWalletChallenge.from_dict(data if isinstance(data, dict) else {})
+
+    def register_bridge_wallet(self, address: str, message: str, signature: str) -> BridgeWallet:
+        """``POST /bridge/wallets`` — register a proven withdrawal wallet.
+
+        Requires credentials. Step 2 of 2, following
+        :meth:`create_bridge_wallet_challenge`.
+
+        ``message`` must be the challenge's ``message`` **verbatim** — the
+        server re-derives the signed bytes from it and re-checks the integrity
+        tag, the account binding and the expiry against what you send, so any
+        reformatting, re-encoding or trimming invalidates a valid signature and
+        returns ``400``. Pass ``challenge.message`` straight through rather than
+        rebuilding it.
+
+        ``signature`` is the 0x-prefixed 65-byte EIP-191 signature over that
+        message, and ``address`` must be the address it recovers to.
+
+        A failed ownership check returns ``400`` and stores nothing; there is no
+        partially-registered state to clean up.
+        """
+        if not address:
+            raise ValueError("address is required")
+        if not message:
+            raise ValueError("message is required: pass the challenge's `message` verbatim")
+        if not signature:
+            raise ValueError("signature is required")
+        data = self._request(
+            "POST",
+            "/bridge/wallets",
+            body={"address": address, "message": message, "signature": signature},
+            signed=True,
+            direct=True,
+        )
+        return BridgeWallet.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_rate_limit_status(self) -> RateLimitStatus:
         """``GET /account/rate-limit`` — the caller's rate-limit status.
@@ -1140,6 +1400,67 @@ class Client:
         data = self._request("POST", "/account/credit", body=body, signed=True, direct=True)
         return CreditResult.from_dict(data if isinstance(data, dict) else {})
 
+    def create_deposit(self, amount: Decimal | str, asset: str | None = None) -> DepositResponse:
+        """``POST /deposits`` — submit a (testnet/synthetic) deposit. Requires credentials.
+
+        Distinct from :meth:`deposit` (``POST /account/deposit``, "deposit USDX
+        collateral"): the spec declares them as two operations with two response
+        schemas, and this SDK wraps each at its own path rather than guessing
+        that one supersedes the other.
+
+        ``asset`` defaults to ``USDX`` server-side and is omitted from the body
+        when not given, so the default is the server's rather than one this
+        client invents and would have to track.
+
+        Not in the ``/api/v1`` spec; stays on the legacy gateway.
+        """
+        # `Decimal("abc")` raises `InvalidOperation`, an `ArithmeticError` rather
+        # than a `ValueError`, so an unparseable amount would surface as a
+        # decimal-internals error instead of the argument error it is. Catch it
+        # and re-raise in the same shape as the range check below, so a caller
+        # has one exception type to handle for "bad amount".
+        try:
+            parsed = Decimal(str(amount))
+        except InvalidOperation as exc:
+            raise ValueError(f"deposit amount must be a positive decimal (got {amount!r})") from exc
+        # Rejects NaN and Infinity too: both are finite-looking to `> 0` in ways
+        # that would put a nonsense amount on the wire.
+        if not parsed.is_finite() or parsed <= 0:
+            raise ValueError(f"deposit amount must be a positive decimal (got {amount!r})")
+        body: dict[str, Any] = {"amount": str(amount)}
+        if asset is not None:
+            body["asset"] = asset
+        data = self._request("POST", "/deposits", body=body, signed=True)
+        return DepositResponse.from_dict(data if isinstance(data, dict) else {})
+
+    def claim_faucet(self) -> FaucetResponse:
+        """``POST /faucet`` — claim the fixed testnet faucet amount.
+
+        Requires credentials. Takes no arguments: the amount is fixed by the
+        server, subject to a per-wallet cooldown and a cumulative cap. A claim
+        before the cooldown elapses returns ``429``; the response's
+        ``available_at_ms`` is when the next one is due, so schedule against it
+        rather than retrying blind.
+
+        Distinct from :meth:`claim_credit` (``POST /account/credit``), which
+        draws on a per-API-key *daily allowance* and takes an amount. Both mint
+        synthetic USDX, and both are separate spec operations.
+
+        Testnet and local only — the spec marks this operation
+        ``x-nexus-network-availability: [testnet, local]``, the same marker
+        ``POST /account/credit`` carries. Raises :class:`ValueError` on a
+        faucet-less network rather than spending a signed request against a
+        real-funds host.
+        """
+        if not self._network.has_faucet:
+            raise ValueError(
+                f"{self._network.label} has no faucet: `claim_faucet` mints synthetic "
+                f"funds and is testnet/local only. Real collateral is bridged — see "
+                f"`deposit`."
+            )
+        data = self._request("POST", "/faucet", signed=True)
+        return FaucetResponse.from_dict(data if isinstance(data, dict) else {})
+
     def adjust_margin(
         self, market_id: str, direction: str, amount: Decimal | str
     ) -> MarginAdjustment:
@@ -1188,6 +1509,28 @@ class Client:
         """``POST /orders`` — place a single order. Requires credentials."""
         data = self._request("POST", "/orders", body=order.to_payload(), signed=True, direct=True)
         return OrderResponse.from_dict(data if isinstance(data, dict) else {})
+
+    def preview_order(self, order: OrderRequest) -> PreviewResponse:
+        """``POST /orders/preview`` — project an order's impact without placing it.
+
+        Requires credentials. Takes the same :class:`OrderRequest` as
+        :meth:`create_order` and sends the identical body, so a preview and the
+        order it previews cannot drift apart.
+
+        **Nothing is submitted, and nothing is reserved.** The projection is
+        against the book and the account as they are at the moment of the call;
+        an ``accepted`` preview is not a promise that the subsequent
+        :meth:`create_order` will be accepted, and the projected fill VWAP is
+        not a quote. Treat it as a pre-trade check, not a two-phase commit.
+
+        Counts against the ``trading`` rate-limit class (the spec marks it
+        ``x-nexus-rate-limit-class: trading``), so previewing every candidate
+        order spends the same budget placing them would.
+        """
+        data = self._request(
+            "POST", "/orders/preview", body=order.to_payload(), signed=True, direct=True
+        )
+        return PreviewResponse.from_dict(data if isinstance(data, dict) else {})
 
     def create_orders(self, orders: list[OrderRequest]) -> list[BatchOrderResult]:
         """``POST /orders/batch`` — submit a batch of orders (sequential, non-atomic).
@@ -1330,6 +1673,37 @@ class Client:
         data = self._request("GET", "/keys", signed=True)
         return [ApiKeyInfo.from_dict(k) for k in (data if isinstance(data, list) else [])]
 
+    def create_api_key(self, session_token: str) -> ApiKeyCreated:
+        """``POST /keys`` — mint a new HMAC API key for the authenticated wallet.
+
+        The spec declares three operations under ``bearerAuth`` — this one,
+        ``GET /keys`` and ``DELETE /keys/{key_id}`` — but this is the only one
+        that *cannot* be HMAC-signed: it is what you call to *obtain* HMAC
+        credentials, so it cannot require them. The other two this client sends
+        signed (:meth:`fetch_api_keys`, :meth:`delete_api_key`); which side is
+        authoritative there is ENG-13303, so do not align them onto either
+        scheme by reading this method as the pattern. Get
+        ``session_token`` from :meth:`sign_in` (:attr:`LoginResponse.token`);
+        this SDK does not store it, so pass it in explicitly. This client's own
+        ``api_key``/``api_secret`` are not used and need not be set.
+
+        **The secret comes back once and is never recoverable.** Persist it at
+        the call site — see :class:`~nexus_exchange.ApiKeyCreated`, whose
+        ``repr`` redacts it so an incidental log cannot leak a live credential.
+
+        **The key is bound to the network of the host that mints it.** There is
+        no network field either way, and another host refuses the key with an
+        opaque ``401`` indistinguishable from an unknown one. This client's
+        target decides: mint against the host you intend to trade on
+        (:attr:`base_url`), and mint a separate key per network rather than
+        reusing one.
+
+        Not in the ``/api/v1`` spec; stays on the legacy gateway.
+        """
+        token = _bearer_token(session_token)
+        data = self._request("POST", "/keys", bearer=token)
+        return ApiKeyCreated.from_dict(data if isinstance(data, dict) else {})
+
     def delete_api_key(self, key_id: str) -> Any:
         """``DELETE /keys/{key_id}`` — delete an API key you own. Requires credentials."""
         return self._request("DELETE", f"/keys/{quote(key_id, safe='')}", signed=True)
@@ -1344,8 +1718,32 @@ class Client:
         return self._request("DELETE", f"/agents/{quote(address, safe='')}", signed=True)
 
     def mint_web_socket_token(self) -> WsToken:
-        """``POST /ws-tokens`` — mint a single-use WebSocket token. Requires credentials."""
+        """``POST /ws-tokens`` — mint a single-use WebSocket token. Requires credentials.
+
+        **Legacy.** The spec names this operation ``createWsTokenLegacy`` and
+        points at :meth:`create_ws_token` instead: this one mints a token for
+        the public ``/stream`` socket, while the newer route also accepts
+        registered agent keys and session tokens and binds the token to the
+        account. Kept because it is still a published operation.
+        """
         data = self._request("POST", "/ws-tokens", signed=True)
+        return WsToken.from_dict(data if isinstance(data, dict) else {})
+
+    def create_ws_token(self) -> WsToken:
+        """``POST /ws/token`` — mint a single-use WebSocket token. Requires credentials.
+
+        The preferred route over :meth:`mint_web_socket_token`: it accepts HMAC
+        keys, registered agent keys and session tokens, and the token it returns
+        encodes the account identity, so the per-account channels (orders,
+        fills, positions, balances, liquidations) scope themselves to the
+        connected wallet.
+
+        The token is short-lived (60s) and single-use. Pass it as ``?token=...``
+        when upgrading to ``GET /ws`` — **this SDK opens no socket**, so minting
+        the token is where its involvement ends; hand it to the WebSocket client
+        of your choice and mint a fresh one per connection.
+        """
+        data = self._request("POST", "/ws/token", signed=True)
         return WsToken.from_dict(data if isinstance(data, dict) else {})
 
     # -- admin (signed) --------------------------------------------------
@@ -1390,6 +1788,7 @@ class Client:
         body: Any | None = None,
         signed: bool = False,
         direct: bool = False,
+        bearer: str | None = None,
     ) -> httpx.Response:
         """Issue one request and return the raw 2xx response.
 
@@ -1413,8 +1812,19 @@ class Client:
         headers: dict[str, str] = dict(self._default_headers)
         if body is not None:
             headers["content-type"] = "application/json"
+        # HMAC and session-bearer are alternative credentials for the same
+        # request, never both. `POST /keys` is the single operation the pinned
+        # spec puts behind `bearerAuth`; sending an HMAC signature alongside the
+        # session token would present two identities for one call and leave the
+        # server to pick. Refusing here keeps that choice from ever being made
+        # implicitly. Unreachable from the public surface — no method passes
+        # both — so this guards the plumbing, not the caller.
+        if signed and bearer is not None:
+            raise ValueError("a request cannot be both HMAC-signed and bearer-authenticated")
         if signed:
             headers.update(self._sign(method, full_path, query, body_bytes))
+        elif bearer is not None:
+            headers["authorization"] = f"Bearer {bearer}"
 
         # Build the URL by hand so the signed query matches the sent query byte
         # for byte (no client-side re-encoding).
@@ -1483,8 +1893,11 @@ class Client:
         body: Any | None = None,
         signed: bool = False,
         direct: bool = False,
+        bearer: str | None = None,
     ) -> Any:
-        resp = self._send(method, path, query=query, body=body, signed=signed, direct=direct)
+        resp = self._send(
+            method, path, query=query, body=body, signed=signed, direct=direct, bearer=bearer
+        )
         return _decode_body(resp)
 
     def _request_page(
