@@ -1676,9 +1676,13 @@ class Client:
     def create_api_key(self, session_token: str) -> ApiKeyCreated:
         """``POST /keys`` — mint a new HMAC API key for the authenticated wallet.
 
-        The **only** operation on this surface authenticated with a session
-        bearer token rather than an HMAC signature: it is what you call to
-        *obtain* HMAC credentials, so it cannot require them. Get
+        The spec declares three operations under ``bearerAuth`` — this one,
+        ``GET /keys`` and ``DELETE /keys/{key_id}`` — but this is the only one
+        that *cannot* be HMAC-signed: it is what you call to *obtain* HMAC
+        credentials, so it cannot require them. The other two this client sends
+        signed (:meth:`fetch_api_keys`, :meth:`delete_api_key`); which side is
+        authoritative there is ENG-13303, so do not align them onto either
+        scheme by reading this method as the pattern. Get
         ``session_token`` from :meth:`sign_in` (:attr:`LoginResponse.token`);
         this SDK does not store it, so pass it in explicitly. This client's own
         ``api_key``/``api_secret`` are not used and need not be set.

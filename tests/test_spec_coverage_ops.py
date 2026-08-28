@@ -16,10 +16,14 @@ tests because they are where the surface can go quietly wrong:
     `x-nexus-network-availability: [testnet, local]` marker as
     `POST /account/credit`, so it gets the same client-side guard — a real-funds
     host must not receive a signed faucet request.
-  * **`POST /keys` is the one bearer-authenticated operation.** It mints HMAC
-    credentials, so it cannot require them. That is a second auth path through
-    `_send`, and the tests pin that it carries a bearer token, carries *no*
-    signature, and refuses a token that could forge a header.
+  * **`POST /keys` is the one operation here that cannot be HMAC-signed.** It
+    mints HMAC credentials, so it cannot require them. (The spec declares three
+    operations under `bearerAuth` — this one, `GET /keys`, `DELETE
+    /keys/{key_id}` — and the other two, both pre-existing, this client sends
+    signed instead; that disagreement is ENG-13303, not something these tests
+    settle.) The bearer path is a second auth path through `_send`, and the
+    tests pin that it carries a bearer token, carries *no* signature, and
+    refuses a token that could forge a header.
   * **Required fields decode strictly.** `BridgeWallet` and
     `BridgeWalletChallenge` have spec-`required` fields whose absence must fail
     rather than default — a fabricated `verified=True` or an empty challenge
@@ -482,7 +486,7 @@ def test_create_ws_token_and_the_legacy_mint_are_separate_routes(httpx_mock) -> 
     assert legacy.token == "t-legacy"
 
 
-# -- POST /keys: the one bearer-authenticated operation ------------------------
+# -- POST /keys: the one operation that cannot be HMAC-signed ------------------
 
 
 def test_create_api_key_uses_a_bearer_token_and_no_signature(httpx_mock) -> None:
