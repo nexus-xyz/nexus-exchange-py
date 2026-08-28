@@ -15,6 +15,26 @@ future release below it. To improve the wording of a release, edit
 below `0.4.0` predate this and follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.0](https://github.com/nexus-xyz/nexus-exchange-py/compare/v0.4.0...v0.5.0) (2026-08-28)
+
+
+### ⚠ BREAKING CHANGES
+
+* **networks:** `NetworkConfig.custom()` now raises `ValueError` for a label that case-insensitively matches a built-in network name (`mainnet`, `testnet`, `local`, `custom`). Any caller that deliberately named a custom target after a built-in must rename it.
+* **client:** delete the off-contract ops and empty CODE_ONLY_OPS (ENG-8618) ([#69](https://github.com/nexus-xyz/nexus-exchange-py/issues/69))
+
+### Features
+
+* **client:** expose base_url/direct_base_url, and stop selling a bare NEXUS_BASE_URL (ENG-10095) ([#73](https://github.com/nexus-xyz/nexus-exchange-py/issues/73)) ([bb77a1b](https://github.com/nexus-xyz/nexus-exchange-py/commit/bb77a1bcd701e5e29048fc230e7928a43c0ba8f5))
+* **client:** implement the remaining 15 spec operations, 51 -&gt; 66 of 68 (ENG-9200) ([#74](https://github.com/nexus-xyz/nexus-exchange-py/issues/74)) ([a1fc4b9](https://github.com/nexus-xyz/nexus-exchange-py/commit/a1fc4b95b967542a89186a8ce4dbf89714bcc5b6))
+
+
+### Bug Fixes
+
+* **ci:** count spec coverage by operation, not by path spelling (ENG-11847) ([#65](https://github.com/nexus-xyz/nexus-exchange-py/issues/65)) ([212e086](https://github.com/nexus-xyz/nexus-exchange-py/commit/212e08692bf6f9e808528d88b301ff9a215ad97c))
+* **client:** delete the off-contract ops and empty CODE_ONLY_OPS (ENG-8618) ([#69](https://github.com/nexus-xyz/nexus-exchange-py/issues/69)) ([7376540](https://github.com/nexus-xyz/nexus-exchange-py/commit/73765404677eec86ce447ef39fa87f8586f2eb74))
+* **networks:** reserve the built-in network labels against custom targets ([#64](https://github.com/nexus-xyz/nexus-exchange-py/issues/64)) ([35cbea2](https://github.com/nexus-xyz/nexus-exchange-py/commit/35cbea21d5dbd6748964ee608a73cbe47ce99507))
+
 ## [0.4.0] - 2026-08-20
 
 ### Changed
