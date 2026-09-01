@@ -15,7 +15,7 @@ literal in the source — `_request("GET", "/bridge/assets", direct=True)` targe
 `GET /api/v1/bridge/assets`. The prefix is read out of client.py rather than
 hardcoded here, so moving the constant cannot silently desynchronize the checker.
 
-Three invariants are enforced:
+Four invariants are enforced:
 
 0. .api-version <-> the spec file it was handed
    The spec's own `info.version` must equal the pinned tag. Guards against a
@@ -45,6 +45,16 @@ Three invariants are enforced:
    operation the contract does not define rather than parking it. The set is
    permanently empty and any entry in it fails the run (ENG-8618).
 
+3. client credential <-> the spec's declared `security` (ENG-13303)
+   Same AST walk, one more axis: the credential each call sends (`signed=True` ->
+   HMAC, `bearer=` -> session token, neither -> unauthenticated) must satisfy the
+   `security` the pinned spec declares for that operation. Nine operations
+   disagreed when this was first measured by hand — including a public one the
+   client signed, which made it unreachable without credentials — and nothing
+   noticed, because agreement on the *path* was all anything checked. The
+   surviving disagreements are pinned in `SECURITY_EXCEPTIONS`, which fails when
+   one is resolved as loudly as when a new one appears.
+
 Usage: check_spec_drift.py <openapi.json>
 """
 
@@ -53,6 +63,7 @@ import json
 import os
 import re
 import sys
+from typing import NamedTuple
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
@@ -136,6 +147,81 @@ NON_REST_TARGETS: set[tuple[str, str]] = set()
 # they are reported as an informational coverage gap. The Python SDK trails the Rust
 # SDK by design (see endpoints.txt), so an uncovered operation is a backlog item,
 # not drift.
+
+
+# -- invariant 3: the credential a call sends vs. the security it declares ------
+
+# The three credentials `Client._send` can put on a request, and the spec scheme
+# each one satisfies. They are mutually exclusive by construction — `_send`
+# refuses `signed=True` together with `bearer=`, and this walk refuses the same
+# pair statically, so exactly one of these describes any call.
+AUTH_HMAC = "hmac"  # signed=True  -> X-API-Key + X-Timestamp + X-Signature
+AUTH_BEARER = "bearer"  # bearer=…      -> Authorization: Bearer <session token>
+AUTH_PUBLIC = "public"  # neither       -> no credential at all
+SCHEME_FOR_AUTH = {AUTH_HMAC: "hmacAuth", AUTH_BEARER: "bearerAuth"}
+
+# How a declaration with no scheme in it renders. An operation is public when it
+# declares `security: []`, when it declares an empty `{}` alternative, or when it
+# declares nothing and the document declares no root `security` either — three
+# spellings of one meaning, so they normalize to one word.
+PUBLIC_DECLARATION = "public"
+
+# The disagreements between what the client sends and what the pinned spec
+# declares that are KNOWN and NOT YET SETTLED (ENG-13303). Each is a contract
+# question — whether the spec over-declares or the client under-authenticates is
+# the server's middleware to answer, not this SDK's — so they are pinned here
+# rather than silently tolerated or unilaterally "fixed".
+#
+# Pinned on BOTH sides: the credential the call sends, and the declaration it is
+# measured against. That makes every way out of an entry loud:
+#
+#   * the client changes credential          -> sent side no longer matches -> red
+#   * the spec widens or narrows its security -> declared side no longer matches -> red
+#   * the two come to agree                   -> the divergence is gone, entry is
+#                                                stale -> red (delete the entry)
+#   * the operation loses its caller          -> stale -> red
+#
+# so an entry can never outlive the disagreement it records. A green run still
+# prints all of them, because a tolerated divergence nobody sees is one nobody
+# resolves.
+#
+# The four shapes, as filed:
+#
+#   1. `GET /keys`, `DELETE /keys/{key_id}` declare `bearerAuth` ("used only for
+#      API key management") and the client signs them with the caller's API key.
+#      `POST /keys` is the one of the three on the bearer path — correctly, since
+#      it MINTS the HMAC credential and so cannot require it. Moving the other two
+#      would stop a signature-only caller from listing or deleting keys, which is
+#      a real API change here, not a patch.
+#   2. The three `/admin/tiers` operations declare `adminAuth` — a bearer carrying
+#      ADMIN_SECRET, a different credential entirely rather than a stricter HMAC.
+#      The client signs them with the caller's ordinary key, and there is no way to
+#      supply an admin secret through this client at all. Resolving this one adds a
+#      credential to the public surface.
+#   3. `GET /markets`, `GET /markets/{id}/adl-events` and
+#      `GET /account/{address}/adl-history` declare `hmacAuth` and the client sends
+#      them unauthenticated. `GET /markets` is the SDK's most basic call, is
+#      documented and exercised as public, and every keyless quickstart depends on
+#      it — so the spec almost certainly over-declares, but it does declare it.
+#
+# The fourth shape — `GET /api/v1/bridge/assets`, declared public and sent signed
+# — is NOT here: it was the one row with no contract question attached (the client
+# was strictly stricter than the contract, at the cost of making a public read
+# unreachable without credentials) and it was fixed in the same change that added
+# this check.
+#
+# Keys are (METHOD, normalized path) exactly as `requested_ops` reports them —
+# placeholders collapsed to `{}` — and values are (credential sent, declaration).
+SECURITY_EXCEPTIONS: dict[tuple[str, str], tuple[str, str]] = {
+    ("GET", "/keys"): (AUTH_HMAC, "bearerAuth"),
+    ("DELETE", "/keys/{}"): (AUTH_HMAC, "bearerAuth"),
+    ("PUT", "/admin/tiers"): (AUTH_HMAC, "adminAuth"),
+    ("GET", "/admin/tiers"): (AUTH_HMAC, "adminAuth"),
+    ("DELETE", "/admin/tiers/{}"): (AUTH_HMAC, "adminAuth"),
+    ("GET", "/markets"): (AUTH_PUBLIC, "hmacAuth"),
+    ("GET", "/markets/{}/adl-events"): (AUTH_PUBLIC, "hmacAuth"),
+    ("GET", "/account/{}/adl-history"): (AUTH_PUBLIC, "hmacAuth"),
+}
 
 
 def fail(msg):
@@ -317,14 +403,23 @@ def literal_path(node):
     return None
 
 
+class RequestCall(NamedTuple):
+    """One `_request` / `_request_page` call site: where it is, and which
+    credential it sends. `auth` is one of the three `AUTH_*` constants."""
+
+    where: str
+    auth: str
+
+
 def requested_ops(modules, api_v1_prefix):
     """Every operation the package requests, derived from the `_request(...)` calls
-    in its modules. Returns {(METHOD, normalized_path): [locations]}.
+    in its modules. Returns {(METHOD, normalized_path): [RequestCall, ...]}.
 
     Anything that cannot be attributed to a concrete operation is a hard failure:
-    a non-literal method, a computed path, or a non-literal `direct` (which decides
-    the /api/v1 prefix). Silently skipping such a call is how a manifest starts
-    describing something other than reality."""
+    a non-literal method, a computed path, a non-literal `direct` (which decides
+    the /api/v1 prefix), or a non-literal `signed` (which decides the credential).
+    Silently skipping such a call is how a manifest starts describing something
+    other than reality."""
     ops = {}
     for path in modules:
         try:
@@ -376,23 +471,46 @@ def requested_ops(modules, api_v1_prefix):
                     f"literals); cannot attribute the call to an operation."
                 )
             direct = False
+            signed = False
+            bearer = False
             for kw in node.keywords:
                 if kw.arg is None:
                     fail(
                         f"{where}: {called}() called with **kwargs; the checker "
-                        f"cannot tell whether `direct` is set."
+                        f"cannot tell what `direct`, `signed` or `bearer` are set to."
                     )
-                if kw.arg == "direct":
+                if kw.arg in ("direct", "signed"):
                     if not (
                         isinstance(kw.value, ast.Constant) and isinstance(kw.value.value, bool)
                     ):
-                        fail(
-                            f"{where}: `direct=` is not a True/False literal, so the "
-                            f"{api_v1_prefix} prefix cannot be resolved."
+                        why = (
+                            f"the {api_v1_prefix} prefix cannot be resolved"
+                            if kw.arg == "direct"
+                            else "the credential this call sends cannot be resolved"
                         )
-                    direct = kw.value.value
+                        fail(f"{where}: `{kw.arg}=` is not a True/False literal, so {why}.")
+                    if kw.arg == "direct":
+                        direct = kw.value.value
+                    else:
+                        signed = kw.value.value
+                elif kw.arg == "bearer":
+                    # Presence decides, not the value: the token is a runtime
+                    # secret (`create_api_key` passes the caller's session token),
+                    # so unlike `signed=` it cannot be a literal to read. An
+                    # explicit `bearer=None` is the parameter's own default and
+                    # sends no credential, so it reads as absent.
+                    bearer = not (isinstance(kw.value, ast.Constant) and kw.value.value is None)
+            if signed and bearer:
+                # `_send` raises on this pair at runtime; refusing it here too means
+                # the walk never has to guess which of two credentials a call sends.
+                fail(
+                    f"{where}: {called}() passes both `signed=True` and `bearer=`; a "
+                    f"request carries one credential, and {SENDING_FUNC}() refuses this "
+                    f"pair at runtime."
+                )
+            auth = AUTH_HMAC if signed else (AUTH_BEARER if bearer else AUTH_PUBLIC)
             resolved = f"{api_v1_prefix}{literal}" if direct else literal
-            ops.setdefault((method, normalize_path(resolved)), []).append(where)
+            ops.setdefault((method, normalize_path(resolved)), []).append(RequestCall(where, auth))
     if not ops:
         fail(
             f"parsed zero {'/'.join(REQUEST_FUNCS)}() calls from the package; the call shape may "
@@ -495,7 +613,7 @@ def check_code_vs_manifest(manifest):
             f"delete the method if it does not):"
         )
         for m, p in unlisted:
-            print(f"  - {m} {p}   requested at {', '.join(requested[(m, p)])}")
+            print(f"  - {m} {p}   requested at {', '.join(c.where for c in requested[(m, p)])}")
 
     if uncalled:
         errors += len(uncalled)
@@ -521,6 +639,201 @@ def check_code_vs_manifest(manifest):
             f"\nOK: the client requests {len(requested_set)} operation(s), each with an "
             f"endpoints.txt line; every endpoints.txt entry has a caller or is in "
             f"NON_REST_TARGETS; and CODE_ONLY_OPS is empty."
+        )
+    return errors
+
+
+def security_alternatives(spec, operation):
+    """The alternatives `operation` accepts, as a set of frozensets of scheme names.
+
+    OpenAPI's `security` is a list of ALTERNATIVES (any one suffices), each a map
+    of scheme -> scopes that must ALL be presented. So `[{a: []}, {b: []}]` means
+    "a or b" while `[{a: [], b: []}]` means "a and b" — a distinction that matters
+    here, because the client sends exactly one credential and therefore can never
+    satisfy an alternative naming two schemes.
+
+    An empty frozenset is the public alternative. It arises three ways, all one
+    meaning: `security: []`, an empty `{}` entry, and no `security` at all (with no
+    root-level `security` to inherit). Absent-at-both-levels is public per the
+    specification, not "unspecified" — this document declares no root `security`,
+    so all 27 of its public operations reach us through the first two spellings and
+    the four with no key at all through the third."""
+    absent = object()
+    declared = operation.get("security", spec.get("security", absent))
+    if declared is absent:
+        return frozenset({frozenset()})
+    if declared is None:
+        # `security: null` is not a spelling of anything — reading it as public
+        # would be a guess, in the direction that hides a requirement.
+        fail("`security` is present but null; it must be a list of requirements")
+    if not isinstance(declared, list):
+        fail(f"`security` must be a list, got {type(declared).__name__}: {declared!r}")
+    if not declared:
+        return frozenset({frozenset()})
+    alternatives = set()
+    for entry in declared:
+        if not isinstance(entry, dict):
+            fail(f"every `security` entry must be an object, got {entry!r}")
+        alternatives.add(frozenset(entry))
+    return frozenset(alternatives)
+
+
+def render_declaration(alternatives):
+    """One canonical string per declaration, so two declarations compare (and pin)
+    by equality: `"hmacAuth"`, `"public"`, `"hmacAuth | bearerAuth"` for a choice,
+    `"a+b"` for an alternative requiring both."""
+    return " | ".join(
+        sorted("+".join(sorted(alt)) if alt else PUBLIC_DECLARATION for alt in alternatives)
+    )
+
+
+def satisfies(auth, alternatives):
+    """Whether one credential satisfies a declaration.
+
+    The client presents a single credential, so it satisfies the declaration only
+    if some alternative is exactly that one scheme. Public counts as a credential
+    of its own: it satisfies only a declaration that offers the public alternative,
+    which is what makes signing a declared-public operation a finding rather than
+    harmless extra caution — it costs a keyless caller the endpoint entirely."""
+    scheme = SCHEME_FOR_AUTH.get(auth)
+    required = frozenset() if scheme is None else frozenset({scheme})
+    return required in alternatives
+
+
+def declared_security_index(spec):
+    """{(METHOD, normalized_path): {rendered: (alternatives, [literal spec paths])}}.
+
+    Normalized so it can be keyed by what `requested_ops` reports (the client's
+    f-string interpolations carry no placeholder NAME, so `{id}` vs `{deposit_id}`
+    cannot be matched any other way). Collapsing names can in principle merge two
+    distinct spec paths, so the value keeps every declaration seen for a key: more
+    than one means the operation is ambiguous under normalization, and the check
+    below refuses to pick rather than reporting a coin-flip."""
+    index = {}
+    for path, methods in spec.get("paths", {}).items():
+        if not isinstance(methods, dict):
+            continue
+        for method, operation in methods.items():
+            if method.upper() not in HTTP_METHODS or not isinstance(operation, dict):
+                continue
+            key = (method.upper(), normalize_path(path))
+            alternatives = security_alternatives(spec, operation)
+            rendered = render_declaration(alternatives)
+            index.setdefault(key, {}).setdefault(rendered, (alternatives, []))[1].append(path)
+    return index
+
+
+def check_declared_security(spec):
+    """Invariant 3: every call's credential satisfies the operation's `security`.
+
+    Runs its own AST walk rather than taking `check_code_vs_manifest`'s: the two
+    answer different questions (which operations, versus how each is authenticated)
+    and keeping them independent means either can be exercised — and can fail —
+    without the other."""
+    with open(CLIENT_PY) as f:
+        api_v1_prefix = read_api_v1_prefix(f.read())
+    requested = requested_ops(package_modules(), api_v1_prefix)
+    index = declared_security_index(spec)
+
+    errors = 0
+    accepted = []
+    for op, calls in sorted(requested.items()):
+        method, path = op
+        sent = {call.auth for call in calls}
+        if len(sent) > 1:
+            # One operation, two credentials, decided by which method you call.
+            # Whatever the server accepts, the SDK cannot be described as doing
+            # one thing here, so it is reported rather than measured.
+            errors += 1
+            print(
+                f"\nERROR: {method} {path} is requested with more than one credential "
+                f"({', '.join(sorted(sent))}); one operation, one credential:"
+            )
+            for call in sorted(calls):
+                print(f"  - {call.auth:<7} at {call.where}")
+            continue
+        auth = next(iter(sent))
+        declarations = index.get(op)
+        if not declarations:
+            # Unreachable while invariants 1 and 2 hold — they already require every
+            # requested operation to have a manifest line that the spec declares —
+            # so this fires only alongside a louder failure. Reported anyway: an
+            # unverifiable call must never read as a verified one.
+            errors += 1
+            print(
+                f"\nERROR: {method} {path} is requested at "
+                f"{', '.join(c.where for c in calls)} but the pinned spec declares no "
+                f"such operation, so its credential cannot be checked."
+            )
+            continue
+        if len(declarations) > 1:
+            errors += 1
+            print(
+                f"\nERROR: {method} {path} matches spec paths that declare different "
+                f"security, so the declaration to check against is ambiguous:"
+            )
+            for rendered, (_, paths) in sorted(declarations.items()):
+                print(f"  - {rendered}: {', '.join(sorted(paths))}")
+            continue
+        rendered, (alternatives, _) = next(iter(declarations.items()))
+        agrees = satisfies(auth, alternatives)
+        pinned = SECURITY_EXCEPTIONS.get(op)
+
+        if agrees and pinned is not None:
+            errors += 1
+            print(
+                f"\nERROR: {method} {path} now sends {auth} and the pinned spec declares "
+                f"{rendered}: they AGREE, so the SECURITY_EXCEPTIONS entry recording "
+                f"their disagreement is stale. Delete it — and close the ENG-13303 row "
+                f"it stands for."
+            )
+        elif not agrees and pinned == (auth, rendered):
+            accepted.append((op, auth, rendered))
+        elif not agrees:
+            errors += 1
+            known = (
+                f" (SECURITY_EXCEPTIONS pins {pinned[0]} vs {pinned[1]}, which is no "
+                f"longer what either side says)"
+                if pinned is not None
+                else ""
+            )
+            print(
+                f"\nERROR: {method} {path} sends {auth} but the pinned spec declares "
+                f"{rendered}{known}. Requested at "
+                f"{', '.join(c.where for c in calls)}."
+            )
+            print(
+                "  Fix the client if the spec is authoritative; if the spec "
+                "over-declares, widen it upstream and re-pin. Adding a "
+                "SECURITY_EXCEPTIONS entry is for a divergence that is filed and "
+                "awaiting that decision — not for one nobody has looked at."
+            )
+
+    orphaned = sorted(set(SECURITY_EXCEPTIONS) - set(requested))
+    if orphaned:
+        errors += len(orphaned)
+        print(
+            f"\nERROR: {len(orphaned)} SECURITY_EXCEPTIONS entr(ies) name an operation "
+            f"the client no longer requests (remove them):"
+        )
+        for method, path in orphaned:
+            print(f"  - {method} {path}")
+
+    if accepted:
+        # Printed on a green run too. A tolerated divergence that nobody is shown
+        # is a tolerated divergence that nobody resolves.
+        print(
+            f"\nKNOWN auth divergences, pinned in SECURITY_EXCEPTIONS and awaiting a "
+            f"contract decision (ENG-13303) — {len(accepted)}:"
+        )
+        for (method, path), auth, rendered in accepted:
+            print(f"  - {method} {path}: sends {auth}, spec declares {rendered}")
+
+    if not errors:
+        print(
+            f"\nOK: {len(requested) - len(accepted)} of {len(requested)} requested "
+            f"operation(s) send a credential the pinned spec's `security` accepts; the "
+            f"other {len(accepted)} are the pinned, known divergences above."
         )
     return errors
 
@@ -595,6 +908,9 @@ def main():
 
     # Invariant 2: client code <-> endpoints.txt.
     failures += check_code_vs_manifest(manifest)
+
+    # Invariant 3: the credential each call sends <-> the spec's `security`.
+    failures += check_declared_security(spec)
 
     if failures:
         print(f"\nFAILED: {failures} drift error(s).")

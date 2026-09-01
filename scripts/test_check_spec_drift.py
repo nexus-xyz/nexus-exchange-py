@@ -59,12 +59,31 @@ def _quiet(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
 
-def spec_of(*ops):
-    """An OpenAPI-shaped dict declaring exactly `ops` (as (METHOD, path) pairs)."""
+def spec_of(*ops, security=None):
+    """An OpenAPI-shaped dict declaring exactly `ops`.
+
+    Each op is `(METHOD, path)`, or `(METHOD, path, security)` to give that one
+    operation a `security` value — including `[]` for "explicitly public" and
+    `None` for "no `security` key at all", which are different spellings the
+    checker has to read the same way. `security=` sets the document-level default
+    an operation without its own key inherits.
+    """
     paths = {}
-    for method, path in ops:
-        paths.setdefault(path, {})[method.lower()] = {"responses": {"200": {}}}
-    return {"info": {"version": "9.9.9"}, "paths": paths}
+    for method, path, *rest in ops:
+        operation = {"responses": {"200": {}}}
+        if rest and rest[0] is not None:
+            operation["security"] = rest[0]
+        paths.setdefault(path, {})[method.lower()] = operation
+    spec = {"info": {"version": "9.9.9"}, "paths": paths}
+    if security is not None:
+        spec["security"] = security
+    return spec
+
+
+HMAC = [{"hmacAuth": []}]
+BEARER = [{"bearerAuth": []}]
+ADMIN = [{"adminAuth": []}]
+PUBLIC = []  # `security: []` — explicitly public, the strongest public spelling
 
 
 @contextlib.contextmanager
@@ -105,6 +124,17 @@ def synthetic_package(client_body="", manifest="", extra_modules=None, pinned="v
         finally:
             for name, value in saved.items():
                 setattr(csd, name, value)
+
+
+@contextlib.contextmanager
+def security_exceptions(entries=None):
+    """Swap the pinned auth-divergence table for the duration of a test."""
+    saved = csd.SECURITY_EXCEPTIONS
+    csd.SECURITY_EXCEPTIONS = dict(entries or {})
+    try:
+        yield
+    finally:
+        csd.SECURITY_EXCEPTIONS = saved
 
 
 @contextlib.contextmanager
@@ -535,6 +565,297 @@ class TestModuleDiscovery(unittest.TestCase):
         ):
             found = csd.package_modules()
         self.assertEqual([m for m in found if "__pycache__" in m], [])
+
+
+class TestDeclaredSecurity(unittest.TestCase):
+    """Invariant 3: the credential a call sends satisfies the operation's `security`.
+
+    The bug this exists for (ENG-13303) was nine operations whose credential and
+    declaration disagreed, none of which anything noticed, because agreeing on the
+    *path* was all any check looked at.
+    """
+
+    def _errors(self, client_body, spec, exceptions=None):
+        with synthetic_package(client_body=client_body, manifest="GET /x\n"):
+            with security_exceptions(exceptions):
+                return _quiet(csd.check_declared_security, spec)
+
+    # -- agreement -------------------------------------------------------------
+    def test_signed_call_against_hmac_auth_passes(self):
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/orders", signed=True)\n',
+                spec_of(("GET", "/orders", HMAC)),
+            ),
+            0,
+        )
+
+    def test_unsigned_call_against_an_explicitly_public_operation_passes(self):
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/tickers")\n',
+                spec_of(("GET", "/tickers", PUBLIC)),
+            ),
+            0,
+        )
+
+    def test_unsigned_call_against_an_operation_with_no_security_key_passes(self):
+        # Absent at both levels is public per OpenAPI, not "unspecified" — four
+        # operations in the pinned spec reach us this way.
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("POST", "/auth/login")\n',
+                spec_of(("POST", "/auth/login")),
+            ),
+            0,
+        )
+
+    def test_bearer_call_against_bearer_auth_passes(self):
+        self.assertEqual(
+            self._errors(
+                'def a(self, t):\n    self._request("POST", "/keys", bearer=t)\n',
+                spec_of(("POST", "/keys", BEARER)),
+            ),
+            0,
+        )
+
+    def test_either_of_two_alternatives_satisfies(self):
+        # `[{a}, {b}]` is a choice, so both credentials are acceptable — this is
+        # the shape the ENG-13303 /keys rows resolve into if the SPEC is the side
+        # that moves.
+        both = [{"hmacAuth": []}, {"bearerAuth": []}]
+        for call in (
+            'def a(self):\n    self._request("GET", "/keys", signed=True)\n',
+            'def a(self, t):\n    self._request("GET", "/keys", bearer=t)\n',
+        ):
+            self.assertEqual(self._errors(call, spec_of(("GET", "/keys", both))), 0, call)
+
+    def test_a_root_level_default_is_inherited(self):
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/orders", signed=True)\n',
+                spec_of(("GET", "/orders"), security=HMAC),
+            ),
+            0,
+        )
+
+    def test_an_operation_overrides_the_root_level_default(self):
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/tickers")\n',
+                spec_of(("GET", "/tickers", PUBLIC), security=HMAC),
+            ),
+            0,
+        )
+
+    # -- disagreement ----------------------------------------------------------
+    def test_signing_a_public_operation_is_an_error(self):
+        # THE regression pin: `GET /api/v1/bridge/assets` was declared public and
+        # sent signed, which made a keyless client raise MissingCredentialsError
+        # on a read every caller is entitled to. Stricter than the contract is
+        # still a disagreement, and this one had a user-visible cost.
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/bridge/assets", signed=True, '
+                "direct=True)\n",
+                spec_of(("GET", "/api/v1/bridge/assets", PUBLIC)),
+            ),
+            1,
+        )
+
+    def test_leaving_a_declared_operation_unauthenticated_is_an_error(self):
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/markets")\n',
+                spec_of(("GET", "/markets", HMAC)),
+            ),
+            1,
+        )
+
+    def test_sending_the_wrong_scheme_is_an_error(self):
+        # An HMAC signature is not a weaker bearer token, and adminAuth is a
+        # different credential entirely — presenting one where the other is
+        # declared is as wrong as presenting none.
+        for declared in (BEARER, ADMIN):
+            self.assertEqual(
+                self._errors(
+                    'def a(self):\n    self._request("GET", "/admin/tiers", signed=True)\n',
+                    spec_of(("GET", "/admin/tiers", declared)),
+                ),
+                1,
+                declared,
+            )
+
+    def test_one_credential_cannot_satisfy_an_and_requirement(self):
+        # `[{a, b}]` (one entry, two schemes) requires BOTH. The client sends one
+        # credential per request, so it can never satisfy this — and must say so
+        # rather than matching on "the scheme is mentioned somewhere".
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/keys", signed=True)\n',
+                spec_of(("GET", "/keys", [{"hmacAuth": [], "bearerAuth": []}])),
+            ),
+            1,
+        )
+
+    def test_an_operation_missing_from_the_spec_is_an_error(self):
+        # Unreachable while invariants 1 and 2 hold, but an unverifiable call must
+        # never be counted as a verified one.
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/gone", signed=True)\n',
+                spec_of(("GET", "/orders", HMAC)),
+            ),
+            1,
+        )
+
+    def test_two_credentials_for_one_operation_is_an_error(self):
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/keys", signed=True)\n'
+                'def b(self, t):\n    self._request("GET", "/keys", bearer=t)\n',
+                spec_of(("GET", "/keys", BEARER)),
+            ),
+            1,
+        )
+
+    def test_paths_that_normalize_together_but_declare_differently_are_ambiguous(self):
+        # Placeholder names are collapsed to match the client's f-strings, which
+        # can in principle merge two spec paths. Refuse to pick one at random.
+        self.assertEqual(
+            self._errors(
+                'def a(self, x):\n    self._request("GET", f"/keys/{x}", signed=True)\n',
+                spec_of(("GET", "/keys/{key_id}", HMAC), ("GET", "/keys/{name}", BEARER)),
+            ),
+            1,
+        )
+
+    def test_identical_declarations_under_one_normalization_are_not_ambiguous(self):
+        self.assertEqual(
+            self._errors(
+                'def a(self, x):\n    self._request("GET", f"/keys/{x}", signed=True)\n',
+                spec_of(("GET", "/keys/{key_id}", HMAC), ("GET", "/keys/{name}", HMAC)),
+            ),
+            0,
+        )
+
+    # -- the pinned-divergence table -------------------------------------------
+    def test_a_pinned_divergence_is_tolerated(self):
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/keys", signed=True)\n',
+                spec_of(("GET", "/keys", BEARER)),
+                exceptions={("GET", "/keys"): (csd.AUTH_HMAC, "bearerAuth")},
+            ),
+            0,
+        )
+
+    def test_a_pinned_divergence_that_has_been_resolved_goes_red(self):
+        # The entry outliving the disagreement is the failure mode an allowlist
+        # normally hides: the client is fixed, the exemption stays, and the next
+        # regression lands inside it silently.
+        self.assertEqual(
+            self._errors(
+                'def a(self, t):\n    self._request("GET", "/keys", bearer=t)\n',
+                spec_of(("GET", "/keys", BEARER)),
+                exceptions={("GET", "/keys"): (csd.AUTH_HMAC, "bearerAuth")},
+            ),
+            1,
+        )
+
+    def test_a_divergence_that_moved_is_not_covered_by_its_old_pin(self):
+        # Both sides moved — the client stopped signing, the spec now declares
+        # adminAuth — so the disagreement is a different one than the pin records.
+        # A pin covers the divergence it was written for, nothing else.
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/keys")\n',
+                spec_of(("GET", "/keys", ADMIN)),
+                exceptions={("GET", "/keys"): (csd.AUTH_HMAC, "bearerAuth")},
+            ),
+            1,
+        )
+
+    def test_a_pin_whose_operation_lost_its_caller_goes_red(self):
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/orders", signed=True)\n',
+                spec_of(("GET", "/orders", HMAC), ("GET", "/keys", BEARER)),
+                exceptions={("GET", "/keys"): (csd.AUTH_HMAC, "bearerAuth")},
+            ),
+            1,
+        )
+
+    def test_the_shipped_pins_all_name_an_operation_the_client_requests(self):
+        # No spec needed for this half: an entry naming an operation nothing calls
+        # is stale whatever the contract says.
+        requested = _quiet(csd.requested_ops, csd.package_modules(), "/api/v1")
+        for op in csd.SECURITY_EXCEPTIONS:
+            self.assertIn(op, requested, f"stale SECURITY_EXCEPTIONS entry: {op[0]} {op[1]}")
+
+    # -- unattributable credentials --------------------------------------------
+    def test_non_literal_signed_fails(self):
+        with self.assertRaises(SystemExit):
+            self._errors(
+                'def a(self, s):\n    self._request("GET", "/orders", signed=s)\n',
+                spec_of(("GET", "/orders", HMAC)),
+            )
+
+    def test_signed_and_bearer_together_fails(self):
+        # `_send` refuses this pair at runtime; the walk refuses it statically, so
+        # it never has to guess which of two credentials a call presents.
+        with self.assertRaises(SystemExit):
+            self._errors(
+                'def a(self, t):\n    self._request("POST", "/keys", signed=True, bearer=t)\n',
+                spec_of(("POST", "/keys", BEARER)),
+            )
+
+    def test_an_explicit_bearer_none_reads_as_unauthenticated(self):
+        # It is the parameter's own default and sends no header, so it must not
+        # register as a credential.
+        self.assertEqual(
+            self._errors(
+                'def a(self):\n    self._request("GET", "/tickers", bearer=None)\n',
+                spec_of(("GET", "/tickers", PUBLIC)),
+            ),
+            0,
+        )
+
+
+class TestSecurityDeclarationReading(unittest.TestCase):
+    """The three public spellings normalize to one, and rendering is canonical."""
+
+    def test_the_public_spellings_agree(self):
+        public = frozenset({frozenset()})
+        self.assertEqual(csd.security_alternatives({}, {}), public)
+        self.assertEqual(csd.security_alternatives({}, {"security": []}), public)
+        self.assertEqual(csd.security_alternatives({}, {"security": [{}]}), public)
+        self.assertEqual(csd.render_declaration(public), "public")
+
+    def test_alternatives_render_in_a_stable_order(self):
+        one = csd.security_alternatives({}, {"security": [{"hmacAuth": []}, {"bearerAuth": []}]})
+        other = csd.security_alternatives({}, {"security": [{"bearerAuth": []}, {"hmacAuth": []}]})
+        self.assertEqual(csd.render_declaration(one), csd.render_declaration(other))
+        self.assertEqual(csd.render_declaration(one), "bearerAuth | hmacAuth")
+
+    def test_an_and_requirement_renders_as_one_alternative(self):
+        alts = csd.security_alternatives({}, {"security": [{"hmacAuth": [], "adminAuth": []}]})
+        self.assertEqual(csd.render_declaration(alts), "adminAuth+hmacAuth")
+
+    def test_a_malformed_security_value_fails(self):
+        with self.assertRaises(SystemExit):
+            _quiet(csd.security_alternatives, {}, {"security": "hmacAuth"})
+        with self.assertRaises(SystemExit):
+            _quiet(csd.security_alternatives, {}, {"security": ["hmacAuth"]})
+
+    def test_an_explicit_null_security_fails_rather_than_reading_as_public(self):
+        # `security: null` is not a spelling of anything, and guessing "public"
+        # guesses in the direction that hides a requirement.
+        with self.assertRaises(SystemExit):
+            _quiet(csd.security_alternatives, {}, {"security": None})
+
+    def test_an_operation_without_the_key_does_not_inherit_a_missing_root(self):
+        self.assertEqual(csd.security_alternatives({"paths": {}}, {}), frozenset({frozenset()}))
 
 
 class TestPinMatchesSpec(unittest.TestCase):
