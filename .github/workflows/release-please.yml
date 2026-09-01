@@ -17,13 +17,18 @@ name: release-please
 # on that door). `tests/test_release_config.py` fails if either flag goes missing,
 # so the policy is enforced rather than remembered.
 #
-# Two things follow from running on the built-in GITHUB_TOKEN, and both are
-# worked around with `workflow_dispatch` — the documented exception to the rule
-# that a GITHUB_TOKEN-raised event starts no workflow run:
+# Two things follow from running on the built-in GITHUB_TOKEN, and each is
+# worked around below (ENG-13320):
 #
-#   * The release PR gets no CI of its own, and `main` requires 9 status checks,
-#     so it would be unmergeable. We dispatch ci.yml at the release branch.
-#   * A tag push wouldn't wake release.yml. We dispatch that too.
+#   * The release PR's CI does start — GitHub raises `pull_request` for it — but
+#     this repo's fork-PR approval policy is `first_time_contributors` and
+#     `github-actions[bot]` trips it on every release PR, so the run parks in
+#     `action_required`, runs no jobs, and reports no checks. `main` requires 9
+#     status checks, so the PR is unmergeable until that run is approved. The
+#     "Approve CI on the release PR" step below approves it.
+#   * A tag push raised by GITHUB_TOKEN starts no workflow run at all — that one
+#     really is the loop-prevention rule, and `workflow_dispatch` is the
+#     documented exception to it. So release.yml is dispatched explicitly.
 #
 # Handoff to release.yml, and why it takes two extra steps:
 #   * The release is created as a DRAFT (`"draft": true`). A published release
@@ -55,7 +60,7 @@ jobs:
     permissions:
       contents: write # release commit, tag, draft release
       pull-requests: write # open/update the release PR
-      actions: write # dispatch ci.yml and release.yml
+      actions: write # approve the release PR's CI run, dispatch release.yml
     steps:
       - uses: googleapis/release-please-action@v5
         id: release
@@ -63,33 +68,6 @@ jobs:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
-
-      # `main` requires 9 status checks, and a PR opened or updated by the
-      # built-in GITHUB_TOKEN starts no workflow run — so the release PR would
-      # sit with its required checks unstarted, permanently unmergeable. Dispatch
-      # CI at the release branch instead; check runs attach to the head commit,
-      # so they satisfy the PR's required checks. Runs on every update to the PR,
-      # since each one moves that head commit.
-      #
-      # (The -cli repo doesn't need this: it runs release-please under a GitHub
-      # App installation token, which triggers workflows like a PAT. Those
-      # secrets are repo-level there and absent here, so this stays on
-      # GITHUB_TOKEN and dispatches explicitly. If they are ever added to this
-      # repo, this step and the release.yml dispatch below both become
-      # deletable — but not the tag creation, which a draft release needs
-      # whatever the token.)
-      - name: Run CI on the release PR
-        if: ${{ steps.release.outputs.prs_created == 'true' }}
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Raw JSON, parsed in the script — not interpolated through fromJSON,
-          # so a shape change fails loudly here rather than at expression time.
-          PR_JSON: ${{ steps.release.outputs.pr }}
-        run: |
-          set -euo pipefail
-          branch="$(jq -er '.headBranchName' <<<"$PR_JSON")"
-          gh workflow run ci.yml --repo "$GITHUB_REPOSITORY" --ref "$branch"
-          echo "Dispatched ci.yml for release branch ${branch}."
 
       # Draft releases don't create the git tag, and release.yml checks the tag
       # out. Idempotent so a re-run is safe.
@@ -124,3 +102,109 @@ jobs:
             --ref "$GITHUB_REF_NAME" \
             -f "tag=${TAG}"
           echo "Dispatched release.yml for ${TAG}."
+
+      # Un-gate the `pull_request` run that `main`'s required checks actually
+      # read, and that the fork-PR approval policy is holding (ENG-13320). Runs
+      # on every update to the release PR, since each one moves the head commit
+      # and each new commit gets its own gated run.
+      #
+      # This replaces a `workflow_dispatch` of ci.yml at the release branch,
+      # which was reasoned to work "because check runs attach to the head commit,
+      # so they satisfy the PR's required checks". They do not: a PR's status
+      # check rollup counts only check suites GitHub associates with the PR, and
+      # a dispatched run has no such association. Measured on #75 — all 9 check
+      # runs green on the head commit from the dispatch, `statusCheckRollup` `[]`,
+      # `mergeStateStatus` BLOCKED. The dispatch was a duplicate CI run that
+      # bought nothing, so it is gone.
+      #
+      # Scope, because approving a workflow run is granting untrusted code a
+      # runner: only a run whose head repository is THIS repo (never a fork) and
+      # whose head SHA is the head of the open PR on the release branch is ever
+      # approved. A fork can name its branch anything, including this branch's
+      # name, so branch name alone is not an identity — `head=<owner>:<branch>`
+      # on the lookup and the `head_repository` check on the run are what make it
+      # one. Pushing that branch needs write access.
+      #
+      # (The -cli repo needs none of this: it runs release-please under a GitHub
+      # App installation token, whose PRs are not gated and do trigger workflows
+      # like a PAT's. Those secrets are repo-level there and absent here. If they
+      # are ever added, this step and the release.yml dispatch above both become
+      # deletable — but not the tag creation, which a draft release needs
+      # whatever the token.)
+      - name: Approve CI on the release PR
+        if: ${{ steps.release.outputs.prs_created == 'true' }}
+        # Best-effort, and last in the job for the same reason: an API
+        # hiccup here must not take the tag or the release.yml handoff with
+        # it. The release PR is already open; the worst case is the manual
+        # click this step exists to remove.
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Raw JSON, parsed in the script — not interpolated through fromJSON,
+          # so a shape change fails loudly here rather than at expression time.
+          PR_JSON: ${{ steps.release.outputs.pr }}
+        run: |
+          set -euo pipefail
+
+          BRANCH="$(jq -er '.headBranchName' <<<"$PR_JSON")"
+          export BRANCH
+          owner="${GITHUB_REPOSITORY%%/*}"
+
+          head_sha="$(gh api \
+            "repos/${GITHUB_REPOSITORY}/pulls?state=open&head=${owner}:${BRANCH}" \
+            --jq '.[0].head.sha // empty')"
+          if [ -z "$head_sha" ]; then
+            echo "::warning::No open release PR on ${BRANCH}; nothing to approve."
+            exit 0
+          fi
+
+          # The run is created within seconds of the PR being pushed, but not
+          # synchronously with it. Bounded poll — never block the job forever.
+          # `action_required` is the gate we are here for; a run already moving
+          # or finished needs nothing, and anything still settling gets another
+          # look rather than an early "nothing to do".
+          run_id=""
+          for _ in $(seq 1 24); do
+            run="$(gh api \
+              "repos/${GITHUB_REPOSITORY}/actions/runs?event=pull_request&head_sha=${head_sha}&per_page=100" \
+              --jq '[.workflow_runs[]
+                     | select(.head_repository.full_name == env.GITHUB_REPOSITORY)
+                     | select(.head_branch == env.BRANCH)
+                     | select(.path == ".github/workflows/ci.yml")]
+                    | first // empty')"
+            if [ -n "$run" ]; then
+              status="$(jq -r '.status' <<<"$run")"
+              case "$status" in
+                action_required | waiting)
+                  run_id="$(jq -r '.id' <<<"$run")"
+                  break
+                  ;;
+                queued | pending | requested) ;; # still settling; look again
+                *)
+                  # Already running or done: the policy let it through (relaxed,
+                  # or an App token is in play). Exactly the state this step is
+                  # trying to reach, so it is a success, not a failure.
+                  echo "CI run for ${BRANCH} @ ${head_sha} is already ${status} — nothing to approve."
+                  exit 0
+                  ;;
+              esac
+            fi
+            sleep 5
+          done
+
+          if [ -z "$run_id" ]; then
+            echo "::warning::No CI run to approve for ${BRANCH} @ ${head_sha} after 2 minutes. Check that ci.yml still triggers on pull_request, then approve or re-run CI by hand."
+            exit 0
+          fi
+
+          if out="$(gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/approve" 2>&1)"; then
+            echo "Approved CI run ${run_id} for ${BRANCH} @ ${head_sha}."
+          else
+            # GITHUB_TOKEN may not be allowed to approve. Say so loudly rather
+            # than failing the release: a human can still click "Approve and run
+            # workflows" (CONTRIBUTING.md "Releasing"), and failing here would
+            # abort the run before the tag/handoff steps.
+            url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${run_id}"
+            echo "::warning::Could not approve CI run ${run_id} for ${BRANCH} (${out//$'\n'/ }). Approve it by hand at ${url}"
+          fi
