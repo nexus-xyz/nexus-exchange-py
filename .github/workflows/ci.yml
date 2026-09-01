@@ -4,14 +4,16 @@ on:
   push:
     branches: [main]
   pull_request:
-  # Run the same jobs against an arbitrary ref. This is not just a convenience:
-  # `main` requires these jobs as status checks, and a pull request opened by the
-  # built-in GITHUB_TOKEN starts no workflow run — so release-please's release PR
-  # would sit forever with its required checks unstarted and could never be
-  # merged. `release-please.yml` dispatches this workflow at the release branch,
-  # and because check runs attach to the head commit, they satisfy the PR's
-  # required checks. `workflow_dispatch` is the documented exception to the
-  # GITHUB_TOKEN no-trigger rule, which is what makes that possible.
+  # Run the same jobs against an arbitrary ref, by hand — an escape hatch for
+  # re-checking a ref without pushing to it.
+  #
+  # It used to carry more weight than that: `release-please.yml` dispatched this
+  # workflow at the release branch to get checks onto the release PR. That never
+  # worked (ENG-13320). A dispatched run's check runs are not associated with the
+  # pull request, so they satisfy none of its required contexts — the PR reads
+  # "no checks reported" with nine green check runs sitting on its head commit.
+  # release-please.yml now approves the PR's own `pull_request` run instead, and
+  # nothing dispatches this workflow.
   #
   # Nothing here reads pull-request context, so every job behaves identically
   # under all three triggers. Keep it that way.
