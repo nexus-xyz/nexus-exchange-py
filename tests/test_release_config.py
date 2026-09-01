@@ -111,16 +111,37 @@ def test_tags_are_bare_v_prefixed_semver(config: dict, package: dict) -> None:
     assert "tag-separator" not in config and "tag-separator" not in package
 
 
-def test_ci_is_dispatchable_for_the_release_pr() -> None:
-    # `main` requires CI as status checks, but a PR opened by the built-in
-    # GITHUB_TOKEN starts no workflow run, so `release-please.yml` dispatches
-    # ci.yml at the release branch instead. Drop `workflow_dispatch` from ci.yml
-    # and the release PR becomes permanently unmergeable with its required checks
-    # simply never started — a symptom that points nowhere near the cause.
-    ci = (REPO_ROOT / ".github" / "workflows" / "ci.yml").read_text()
-    assert "\n  workflow_dispatch:" in ci, "ci.yml must stay dispatchable"
+def test_the_release_pr_ci_run_is_approved_not_dispatched() -> None:
+    # `main` requires CI as status checks, and the release PR's own
+    # `pull_request` run is the only thing that can satisfy them — a run
+    # dispatched at the release branch is not associated with the pull request,
+    # so its check runs land on the head commit and count for nothing. That was
+    # the original workaround and it never worked: measured on #75, nine green
+    # check runs on the head commit, `statusCheckRollup` empty, PR BLOCKED
+    # (ENG-13320). Re-adding the dispatch would restore a duplicate CI run that
+    # looks like it fixes the problem and does not.
     rp = (REPO_ROOT / ".github" / "workflows" / "release-please.yml").read_text()
-    assert "gh workflow run ci.yml" in rp
+    assert "gh workflow run ci.yml" not in rp, (
+        "dispatching ci.yml does not satisfy the release PR's required checks"
+    )
+    assert "/actions/runs/${run_id}/approve" in rp, (
+        "release-please.yml must approve the release PR's gated CI run"
+    )
+
+
+def test_the_ci_approval_cannot_be_aimed_at_a_fork() -> None:
+    # Approving a workflow run hands a runner to whatever code that run checks
+    # out, and the approval is found by branch name — which a fork controls, and
+    # can set to the release branch's name. Only the head-repository check keeps
+    # a fork's run out of the set this step will approve; without it the step is
+    # a one-click-free path for an outside PR to run in this repo.
+    rp = (REPO_ROOT / ".github" / "workflows" / "release-please.yml").read_text()
+    assert ".head_repository.full_name == env.GITHUB_REPOSITORY" in rp, (
+        "the approval must be restricted to runs whose head repository is this repo"
+    )
+    assert "head=${owner}:${BRANCH}" in rp, (
+        "the release PR must be looked up by owner-qualified head ref, not branch name alone"
+    )
 
 
 def test_release_is_drafted_so_artifacts_land_before_it_is_public(config: dict) -> None:
