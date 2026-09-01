@@ -1232,8 +1232,20 @@ class Client:
     # -- bridge (deposits) ---------------------------------------------------
 
     def fetch_bridge_assets(self) -> BridgeAssetsResponse:
-        """``GET /bridge/assets`` — bridgeable chains and assets. Requires credentials."""
-        data = self._request("GET", "/bridge/assets", signed=True, direct=True)
+        """``GET /bridge/assets`` — bridgeable chains and assets. No credentials needed.
+
+        Public, like the other catalogue reads on this surface: the pinned spec
+        declares ``security: []`` for this operation, and the answer is the same
+        for every caller — which chains and assets the bridge accepts is not
+        account-specific. It is the only read in the bridge group that is.
+
+        It used to be sent HMAC-signed (ENG-13303), which made a keyless client
+        raise :class:`MissingCredentialsError` before the transport and put the
+        chain list — the input to :meth:`create_bridge_deposit_address` — out of
+        reach of anyone who had not yet minted a key. Sending a signature the
+        contract does not ask for bought nothing and cost that.
+        """
+        data = self._request("GET", "/bridge/assets", direct=True)
         return BridgeAssetsResponse.from_dict(data if isinstance(data, dict) else {})
 
     def create_bridge_deposit_address(self, chain: str) -> BridgeDepositAddress:

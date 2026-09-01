@@ -233,3 +233,45 @@ def test_signed_methods_require_credentials(call) -> None:
     with Client(Network.LOCAL) as client:
         with pytest.raises(MissingCredentialsError):
             call(client)
+
+
+# -- the one bridge read that is public (ENG-13303) -----------------------------
+def test_fetch_bridge_assets_is_public(httpx_mock) -> None:
+    """The pinned spec declares ``security: []`` for this operation, so it is sent
+    with no credential at all — and the client that most needs it (one with no key
+    yet, about to mint a deposit address) can reach it."""
+    httpx_mock.add_response(
+        url=f"{_BASE}/api/v1/bridge/assets",
+        json={
+            "chains": [
+                {
+                    "chain": "ethereum",
+                    "chain_id": 1,
+                    "deposit_assets": [{"symbol": "USDC", "decimals": 6, "min_amount": "1"}],
+                    "withdraw_assets": [],
+                }
+            ]
+        },
+    )
+    # No credentials: signing this route again would raise MissingCredentialsError
+    # before the transport rather than quietly passing on header absence.
+    with Client(Network.LOCAL) as client:
+        assets = client.fetch_bridge_assets()
+
+    req = httpx_mock.get_request()
+    assert req.method == "GET"
+    assert req.url.raw_path.decode() == "/api/v1/bridge/assets"
+    for header in ("x-api-key", "x-timestamp", "x-signature", "authorization"):
+        assert header not in req.headers
+    assert assets.chains[0].chain == "ethereum"
+    assert assets.chains[0].deposit_assets[0].symbol == "USDC"
+
+
+def test_fetch_bridge_assets_sends_no_credential_even_when_one_is_held(httpx_mock) -> None:
+    # Holding a key must not change which credential a public operation carries:
+    # a signature the contract does not ask for is a divergence in the other
+    # direction, and it is what the drift checker's invariant 3 now measures.
+    httpx_mock.add_response(url=f"{_BASE}/api/v1/bridge/assets", json={"chains": []})
+    with _authed() as client:
+        client.fetch_bridge_assets()
+    assert "x-signature" not in httpx_mock.get_request().headers

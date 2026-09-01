@@ -342,6 +342,9 @@ Deposit funds across chains via the `/bridge` surface (USDC/USDX in Phase A).
 Get a deposit address (idempotent per account + chain), send funds, then poll a
 deposit until `status` is `credited`:
 
+`fetch_bridge_assets` is public — the chain and asset catalogue is the same for
+everyone, so it needs no key. Everything after it is signed.
+
 ```python
 assets = client.fetch_bridge_assets()
 addr = client.create_bridge_deposit_address(assets.chains[0].chain)
