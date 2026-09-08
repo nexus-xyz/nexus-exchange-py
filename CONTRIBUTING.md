@@ -208,9 +208,15 @@ The version is **computed, not hand-set** (ENG-7536). Two workflows, two stages:
    (`pyproject.toml`, `.release-please-manifest.json`, and the
    `_resolve_version` fallback literal in `src/nexus_exchange/client.py`) plus a
    new `CHANGELOG.md` section. Nothing ships while it sits open. It needs a
-   review and green checks like any other PR — the checks are dispatched onto
-   its branch rather than triggered by it, because a PR opened by Actions'
-   built-in token starts no workflow run.
+   review and green checks like any other PR — with one wrinkle: this repo
+   requires approval before a first-time contributor's workflows run, and
+   `github-actions[bot]` counts as one on every release PR, so its CI run parks
+   in *action_required* and the PR reports no checks at all until that run is
+   approved. `release-please.yml` approves it itself (ENG-13320); if it warns
+   that it could not — the built-in token may not be allowed to — click
+   **Approve and run workflows** on the PR, or approve the run from
+   **Actions**. That is the only manual step, and the checks go green on their
+   own afterwards.
 2. **Merging that PR is the release.** release-please tags the merge commit and
    cuts a *draft* GitHub release, then dispatches `release.yml`, which guards
    the tag against `pyproject.toml`, guards the version against the pre-1.0
