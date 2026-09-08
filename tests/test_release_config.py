@@ -123,6 +123,49 @@ def test_ci_is_dispatchable_for_the_release_pr() -> None:
     assert "gh workflow run ci.yml" in rp
 
 
+RELEASE_PLEASE_PATH = REPO_ROOT / ".github" / "workflows" / "release-please.yml"
+
+
+def test_cutting_a_release_never_also_computes_a_pull_request() -> None:
+    # ENG-13319. One `release-please-action` invocation doing both jobs computes
+    # "what's next" at the one moment the version it just cut has no identity to
+    # anchor on: the release is a draft, GitHub materialises no git tag for a
+    # draft, and this workflow's own tag step runs *after* the action. Finding no
+    # baseline, release-please walks back to the first commit and opens a release
+    # PR proposing the entire history — #75 did exactly that on 0.5.0, and the
+    # action does not withdraw a PR it has already opened.
+    #
+    # The fix is the split, so the split is what has to hold: a release
+    # invocation that cannot open a PR, and a PR invocation that cannot cut a
+    # release and is skipped on any run that just cut one. Recombining them
+    # reintroduces a bug whose symptom appears only at the next release.
+    rp = RELEASE_PLEASE_PATH.read_text()
+
+    assert rp.count("googleapis/release-please-action@v5") == 2, (
+        "release-please must be invoked twice — once to cut the release, once to "
+        "manage the standing PR"
+    )
+    assert "skip-github-pull-request: true" in rp, (
+        "the release invocation must not open a pull request"
+    )
+    assert "skip-github-release: true" in rp, "the pull-request invocation must not cut a release"
+    assert "steps.release.outputs.release_created != 'true'" in rp, (
+        "the pull-request invocation must be skipped on a run that cut a release"
+    )
+
+
+def test_ci_is_dispatched_for_the_pull_request_invocation() -> None:
+    # The CI dispatch has to read the invocation that actually opens the PR. It
+    # sat under the combined step before ENG-13319 split them, and a split that
+    # left it reading `steps.release` would silently stop dispatching: that id
+    # now belongs to the invocation with `skip-github-pull-request: true`, whose
+    # `prs_created` is therefore never 'true'. The release PR would sit with its
+    # required checks unstarted — the same dead end as an undispatchable ci.yml.
+    rp = RELEASE_PLEASE_PATH.read_text()
+    assert "steps.release_pr.outputs.prs_created == 'true'" in rp
+    assert "steps.release_pr.outputs.pr" in rp
+
+
 def test_release_is_drafted_so_artifacts_land_before_it_is_public(config: dict) -> None:
     # release-please cuts the release before anything is built; release.yml
     # attaches the sdist/wheel and only then undrafts it. Without this, a
