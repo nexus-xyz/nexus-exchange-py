@@ -16,13 +16,14 @@ from nexus_exchange import (
 
 
 def test_network_base_urls() -> None:
-    # Testnet is the successor to the old `STABLE` channel and keeps its exact
-    # targets: the legacy gateway still serves testnet, and the hosted per-network
-    # host is not resolvable yet.
-    assert Network.TESTNET.base_url == "https://exchange.nexus.xyz/api/exchange"
-    # The /api/v1 surface is mounted UNDER the gateway prefix on this deploy, so
-    # the direct base is the gateway base too. The host root 404s (ENG-10063).
-    assert Network.TESTNET.direct_base_url == "https://exchange.nexus.xyz/api/exchange"
+    # Testnet now targets its durable host (ENG-8868). The value carries the
+    # `/indexer` route prefix the service is mounted under, not the bare host:
+    # `api.testnet.nexus.xyz/markets/summary` 404s where
+    # `api.testnet.nexus.xyz/indexer/markets/summary` answers 200.
+    assert Network.TESTNET.base_url == "https://api.testnet.nexus.xyz/indexer"
+    # The /api/v1 surface sits under that same prefix, so the direct base is the
+    # same value — the topology the retired gateway had (ENG-10063).
+    assert Network.TESTNET.direct_base_url == "https://api.testnet.nexus.xyz/indexer"
     assert Client(Network.LOCAL)._base_url == "http://localhost:9090"
     assert Client(Network.LOCAL)._direct_base_url == "http://localhost:9090"
 
@@ -111,20 +112,20 @@ def test_api_error_on_4xx_is_terminal(httpx_mock) -> None:
     assert excinfo.value.transient is False
 
 
-def test_testnet_direct_route_composes_the_gateway_mounted_url(httpx_mock) -> None:
-    # The regression this pins: `direct_base_url` used to be the bare host root,
-    # so every one of the ~36 `direct=True` routes composed
-    # https://exchange.nexus.xyz/api/v1/... — which 404s to the frontend. The
-    # whole suite passed anyway, because the only composed-URL test ran against
-    # Network.LOCAL, where a bare origin IS the right base. Measured live:
+def test_testnet_direct_route_composes_the_prefix_mounted_url(httpx_mock) -> None:
+    # The regression this pins: `direct_base_url` must not be the bare host root,
+    # or every one of the ~36 `direct=True` routes composes a URL the deploy does
+    # not serve. That was true of the legacy gateway and is true of the durable
+    # host for the same reason — the service is mounted under a route prefix.
+    # Measured on api.testnet.nexus.xyz, 2026-09-09:
     #
-    #     .../api/exchange/api/v1/markets/summary  -> 200 application/json
-    #     .../api/v1/markets/summary               -> 404 text/html (frontend)
+    #     /indexer/api/v1/markets/summary  -> 200 application/json
+    #     /api/v1/markets/summary          -> 404
     #
     # Assert on the URL, not on the config field, so this fails if either the
     # default or the composition regresses.
     httpx_mock.add_response(
-        url="https://exchange.nexus.xyz/api/exchange/api/v1/markets/summary",
+        url="https://api.testnet.nexus.xyz/indexer/api/v1/markets/summary",
         json=[],
     )
     with Client(Network.TESTNET) as client:
@@ -132,20 +133,20 @@ def test_testnet_direct_route_composes_the_gateway_mounted_url(httpx_mock) -> No
 
     assert (
         str(httpx_mock.get_request().url)
-        == "https://exchange.nexus.xyz/api/exchange/api/v1/markets/summary"
+        == "https://api.testnet.nexus.xyz/indexer/api/v1/markets/summary"
     )
 
 
-def test_testnet_legacy_route_stays_on_the_gateway_base(httpx_mock) -> None:
+def test_testnet_non_v1_route_stays_on_the_base(httpx_mock) -> None:
     # The other half of the split: a route with no /api/v1 variant must not pick
-    # up the prefix, and must still land under the gateway.
+    # up the prefix, and must still land under the route prefix the base carries.
     httpx_mock.add_response(
-        url="https://exchange.nexus.xyz/api/exchange/ws/token", json={"token": "t"}
+        url="https://api.testnet.nexus.xyz/indexer/ws/token", json={"token": "t"}
     )
     with Client(Network.TESTNET) as client:
         client._request("POST", "/ws/token")
 
-    assert str(httpx_mock.get_request().url) == "https://exchange.nexus.xyz/api/exchange/ws/token"
+    assert str(httpx_mock.get_request().url) == "https://api.testnet.nexus.xyz/indexer/ws/token"
 
 
 def test_has_credentials_reflects_keys() -> None:

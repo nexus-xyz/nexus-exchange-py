@@ -270,11 +270,11 @@ def test_a_blank_base_url_env_var_means_unset_not_an_empty_override(
     "url",
     [
         "https://beta.exchange.nexus.xyz/api/exchange",
-        "https://exchange.nexus.xyz/api/exchange",
+        "https://api.testnet.nexus.xyz/indexer",
     ],
 )
-def test_gateway_style_urls_pass_the_guard(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Gateway-style hosts must not be refused as real-funds targets.
+def test_play_funds_urls_pass_the_guard(url: str, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Known play-funds hosts must not be refused as real-funds targets.
 
     Both URLs are play-funds: the first is what `beta` became (this module's
     docstring), the second is `Network.TESTNET.config.base_url` itself. Neither may
@@ -287,6 +287,12 @@ def test_gateway_style_urls_pass_the_guard(url: str, monkeypatch: pytest.MonkeyP
     Pointing testnet's direct base at the gateway-mounted `/api/v1` ended that, so
     the assertion is now the property the docstring always wanted: the guard admits
     these and a client is built.
+
+    The second URL moved with ENG-8868, and that is the point of deriving the
+    allowlist from the map rather than typing it: `exchange.nexus.xyz` is no
+    longer any network's base, so it is no longer vouched for here. Whoever still
+    has it in `NEXUS_BASE_URL` gets the guard's refusal instead of the HTTP 500
+    the decommissioned host behind it now answers with (ENG-14039).
 
     If a change ever starts treating these hosts as real-funds -- or as funds it
     cannot vouch for, which now refuses too -- this fails on the guard's

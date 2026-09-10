@@ -93,8 +93,9 @@ semantics and the EIP-712 signing domain:
 ```python
 from nexus_exchange import Client, Funds, Network
 
-Network.TESTNET.ws_market_data_url  # 'wss://api.testnet.nexus.xyz/stream'
-Network.TESTNET.ws_authenticated_url  # 'wss://api.testnet.nexus.xyz/ws'
+Network.TESTNET.base_url  # 'https://api.testnet.nexus.xyz/indexer'
+Network.TESTNET.ws_market_data_url  # 'wss://api.testnet.nexus.xyz/indexer/stream'
+Network.TESTNET.ws_authenticated_url  # 'wss://api.testnet.nexus.xyz/indexer/ws'
 Network.MAINNET.funds  # Funds.REAL — branch on this, never on the host string
 
 with Client(Network.TESTNET) as client:
@@ -115,16 +116,21 @@ if client.network.funds is Funds.REAL:  # WRONG — UNKNOWN slips through
 Whether a faucet exists is tracked separately (`has_faucet`): "not real money"
 does not imply "can mint more of it".
 
-The two WebSocket bases and `published_rest_base` are the spec's **durable**
-per-network values, recorded here so they live in one place. The hosted ones do
-not resolve yet (DNS is not configured), and this SDK ships no WebSocket client, so
-treat them as published targets rather than something to connect to today. What
-the client actually sends to is `base_url` / `direct_base_url`.
+The two WebSocket bases and `published_rest_base` are the **durable**
+per-network values, recorded here so they live in one place. Testnet's are live;
+mainnet's host has no DNS record at all, so treat that one as a published target
+rather than something to connect to. This SDK ships no WebSocket client either
+way, so neither WS base is dialled on your behalf. What the client actually
+sends to is `base_url` / `direct_base_url`.
+
+Note the `/indexer` in testnet's bases. It is a **route prefix the deployment
+mounts the service under**, not part of the API contract — the bare host answers
+404. Copy the base whole rather than trimming it to the hostname.
 
 Three things worth knowing before you pick one:
 
 - **Mainnet has no default base URL yet.** Its host (`api.nexus.xyz`) is
-  published but DNS is not live, so `Client(Network.MAINNET)` raises rather than
+  decided but has no DNS record, so `Client(Network.MAINNET)` raises rather than
   guessing a real-funds target or quietly falling back to testnet. Pass
   `base_url=…` explicitly to target it.
 - **Credentials never cross networks.** Session tokens, HMAC keys and agent keys
@@ -226,19 +232,20 @@ Client(Network.MAINNET, base_url="https://api.nexus.xyz")  # stays real funds
 Custom configs are never added to the network map and are not addressable by
 name — `Network("dev")` still raises.
 
-### Routing: direct `/api/v1` service vs. legacy gateway
+### Routing: direct `/api/v1` service vs. unprefixed routes
 
 As the REST gateway is retired, backend services expose their own
 REST API under an **`/api/v1`** prefix. That prefix is a *path*, not a host: it
 is mounted wherever the deployment serves the direct service, which on the
-hosted deploy is under the `…/api/exchange` gateway prefix
-(`https://exchange.nexus.xyz/api/exchange/api/v1/…`) and on a direct indexer
-host is the bare origin. The client appends `/api/v1` to `direct_base_url`, so
+hosted deploy is under that deployment's route prefix
+(`https://api.testnet.nexus.xyz/indexer/api/v1/…`) and on a locally run indexer
+is the bare origin. The client appends `/api/v1` to `direct_base_url`, so
 that field carries whichever base applies. The migrated market-data and
 account/trading routes now target this direct service; the HMAC signature covers
 the full path (e.g. `/api/v1/orders`), independent of the base. Routes with no
 `/api/v1` equivalent yet — `GET /markets`, ADL history, `GET /orders/{id}`,
-deposits, keys/agents, WS tokens and admin tiers — stay on the legacy gateway.
+deposits, keys/agents, WS tokens and admin tiers — are sent relative to the
+base with no prefix added.
 This split is internal; method names and signatures are unchanged. A custom `base_url` overrides both bases; pass `direct_base_url`
 alongside it to target a deploy that serves the two surfaces apart.
 
@@ -267,11 +274,11 @@ append that prefix themselves, on the direct routes only:
 
 | Surface | Python | TypeScript | Base value (testnet) | Composed URL |
 | --- | --- | --- | --- | --- |
-| Direct `/api/v1` service | `direct_base_url` | `baseUrl` | `https://exchange.nexus.xyz/api/exchange` | `…/api/exchange/api/v1/orders` |
-| Legacy `/api/exchange` gateway | `base_url` | *not modelled* | `https://exchange.nexus.xyz/api/exchange` | `…/api/exchange/ws/token` |
+| Direct `/api/v1` service | `direct_base_url` | `baseUrl` | `https://api.testnet.nexus.xyz/indexer` | `…/indexer/api/v1/orders` |
+| Routes with no `/api/v1` variant | `base_url` | *not modelled* | `https://api.testnet.nexus.xyz/indexer` | `…/indexer/ws/token` |
 
 On this deploy all of these hold the **same string**, because the direct surface
-is mounted under the gateway prefix — so copying a base across the three SDKs
+is mounted under the same route prefix — so copying a base across the three SDKs
 gives the right answer today, and Python's two fields stay separate only so a
 deploy that *does* serve the surfaces apart can still say so.
 

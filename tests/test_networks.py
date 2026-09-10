@@ -60,14 +60,15 @@ class TestHostMap:
             assert network.ws_authenticated_url.endswith("/ws")
             assert network.ws_market_data_url.startswith(("wss://", "ws://"))
 
-    def test_ws_bases_are_the_spec_durable_hosts_not_the_legacy_one(self) -> None:
-        # These mirror `x-nexus-networks` verbatim rather than tracking whatever
-        # is reachable today: there is no legacy WS base to keep using, and no WS
-        # client here to dial one. Documented as informational for that reason.
-        assert Network.TESTNET.ws_market_data_url == "wss://api.testnet.nexus.xyz/stream"
+    def test_ws_bases_are_the_durable_hosts_not_the_legacy_one(self) -> None:
+        # Testnet's carries the `/indexer` route prefix its REST base does — the
+        # service is mounted under it, so a host-root WS URL would not reach the
+        # handler either (ENG-8868). Mainnet's host still does not resolve; no WS
+        # client ships here, so both remain informational.
+        assert Network.TESTNET.ws_market_data_url == "wss://api.testnet.nexus.xyz/indexer/stream"
         assert Network.MAINNET.ws_authenticated_url == "wss://api.nexus.xyz/ws"
         for network in Network:
-            assert "exchange.nexus.xyz" not in network.ws_market_data_url
+            assert "//exchange.nexus.xyz" not in network.ws_market_data_url
 
     def test_funds_and_faucet_semantics(self) -> None:
         assert Network.MAINNET.funds is Funds.REAL
@@ -93,14 +94,16 @@ class TestHostMap:
 
 
 class TestClientTargeting:
-    def test_default_network_is_testnet_and_preserves_legacy_targets(self) -> None:
-        # Defaulting to real funds would be one keystroke from a costly mistake;
-        # and testnet's bases are byte-identical to the old `STABLE` ones, so
-        # existing code keeps hitting exactly the same URLs.
+    def test_default_network_is_testnet_and_targets_the_durable_host(self) -> None:
+        # Defaulting to real funds would be one keystroke from a costly mistake.
+        # The default target is testnet's durable host, no longer the legacy
+        # gateway it inherited from the old `STABLE` channel (ENG-8868) — that
+        # gateway proxies to a decommissioned Cloud Run indexer and answers 500
+        # on every route (ENG-14039).
         with Client() as client:
             assert client.network is Network.TESTNET.config
-            assert client._base_url == "https://exchange.nexus.xyz/api/exchange"
-            assert client._direct_base_url == "https://exchange.nexus.xyz/api/exchange"
+            assert client._base_url == "https://api.testnet.nexus.xyz/indexer"
+            assert client._direct_base_url == "https://api.testnet.nexus.xyz/indexer"
 
     def test_mainnet_without_an_explicit_base_refuses_at_construction(self) -> None:
         # Its host is published but not resolvable. Guessing one would mean
@@ -161,20 +164,22 @@ class TestClientTargeting:
         ) as client:
             assert client._direct_base_url == "https://beta.exchange.nexus.xyz/api/exchange"
 
-    def test_both_surfaces_share_the_gateway_base_on_testnet(self) -> None:
+    def test_both_surfaces_share_the_base_on_testnet(self) -> None:
         # There is no split to preserve on this deploy: the /api/v1 surface is
-        # mounted under the gateway prefix, so both bases are the same value.
-        # The two fields stay separate for a deploy that does split them.
+        # mounted under the same route prefix as everything else, so both bases
+        # are the same value. The two fields stay separate for a deploy that does
+        # split them.
         with Client(Network.TESTNET) as client:
-            assert client._base_url == "https://exchange.nexus.xyz/api/exchange"
-            assert client._direct_base_url == "https://exchange.nexus.xyz/api/exchange"
+            assert client._base_url == "https://api.testnet.nexus.xyz/indexer"
+            assert client._direct_base_url == "https://api.testnet.nexus.xyz/indexer"
 
-    def test_the_default_gateway_base_url_is_not_caught_by_the_guard(self) -> None:
-        # The guard covers the direct surface only. Testnet's own base_url is a
-        # gateway URL, and must stay one.
+    def test_the_default_base_url_is_not_caught_by_the_guard(self) -> None:
+        # The guard rejects a direct base that already carries `/api/exchange`.
+        # Testnet's default must not trip it — it did not when the default was a
+        # gateway URL and must not now that it is a `/indexer`-prefixed one.
         with Client() as client:
-            assert client._base_url == "https://exchange.nexus.xyz/api/exchange"
-            assert client._direct_base_url == "https://exchange.nexus.xyz/api/exchange"
+            assert client._base_url == "https://api.testnet.nexus.xyz/indexer"
+            assert client._direct_base_url == "https://api.testnet.nexus.xyz/indexer"
 
     def test_a_host_containing_the_word_exchange_is_not_a_gateway(self) -> None:
         # The check is on path segments, so `exchange.nexus.xyz` and a path like
