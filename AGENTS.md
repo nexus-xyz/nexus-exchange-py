@@ -31,6 +31,13 @@ The Python SDK for the Nexus Exchange API.
 - Include the `/api/v1` prefix in an `endpoints.txt` line whenever the call passes
   `direct=True` — the prefix is part of the operation, and the spec lists the two
   surfaces separately.
+- The same script checks the credential each call sends (`signed=True` / `bearer=`
+  / neither) against the `security` the pinned spec declares for that operation.
+  Match the spec: sign what it declares `hmacAuth`, and send nothing on a public
+  route — a signature it does not ask for makes the route unreachable to a keyless
+  caller. Known disagreements awaiting a contract decision live in that script's
+  `SECURITY_EXCEPTIONS`, pinned on both sides, and an entry fails once the
+  disagreement it records is gone.
 - Pre-1.0: bump minor on breaking changes, patch on features and fixes.
 
 ## Versioning
