@@ -292,49 +292,48 @@ class NetworkConfig:
     #: has no faucet, and the spec marks that operation testnet/local-only.
     has_faucet: bool
 
-    #: The durable per-network REST base published by the spec's
-    #: ``x-nexus-networks``. Informational: the hosted entries are **not
-    #: resolvable yet** (DNS/TLS is separate infra, ENG-8155), and how this
-    #: SDK's two request surfaces map onto it is not settled. Recorded so the
-    #: published target is not lost; :attr:`base_url` is what actually gets used.
-    #: A custom target has no spec entry, so :meth:`custom` mirrors its
-    #: :attr:`base_url` here.
+    #: The durable per-network REST base. Testnet's is live and is the value
+    #: :attr:`base_url` uses (ENG-8868); mainnet's host does **not resolve at
+    #: all** (ENG-8155's mainnet half), so its entry is a record of the decided
+    #: name rather than something reachable — and, being unverifiable, is
+    #: deliberately left in the form it was written in. A custom target has no
+    #: published entry, so :meth:`custom` mirrors its :attr:`base_url` here.
     published_rest_base: str
 
-    #: The spec's WebSocket base for public market data (``/stream``).
+    #: WebSocket base for public market data (``/stream``).
     #:
-    #: Informational, on the same terms as :attr:`published_rest_base`: these are
-    #: the durable per-network hosts, and the hosted ones do **not resolve yet**
-    #: (ENG-8155). This SDK ships no WebSocket client, so nothing here is dialled
-    #: on your behalf — the value is published so it lives in one place, not
-    #: because it can be connected to today. Both hosted entries are unreachable,
-    #: mainnet included, which is why it is not ``None`` the way its REST bases
-    #: are: there is no reachable predecessor to prefer, so there is no choice
-    #: being hidden.
+    #: Informational on the same terms as :attr:`published_rest_base`: testnet's
+    #: route answers, mainnet's host does not resolve. This SDK ships no
+    #: WebSocket client either way, so nothing here is dialled on your behalf —
+    #: the value lives here so it lives in exactly one place. It is not ``None``
+    #: the way an absent REST base is, because there is no reachable predecessor
+    #: to prefer over it: no choice is being hidden.
     ws_market_data_url: str
 
-    #: The spec's WebSocket base for the authenticated stream (``/ws``), which
-    #: takes a token minted over REST by ``POST /ws-tokens``. Informational and
-    #: not yet resolvable — see :attr:`ws_market_data_url`.
+    #: WebSocket base for the authenticated stream (``/ws``), which takes a
+    #: token minted over REST by ``POST /ws-tokens``. Informational — see
+    #: :attr:`ws_market_data_url`.
     ws_authenticated_url: str
 
     #: EIP-712 domain for this network.
     signing_domain: SigningDomain
 
-    #: Legacy ``/api/exchange`` gateway base the client sends to today, or
-    #: ``None`` when this network has no working default yet. ``None`` is
-    #: deliberate absence rather than a guess — see :class:`Network`.
+    #: Base the client actually sends to, or ``None`` when this network has no
+    #: working default yet. ``None`` is deliberate absence rather than a guess —
+    #: see :class:`Network`. On the hosted deploy this carries the route prefix
+    #: the service is mounted under (``…/indexer``), which is a property of the
+    #: deployment and not of the contract.
     base_url: str | None
 
     #: Base the ``/api/v1`` surface is mounted under, or ``None`` as above.
     #:
     #: Named "direct" for the *direct-service* surface, not for a host root:
     #: the client appends ``/api/v1`` to this, so it must point wherever that
-    #: surface actually answers. On the hosted deploy that is under the gateway
-    #: prefix, so this equals :attr:`base_url`; on a direct indexer host
-    #: (``local``) it is the bare origin. Setting it to the host root of a
-    #: gateway deploy composes ``https://host/api/v1/...``, which 404s to the
-    #: frontend — see :meth:`Client._resolve_base` for the probe table.
+    #: surface actually answers. On the hosted deploy that is under the same
+    #: route prefix as everything else, so this equals :attr:`base_url`; on a
+    #: direct indexer host (``local``) it is the bare origin. Setting it to the
+    #: host root of a prefixed deploy composes ``https://host/api/v1/...``,
+    #: which 404s — see :meth:`Client._resolve_base` for the probe table.
     direct_base_url: str | None
 
     def __post_init__(self) -> None:
@@ -500,18 +499,52 @@ class NetworkConfig:
 
 # The map. Spelled out, mainnet a named case, no interpolation anywhere.
 #
-# On the transitional REST bases: the hosted per-network hosts do not resolve
-# yet, and the spec is explicit that clients should keep using the legacy base
-# until they are live. So testnet keeps pointing at the gateway it has always
-# used — the same URL the old `Network.STABLE` produced, which the spec now
-# documents as serving testnet. Mainnet has no such predecessor: `exchange.
-# nexus.xyz` is testnet, so there is nothing to fall back to and nothing safe to
-# invent. Its bases are None, and the client says so plainly instead of
-# resolving to a host that would quietly be the wrong network.
+# TESTNET IS ON ITS DURABLE HOST AS OF ENG-8868. `api.testnet.nexus.xyz` now
+# resolves and serves the `apps-prod-testnet` indexer, so testnet no longer
+# points at the legacy `exchange.nexus.xyz/api/exchange` gateway. That was not a
+# cosmetic swap: the legacy gateway proxies to the Cloud Run indexer
+# `exchange-indexer-t3jdki3hoa-uc.a.run.app`, which is decommissioned and
+# answers HTTP 500 on every route (ENG-14039). The base this SDK shipped was
+# dead, and the replacement is live.
 #
-# The WebSocket bases are the spec's values as published and are not reachable
-# yet either (there is no legacy WS base to keep using, and no WS client here to
-# use one). They are recorded, not dialled — see `NetworkConfig`.
+# THE BASE IS THE HOST PLUS `/indexer`, NOT THE HOST ROOT, and this is the one
+# detail worth reading twice. ENG-8865's target table says the durable base is
+# the bare host — it predates the route that actually shipped. The indexer's
+# HTTPRoute mounts it under a `/indexer` path prefix on the shared per-env
+# hostname and strips the prefix before forwarding, so the app still sees bare
+# spec paths (nexus monorepo, indexer/helmchart/values/apps-prod-testnet.yaml:
+# `hostnames: [api.testnet.nexus.xyz]`, `pathPrefix: "/indexer"`). Measured
+# 2026-09-09:
+#
+#   https://api.testnet.nexus.xyz/indexer/markets/summary          -> 200 JSON
+#   https://api.testnet.nexus.xyz/indexer/api/v1/markets/summary   -> 200 JSON
+#   https://api.testnet.nexus.xyz/markets/summary                  -> 404
+#   https://api.testnet.nexus.xyz/api/v1/markets/summary           -> 404
+#
+# Both of this SDK's surfaces answer under that one prefix, exactly as they did
+# under the gateway prefix, so `base_url` and `direct_base_url` stay equal and
+# NOTHING ABOUT PATH COMPOSITION OR SIGNING CHANGES. The HMAC still covers the
+# logical path (`/api/v1/orders`) and still excludes whatever prefix the base
+# carries — see `Client._resolve_base`. This is a hostname swap and only that.
+#
+# MAINNET IS UNCHANGED AND STILL REFUSES. `api.nexus.xyz` has no DNS record at
+# all (NODATA against 1.1.1.1, 8.8.8.8 and Cloudflare DoH, 2026-09-09), and
+# `apps-prod-mainnet` is a GCP project with no cluster, so there is no host to
+# point at and no way to verify a guess. `exchange.nexus.xyz` is testnet, so
+# there is no predecessor to fall back to either. Its bases stay None and the
+# client says so plainly rather than resolving to a host that would quietly be
+# the wrong network. Its `published_rest_base` is left exactly as it was for the
+# same reason: the `/v1`-in-base form is known-stale (ENG-9134 settled the
+# layout as path-versioned `/api/v1`), but testnet turning out to be
+# `/indexer`-prefixed means host-root is no longer the obvious correction
+# either. Recording an unverified mainnet base is the expensive mistake here, so
+# it waits for ENG-8155's mainnet half rather than being improved on a guess.
+#
+# The WebSocket bases follow the same prefix — `/indexer/stream` and
+# `/indexer/ws` both reach the indexer's own handlers (400 "Connection header
+# did not include 'upgrade'" over plain HTTP, which is the route answering).
+# This SDK still ships no WebSocket client, so they are recorded, not dialled —
+# see `NetworkConfig`. Mainnet's remain unreachable along with its REST base.
 _CONFIGS: Mapping[str, NetworkConfig] = MappingProxyType(
     {
         "mainnet": NetworkConfig(
@@ -529,15 +562,16 @@ _CONFIGS: Mapping[str, NetworkConfig] = MappingProxyType(
             label="Testnet",
             funds=Funds.PLAY,
             has_faucet=True,
-            published_rest_base="https://api.testnet.nexus.xyz/v1",
-            ws_market_data_url="wss://api.testnet.nexus.xyz/stream",
-            ws_authenticated_url="wss://api.testnet.nexus.xyz/ws",
+            published_rest_base="https://api.testnet.nexus.xyz/indexer",
+            ws_market_data_url="wss://api.testnet.nexus.xyz/indexer/stream",
+            ws_authenticated_url="wss://api.testnet.nexus.xyz/indexer/ws",
             signing_domain=SigningDomain(),
-            base_url="https://exchange.nexus.xyz/api/exchange",
-            # The /api/v1 surface is mounted UNDER the gateway prefix on this
-            # deploy, so this is the gateway base too — not the host root, which
-            # 404s (ENG-10063). Measured; pinned by test_client.py.
-            direct_base_url="https://exchange.nexus.xyz/api/exchange",
+            base_url="https://api.testnet.nexus.xyz/indexer",
+            # The /api/v1 surface is mounted UNDER the route prefix on this
+            # deploy, so this is the same base — not the host root, which 404s
+            # (the same topology the retired gateway had, ENG-10063). Measured;
+            # pinned by test_client.py.
+            direct_base_url="https://api.testnet.nexus.xyz/indexer",
         ),
         "local": NetworkConfig(
             label="Local",
@@ -625,7 +659,7 @@ class Network(str, Enum):
 
     @property
     def base_url(self) -> str | None:
-        """Legacy gateway base, or ``None`` when none is published yet."""
+        """Base the client sends to, or ``None`` when none is published yet."""
         return self.config.base_url
 
     @property
