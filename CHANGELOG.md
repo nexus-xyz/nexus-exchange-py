@@ -15,6 +15,21 @@ future release below it. To improve the wording of a release, edit
 below `0.4.0` predate this and follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.1](https://github.com/nexus-xyz/nexus-exchange-py/compare/v0.5.0...v0.5.1) (2026-09-11)
+
+
+### Bug Fixes
+
+* **ci:** approve the release PR's own CI run instead of dispatching a duplicate (ENG-13320) ([#77](https://github.com/nexus-xyz/nexus-exchange-py/issues/77)) ([2434559](https://github.com/nexus-xyz/nexus-exchange-py/commit/243455992f8887ce742c0646984d8be2fffbf1e7))
+* **ci:** stop every release from opening a phantom release PR (ENG-13319) ([#76](https://github.com/nexus-xyz/nexus-exchange-py/issues/76)) ([8ccedcd](https://github.com/nexus-xyz/nexus-exchange-py/commit/8ccedcd9f0120513cb181e5c2f13609d17757bfa))
+* **client:** stop signing the public bridge-assets read; check credentials against the spec (ENG-13303) ([#78](https://github.com/nexus-xyz/nexus-exchange-py/issues/78)) ([446fc87](https://github.com/nexus-xyz/nexus-exchange-py/commit/446fc876f96c52f9efec9d2c6fe30574db08ae4b))
+* **networks:** point testnet at its durable host, api.testnet.nexus.xyz/indexer (ENG-8868) ([#81](https://github.com/nexus-xyz/nexus-exchange-py/issues/81)) ([5d1c886](https://github.com/nexus-xyz/nexus-exchange-py/commit/5d1c886bd3a1b18b96eb9d9127e0d04dc1ce68a7))
+
+
+### Documentation
+
+* the bare testnet host serves /api/v1, so a trimmed base half-works (ENG-15256) ([#83](https://github.com/nexus-xyz/nexus-exchange-py/issues/83)) ([bf11423](https://github.com/nexus-xyz/nexus-exchange-py/commit/bf11423c2bd6b0b713b7bf169513cc52e6a79ecc))
+
 ## [0.5.0](https://github.com/nexus-xyz/nexus-exchange-py/compare/v0.4.0...v0.5.0) (2026-08-28)
 
 
