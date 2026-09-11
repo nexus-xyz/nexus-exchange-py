@@ -124,8 +124,13 @@ way, so neither WS base is dialled on your behalf. What the client actually
 sends to is `base_url` / `direct_base_url`.
 
 Note the `/indexer` in testnet's bases. It is a **route prefix the deployment
-mounts the service under**, not part of the API contract — the bare host answers
-404. Copy the base whole rather than trimming it to the hostname.
+mounts the service under**, not part of the API contract. Copy the base whole
+rather than trimming it to the hostname — and note that trimming does *not*
+fail cleanly. The host serves `/api/v1/*` unprefixed as well, so a trimmed
+`direct_base_url` keeps working while everything sent relative to `base_url`
+(`GET /markets`, `GET /orders/{id}`, deposits, keys/agents, WS tokens) `404`s.
+The HMAC signature covers the logical path, not the base, so it verifies either
+way and nothing surfaces the mistake at the auth layer.
 
 Three things worth knowing before you pick one:
 
@@ -255,9 +260,11 @@ host root. Production measurement says otherwise ([rs#131][rs131]):
 `…/api/exchange/api/v1/markets/summary` answers `200 application/json` while
 `…/api/v1/markets/summary` answers `404 text/html`, and junk segments under the
 gateway prefix answer a JSON `NOT_FOUND` — so the gateway mounts `/api/v1`
-specifically rather than routing permissively. A direct indexer host plausibly
-serves it at the root too, so both are real and which applies is a property of
-the URL, not something this client can assert. The rejection made the working
+specifically rather than routing permissively. A direct indexer host does
+serve it at the root too — `/api/v1/markets/summary` on
+`api.testnet.nexus.xyz` answers `200 application/json` (measured 2026-09-11) —
+so both are real and which applies is a property of the URL, not something this
+client can assert. The rejection made the working
 configuration unreachable on the deploy targeted by default, so it is gone
 ([#60][pr60]).
 
