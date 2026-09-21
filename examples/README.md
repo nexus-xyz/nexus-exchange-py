@@ -58,6 +58,7 @@ looking for a flow that is already here.
 | `single_ticker.py` | none | `ticker` (one market) |
 | `public_market_data.py` | none | `markets`, `ticker`, `orderbook`, `trades`, `candles` |
 | `ccxt_market_data.py` | none | CCXT adapter: `load_markets`, `fetch_ticker`, `fetch_order_book`, `fetch_trades`, `fetch_ohlcv` |
+| `ws_trades.py` | none | `GET /ws` (`trades` channel; needs the `ws` extra) |
 | `account_and_positions.py` | HMAC | `account`, `positions`, `account/rate-limit` |
 | `place_and_cancel_order.py` | HMAC | `POST /orders`, `GET /orders/{id}`, `GET /orders`, `DELETE /orders/{id}` |
 | `fills_and_withdrawals.py` | HMAC | `fills`, `withdrawals` |

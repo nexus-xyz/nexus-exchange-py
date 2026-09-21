@@ -136,12 +136,19 @@ HTTP_SENDING_CALLS = frozenset(
 CODE_ONLY_OPS: set[tuple[str, str]] = set()
 
 # Listed in endpoints.txt but reached WITHOUT a `_request` call, so no AST walk can
-# see a caller. Empty today, and deliberately kept as a named concept: rs uses it
-# for the WebSocket upgrade `GET /ws`, which its streaming client opens directly.
-# This SDK mints a token over REST (`POST /ws-tokens`) and opens no socket itself,
-# so nothing qualifies yet. An entry here that the manifest does not list is stale
-# and fails.
-NON_REST_TARGETS: set[tuple[str, str]] = set()
+# see a caller. An entry here that the manifest does not list is stale and fails.
+#
+# `GET /ws` is the WebSocket upgrade. `ws.py`'s WsClient opens the socket directly
+# through the `websockets` library, so there is no `_request` call to find and there
+# should not be — the operation is real, listed, and exercised by tests/test_ws.py,
+# but it never travels the REST path this walk inspects. rs carries the identical
+# exemption for the identical reason.
+#
+# This comment previously read "nothing qualifies yet", which was true only while
+# the ws client was missing from main: it was written, merged into a feature branch
+# rather than main (ENG-4045), and never landed. Restoring it is what makes this set
+# non-empty for the first time.
+NON_REST_TARGETS: set[tuple[str, str]] = {("GET", "/ws")}
 
 # Spec operations this SDK deliberately does not implement are *not* enumerated —
 # they are reported as an informational coverage gap. The Python SDK trails the Rust
