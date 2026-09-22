@@ -83,6 +83,7 @@ GET /agents
 DELETE /agents/{address}
 POST /ws-tokens
 POST /ws/token
+GET /ws
 PUT /admin/tiers
 GET /admin/tiers
 DELETE /admin/tiers/{address}

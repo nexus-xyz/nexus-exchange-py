@@ -64,7 +64,7 @@ from the environment — no secrets in source).
 | Cursor pagination — `cursor` + `X-Next-Cursor` on all five paginated GETs | ✅ implemented |
 | Create API key — `POST /keys` | ✅ implemented (session-token authenticated: pass `sign_in().token` to `create_api_key`) |
 | Venue / market info — `GET /stats`, `/stats/history`, `/status`, `/markets/{id}/risk-params`, `/markets/{id}/funding-samples` | ✅ implemented |
-| WebSocket streaming — the `GET /ws` and `GET /stream` upgrades themselves | ❌ not yet (mint the token with `create_ws_token`, then bring your own socket) |
+| WebSocket streaming — `GET /ws` (async `WsClient`, multiplexed, auto-resume) | ✅ implemented (`pip install nexus-exchange[ws]`) |
 | Rate-limit-aware retry (`429` / `Retry-After`, token bucket) | ❌ not yet |
 | OAuth auth | ❌ not yet |
 
