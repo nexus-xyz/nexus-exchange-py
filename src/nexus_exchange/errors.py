@@ -163,7 +163,43 @@ class PaginationError(NexusExchangeError):
 
 
 class MissingCredentialsError(NexusExchangeError):
-    """A signed request was attempted without ``api_key`` / ``api_secret``."""
+    """A signed request was attempted without a request credential.
+
+    The client holds neither ``api_key`` / ``api_secret`` (HMAC) nor an
+    ``agent`` key (:class:`~nexus_exchange.AgentSigner`).
+    """
+
+
+class AgentKeyRefusedError(MissingCredentialsError):
+    """An agent-key client attempted an operation agent keys may never perform.
+
+    Agent keys are trade-only (spec ``agentAuth``, "What an agent key cannot
+    do"). The server refuses these with a ``403``; the SDK refuses them locally,
+    before signing, so an agent key never spends a request (or a nonce) on a
+    guaranteed refusal:
+
+    * **Withdrawals** — any non-read method on ``/withdrawals``,
+      ``/account/withdraw`` or ``/bridge/withdrawals`` (the server's
+      ``is_withdrawal_path``). ``code`` is ``AGENT_CANNOT_WITHDRAW``.
+    * **Agent management and the legacy WS token** — ``GET /agents``,
+      ``DELETE /agents/{address}`` and ``POST /ws-tokens``. ``code`` is
+      ``AGENT_KEY_FORBIDDEN``.
+
+    Use a client with the wallet's own HMAC key for these. Subclasses
+    :class:`MissingCredentialsError` because that is the fix: the operation
+    needs a credential this client does not hold. Terminal, never retryable.
+    """
+
+    def __init__(self, method: str, path: str, code: str) -> None:
+        self.method = method
+        self.path = path
+        #: The server's ``403`` code for the same refusal.
+        self.code = code
+        what = "withdraw" if code == "AGENT_CANNOT_WITHDRAW" else "call this operation"
+        super().__init__(
+            f"{method} {path}: an agent key cannot {what} (the server refuses it "
+            f"with 403 {code}); use a client holding the wallet's HMAC api_key/api_secret"
+        )
 
 
 class AuthError(NexusExchangeError):

@@ -1,0 +1,41 @@
+[
+  {
+    "private_key": "0x0101010101010101010101010101010101010101010101010101010101010101",
+    "method": "GET",
+    "path": "/account/summary",
+    "query": "",
+    "body": "",
+    "x-timestamp": "1776033900000",
+    "x-nonce": "1776033900000",
+    "canonical_string": "GET\n/account/summary\n\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n1776033900000\n1776033900000",
+    "digest": "0xe3e5ce99d3adbeeb18ab49b7e7b24b135689fc4912c9664f40bc4a3f1dfbc6a3",
+    "x-agent": "0x1a642f0e3c3af545e7acbd38b07251b3990914f1",
+    "x-signature": "0xd94b40dff9c3d0e0a649178b6eb3159d9a3522a1ccc66390b42a7a444b8e52c85f2d2a9d66e8a48ac5040d8e96f526d352b3b7a686634280b9192eb6c12a61b61b"
+  },
+  {
+    "private_key": "0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318",
+    "method": "post",
+    "path": "/orders",
+    "query": "",
+    "body": "{\"market_id\":\"BTC-USDX-PERP\",\"side\":\"Buy\",\"order_type\":\"Limit\",\"quantity\":\"0.1\",\"price\":\"50000\"}",
+    "x-timestamp": "1776033900123",
+    "x-nonce": "42",
+    "canonical_string": "POST\n/orders\n\n59ddf9017ca0eb5f8802afd1a2d1584b2d93b0260a0fcd62a1b94b3ff92b332c\n1776033900123\n42",
+    "digest": "0xe27ade6101c417d2c393abfce8f35b6e1551cf0ce5c50dfbe12f8d6f399ffc35",
+    "x-agent": "0x2c7536e3605d9c16a7a3d7b1898e529396a65c23",
+    "x-signature": "0xeef09105834062da10d208be38311995d04cbc5e05043b89e7cbe6d4497d11b51f61729639551a8cfb6ea3e4fe0765afeba7bf3b5f5e09f63bc095c89005b61d1c"
+  },
+  {
+    "private_key": "0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318",
+    "method": "DELETE",
+    "path": "/orders",
+    "query": "market_id=BTC-USDX-PERP",
+    "body": "",
+    "x-timestamp": "1776033900456",
+    "x-nonce": "43",
+    "canonical_string": "DELETE\n/orders\nmarket_id=BTC-USDX-PERP\ne3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855\n1776033900456\n43",
+    "digest": "0x69159f66a03a9b6e3e3e4582ed8f497cdc47545641db9a010b4cb6efe1649fea",
+    "x-agent": "0x2c7536e3605d9c16a7a3d7b1898e529396a65c23",
+    "x-signature": "0x002554d4216daa303818dfcc5a15eb86940691e11ad6ab25a270916ec5a43a1a5eb4c18dd898aa3ebd099c1683337e3c545417c2b67a0d384f1d0355ffa807f91c"
+  }
+]

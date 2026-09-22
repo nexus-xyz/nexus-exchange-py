@@ -15,6 +15,7 @@ from .auth import (
     SIGN_IN_MESSAGE,
     AgentRegistered,
     AgentRegistration,
+    AgentSigner,
     EthSigner,
     LoginRequest,
     LoginResponse,
@@ -37,6 +38,7 @@ from .client import (
 )
 from .errors import (
     JURISDICTION_CODES,
+    AgentKeyRefusedError,
     ApiError,
     AuthError,
     DecodeError,
@@ -156,6 +158,7 @@ __all__ = [
     "AdlEvent",
     "AdlClosure",
     "EthSigner",
+    "AgentSigner",
     "LoginRequest",
     "AgentRegistration",
     "LoginResponse",
@@ -206,6 +209,7 @@ __all__ = [
     "AuthError",
     "TransportError",
     "MissingCredentialsError",
+    "AgentKeyRefusedError",
     "DecodeError",
     "PaginationError",
     "RestrictedJurisdictionError",
