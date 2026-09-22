@@ -13,8 +13,10 @@ from __future__ import annotations
 import hashlib
 import hmac
 import json
+import random
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
+from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
 from importlib import metadata
 from typing import Any
@@ -161,6 +163,39 @@ DEFAULT_TIMEOUT = 30.0
 #: over the full request path *including* this prefix (e.g. ``/api/v1/orders``)
 #: but excluding the base's own path, matching the server.
 API_V1_PREFIX = "/api/v1"
+
+#: Upper bound (seconds) on how long a server ``Retry-After`` can make the client
+#: sleep, so a hostile or bogus hint can't stall a caller for minutes.
+RETRY_AFTER_MAX_SECONDS = 60.0
+
+#: HTTP methods safe to retry automatically. GET only: a retried write could
+#: double-submit (e.g. place two orders) if the first attempt's response was
+#: lost in transit, so mutating verbs are never auto-retried. Mirrors the Rust
+#: SDK (signed helpers time out per attempt but do not auto-retry) and the TS SDK.
+_IDEMPOTENT_METHODS = frozenset({"GET"})
+
+
+@dataclass(frozen=True)
+class RetryConfig:
+    """Automatic-retry policy for transient failures on idempotent requests.
+
+    Mirrors the Rust SDK's ``RetryConfig`` defaults. Retries apply only to
+    ``GET`` requests that fail with a transport error, a 5xx/408, or a 429; the
+    delay before retry ``n`` is ``min(min_delay * factor**n, max_delay)`` plus
+    jitter, and a 429's ``Retry-After`` (clamped to
+    :data:`RETRY_AFTER_MAX_SECONDS`) raises the floor.
+
+    Retries are **off by default**: a :class:`Client` built without ``retry``
+    makes exactly one attempt per request. Opt in with ``retry=RetryConfig()``
+    for the defaults below, or tune the fields. ``max_retries=0`` also disables
+    retries.
+    """
+
+    max_retries: int = 3
+    min_delay: float = 0.1
+    max_delay: float = 5.0
+    factor: float = 2.0
+    jitter: bool = True
 
 
 #: Upper bound the spec puts on the portfolio-history ``limit`` parameter (the
@@ -459,6 +494,7 @@ class Client:
         api_version: str | None = None,
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.Client | None = None,
+        retry: RetryConfig | None = None,
     ) -> None:
         config = self._resolve_config(network, base_url, direct_base_url)
         self._network = config
@@ -486,8 +522,16 @@ class Client:
             "user-agent": DEFAULT_USER_AGENT,
             "x-nexus-api-version": self._api_version,
         }
+        # Off unless the caller opts in: one attempt per request by default.
+        self._retry = retry if retry is not None else RetryConfig(max_retries=0)
         self._owns_http = http_client is None
         self._http = http_client or httpx.Client(timeout=timeout)
+        # Injectable so tests record backoff delays, control jitter, and advance
+        # the signing clock without real waiting or nondeterminism; production
+        # uses the real clock/RNG.
+        self._sleep: Callable[[float], None] = time.sleep
+        self._rand: Callable[[], float] = random.random
+        self._now_ms: Callable[[], int] = lambda: int(time.time() * 1000)
 
     @staticmethod
     def _resolve_config(
@@ -1782,7 +1826,7 @@ class Client:
     def _sign(self, method: str, path: str, query: str, body: bytes) -> dict[str, str]:
         if not self._api_key or not self._api_secret:
             raise MissingCredentialsError("signed request requires api_key and api_secret")
-        ts = str(int(time.time() * 1000))
+        ts = str(self._now_ms())
         body_hash = hashlib.sha256(body).hexdigest()
         # Canonical string the indexer verifies (auth.rs::verify_hmac):
         #   <ts>\n<METHOD>\n<path>\n<query>\n<sha256hex(body)>
@@ -1791,6 +1835,31 @@ class Client:
             bytes.fromhex(self._api_secret), canonical.encode(), hashlib.sha256
         ).hexdigest()
         return {"x-api-key": self._api_key, "x-timestamp": ts, "x-signature": signature}
+
+    def _backoff_delay(self, attempt: int) -> float:
+        """Exponential backoff (seconds) before retry ``attempt`` (0-indexed).
+
+        ``min(min_delay * factor**attempt, max_delay)``, then full jitter —
+        uniform in ``[0, base]`` — so many clients failing at once don't
+        synchronize into a thundering herd.
+        """
+        base = min(self._retry.min_delay * (self._retry.factor**attempt), self._retry.max_delay)
+        return base * self._rand() if self._retry.jitter else base
+
+    @staticmethod
+    def _parse_retry_after(value: str | None) -> int | None:
+        """Parse a ``Retry-After`` header (integer seconds) to milliseconds.
+
+        Only the integer-seconds form is honored — the server sends that; an
+        HTTP-date form is ignored rather than mis-parsed.
+        """
+        if not value:
+            return None
+        try:
+            secs = int(value.strip())
+        except ValueError:
+            return None
+        return max(0, secs) * 1000
 
     def _send(
         self,
@@ -1820,11 +1889,6 @@ class Client:
         full_path = f"{API_V1_PREFIX}{path}" if direct else path
 
         body_bytes = b"" if body is None else json.dumps(body).encode()
-        # Seed from the defaults (User-Agent + X-Nexus-Api-Version) so both ride
-        # along on every request; copy so per-call headers stay local.
-        headers: dict[str, str] = dict(self._default_headers)
-        if body is not None:
-            headers["content-type"] = "application/json"
         # HMAC and session-bearer are alternative credentials for the same
         # request, never both. `POST /keys` is the single operation the pinned
         # spec puts behind `bearerAuth`; sending an HMAC signature alongside the
@@ -1834,10 +1898,6 @@ class Client:
         # both — so this guards the plumbing, not the caller.
         if signed and bearer is not None:
             raise ValueError("a request cannot be both HMAC-signed and bearer-authenticated")
-        if signed:
-            headers.update(self._sign(method, full_path, query, body_bytes))
-        elif bearer is not None:
-            headers["authorization"] = f"Bearer {bearer}"
 
         # Build the URL by hand so the signed query matches the sent query byte
         # for byte (no client-side re-encoding).
@@ -1845,17 +1905,41 @@ class Client:
         if query:
             url = f"{url}?{query}"
 
-        try:
-            resp = self._http.request(
-                method,
-                url,
-                headers=headers,
-                content=body_bytes if body is not None else None,
-            )
-        except httpx.HTTPError as exc:
-            raise TransportError(str(exc)) from exc
+        # Only idempotent (GET) requests are auto-retried (ENG-5295); a retried
+        # write could double-submit if the first attempt's response was lost in
+        # transit, so POST/PATCH/PUT/DELETE always surface the first failure.
+        retryable = method.upper() in _IDEMPOTENT_METHODS
+        attempt = 0
+        while True:
+            # Seed from the defaults (User-Agent + X-Nexus-Api-Version) so both
+            # ride along on every request; copy so per-call headers stay local.
+            # Rebuilt every attempt: the HMAC timestamp must be fresh, or a retry
+            # after backoff would present a stale (server-rejected) signature.
+            headers: dict[str, str] = dict(self._default_headers)
+            if body is not None:
+                headers["content-type"] = "application/json"
+            if signed:
+                headers.update(self._sign(method, full_path, query, body_bytes))
+            elif bearer is not None:
+                headers["authorization"] = f"Bearer {bearer}"
 
-        if resp.status_code >= 400:
+            try:
+                resp = self._http.request(
+                    method,
+                    url,
+                    headers=headers,
+                    content=body_bytes if body is not None else None,
+                )
+            except httpx.HTTPError as exc:
+                if retryable and attempt < self._retry.max_retries:
+                    self._sleep(self._backoff_delay(attempt))
+                    attempt += 1
+                    continue
+                raise TransportError(str(exc)) from exc
+
+            if resp.status_code < 400:
+                return resp
+
             code: str | None = None
             message: str | None = None
             try:
@@ -1893,9 +1977,26 @@ class Client:
                     block_reason=block_reason,
                 )
 
-            raise ApiError(resp.status_code, resp.text[:2000], code=code, message=message)
+            retry_after_ms = self._parse_retry_after(resp.headers.get("retry-after"))
+            status = resp.status_code
+            is_transient = status >= 500 or status in (408, 429)
+            if retryable and is_transient and attempt < self._retry.max_retries:
+                delay = self._backoff_delay(attempt)
+                # A 429's Retry-After raises the floor (clamped so a bogus hint
+                # can't stall the caller); backoff still applies to 5xx/408.
+                if status == 429 and retry_after_ms is not None:
+                    delay = max(delay, min(retry_after_ms / 1000.0, RETRY_AFTER_MAX_SECONDS))
+                self._sleep(delay)
+                attempt += 1
+                continue
 
-        return resp
+            raise ApiError(
+                status,
+                resp.text[:2000],
+                code=code,
+                message=message,
+                retry_after_ms=retry_after_ms,
+            )
 
     def _request(
         self,

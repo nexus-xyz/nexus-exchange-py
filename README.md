@@ -65,7 +65,7 @@ from the environment — no secrets in source).
 | Create API key — `POST /keys` | ✅ implemented (session-token authenticated: pass `sign_in().token` to `create_api_key`) |
 | Venue / market info — `GET /stats`, `/stats/history`, `/status`, `/markets/{id}/risk-params`, `/markets/{id}/funding-samples` | ✅ implemented |
 | WebSocket streaming — `GET /ws` (async `WsClient`, multiplexed, auto-resume) | ✅ implemented (`pip install nexus-exchange[ws]`) |
-| Rate-limit-aware retry (`429` / `Retry-After`, token bucket) | ❌ not yet |
+| Retry on transient `GET` failures (5xx / 408 / `429`, honours `Retry-After`) | ✅ implemented, **off by default** — opt in with `Client(retry=RetryConfig())`; no client-side token bucket yet |
 | OAuth auth | ❌ not yet |
 
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
