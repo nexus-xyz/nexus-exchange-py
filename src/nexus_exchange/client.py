@@ -183,8 +183,12 @@ class RetryConfig:
     ``GET`` requests that fail with a transport error, a 5xx/408, or a 429; the
     delay before retry ``n`` is ``min(min_delay * factor**n, max_delay)`` plus
     jitter, and a 429's ``Retry-After`` (clamped to
-    :data:`RETRY_AFTER_MAX_SECONDS`) raises the floor. Set ``max_retries=0`` to
-    disable retries entirely.
+    :data:`RETRY_AFTER_MAX_SECONDS`) raises the floor.
+
+    Retries are **off by default**: a :class:`Client` built without ``retry``
+    makes exactly one attempt per request. Opt in with ``retry=RetryConfig()``
+    for the defaults below, or tune the fields. ``max_retries=0`` also disables
+    retries.
     """
 
     max_retries: int = 3
@@ -518,7 +522,8 @@ class Client:
             "user-agent": DEFAULT_USER_AGENT,
             "x-nexus-api-version": self._api_version,
         }
-        self._retry = retry or RetryConfig()
+        # Off unless the caller opts in: one attempt per request by default.
+        self._retry = retry if retry is not None else RetryConfig(max_retries=0)
         self._owns_http = http_client is None
         self._http = http_client or httpx.Client(timeout=timeout)
         # Injectable so tests record backoff delays, control jitter, and advance

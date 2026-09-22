@@ -11,7 +11,6 @@ from nexus_exchange import (
     MissingCredentialsError,
     Network,
     OrderRequest,
-    RetryConfig,
     TransportError,
 )
 
@@ -175,10 +174,8 @@ def test_order_request_serializes_reduce_only() -> None:
 def test_transport_error_wraps_httpx_error(httpx_mock) -> None:
     # A network-layer failure surfaces as the SDK's TransportError, not a raw
     # httpx exception, so callers catch one error hierarchy.
-    # Retries off: this pins the error mapping for one failure; retry
-    # exhaustion on a GET is covered in tests/test_retry.py (ENG-5295).
     httpx_mock.add_exception(httpx.ConnectError("connection refused"))
-    with Client(Network.LOCAL, retry=RetryConfig(max_retries=0)) as client:
+    with Client(Network.LOCAL) as client:
         with pytest.raises(TransportError):
             client.fetch_markets()
 
@@ -197,9 +194,8 @@ def test_no_content_response_decodes_to_none(httpx_mock) -> None:
 def test_non_json_error_body_still_raises_api_error(httpx_mock) -> None:
     # A 5xx with a plain-text (non-JSON) body must still raise ApiError with the
     # status, leaving code/message None rather than failing to parse the envelope.
-    # Retries off: this pins the error mapping for one response (ENG-5295).
     httpx_mock.add_response(status_code=502, text="upstream down")
-    with Client(Network.LOCAL, retry=RetryConfig(max_retries=0)) as client:
+    with Client(Network.LOCAL) as client:
         with pytest.raises(ApiError) as excinfo:
             client.fetch_markets()
     assert excinfo.value.status == 502

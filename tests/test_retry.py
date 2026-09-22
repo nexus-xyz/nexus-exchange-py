@@ -89,6 +89,15 @@ def test_gives_up_after_max_retries(httpx_mock) -> None:
     assert len(httpx_mock.get_requests()) == 3, "initial + 2 retries"
 
 
+def test_retries_are_off_by_default(httpx_mock) -> None:
+    # A Client built without ``retry`` makes exactly one attempt.
+    httpx_mock.add_response(url=_SUMMARY_URL, status_code=503)
+    with Client(Network.LOCAL) as client:
+        with pytest.raises(ApiError):
+            client.fetch_market_summaries()
+    assert len(httpx_mock.get_requests()) == 1
+
+
 def test_max_retries_zero_disables_retries(httpx_mock) -> None:
     httpx_mock.add_response(url=_SUMMARY_URL, status_code=503)
     delays: list[float] = []

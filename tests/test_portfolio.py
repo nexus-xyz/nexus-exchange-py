@@ -45,7 +45,6 @@ from nexus_exchange import (
     PortfolioHistory,
     PortfolioWindow,
     Position,
-    RetryConfig,
 )
 
 _SECRET = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
@@ -58,14 +57,6 @@ _HISTORY_URL = f"{_BASE}/account/portfolio-history"
 
 def _authed() -> Client:
     return Client(Network.LOCAL, api_key="nx_test", api_secret=_SECRET)
-
-
-def _authed_no_retry() -> Client:
-    # A 5xx on a GET is auto-retried (ENG-5295); the fail-closed tests pin what
-    # the caller sees for one failed response, so they take retries off.
-    return Client(
-        Network.LOCAL, api_key="nx_test", api_secret=_SECRET, retry=RetryConfig(max_retries=0)
-    )
 
 
 # The /positions example payload from the v0.7.2 spec, verbatim.
@@ -304,7 +295,7 @@ def test_fetch_account_state_fails_closed_on_502(httpx_mock) -> None:
         status_code=502,
         json={"code": "authoritative_margin_unavailable"},
     )
-    with _authed_no_retry() as client, pytest.raises(ApiError) as excinfo:
+    with _authed() as client, pytest.raises(ApiError) as excinfo:
         client.fetch_account_state()
     assert excinfo.value.status == 502
     assert excinfo.value.code == "authoritative_margin_unavailable"
@@ -365,7 +356,7 @@ def test_fetch_account_summary_fails_closed_on_502(httpx_mock) -> None:
         status_code=502,
         json={"code": "authoritative_margin_unavailable"},
     )
-    with _authed_no_retry() as client, pytest.raises(ApiError) as excinfo:
+    with _authed() as client, pytest.raises(ApiError) as excinfo:
         client.fetch_account_summary()
     assert excinfo.value.status == 502
     assert excinfo.value.code == "authoritative_margin_unavailable"
