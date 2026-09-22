@@ -14,6 +14,7 @@ import hashlib
 import hmac
 import json
 import random
+import re
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
@@ -25,9 +26,10 @@ from urllib.parse import quote, urlencode
 import httpx
 
 from ._parse import to_dict_list
-from .auth import AgentRegistered, AgentRegistration, EthSigner, LoginResponse
+from .auth import AgentRegistered, AgentRegistration, AgentSigner, EthSigner, LoginResponse
 from .errors import (
     JURISDICTION_CODES,
+    AgentKeyRefusedError,
     ApiError,
     MissingCredentialsError,
     RestrictedJurisdictionError,
@@ -173,6 +175,40 @@ RETRY_AFTER_MAX_SECONDS = 60.0
 #: lost in transit, so mutating verbs are never auto-retried. Mirrors the Rust
 #: SDK (signed helpers time out per attempt but do not auto-retry) and the TS SDK.
 _IDEMPOTENT_METHODS = frozenset({"GET"})
+
+#: Methods the server treats as reads for agent keys: they never hit the
+#: withdrawal wall and never consume a nonce.
+_READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+
+#: Balance-reducing routes an agent key can never reach, whatever the method
+#: (other than a read). A port of the server's
+#: ``accounts::withdrawal_guard::is_withdrawal_path``, matched after stripping
+#: the ``/api/v1`` prefix and one trailing slash, exactly as it does. The SDK
+#: has no method for any of these today; the table is here so that one added
+#: later is refused for agent keys without anyone remembering to.
+_AGENT_WITHDRAWAL_PATHS = frozenset({"/withdrawals", "/account/withdraw", "/bridge/withdrawals"})
+
+#: Non-withdrawal operations the spec leaves off ``agentAuth`` and the server
+#: refuses for agent keys with ``403 AGENT_KEY_FORBIDDEN``: agent management
+#: and the HMAC-only legacy WS token. ``(METHOD, path regex)``.
+_AGENT_FORBIDDEN_OPS = (
+    ("GET", re.compile(r"/agents")),
+    ("DELETE", re.compile(r"/agents/[^/]+")),
+    ("POST", re.compile(r"/ws-tokens")),
+)
+
+
+def _agent_refusal(method: str, full_path: str) -> str | None:
+    """The server's ``403`` code if an agent key may not send this, else ``None``."""
+    method = method.upper()
+    path = full_path.removeprefix(API_V1_PREFIX) or "/"
+    path = path.removesuffix("/") or "/"
+    if method not in _READ_METHODS and path in _AGENT_WITHDRAWAL_PATHS:
+        return "AGENT_CANNOT_WITHDRAW"
+    for op_method, pattern in _AGENT_FORBIDDEN_OPS:
+        if method == op_method and pattern.fullmatch(path):
+            return "AGENT_KEY_FORBIDDEN"
+    return None
 
 
 @dataclass(frozen=True)
@@ -418,7 +454,9 @@ class Client:
     """Client for the Nexus Exchange REST API.
 
     Public market-data methods need no credentials. Pass ``api_key`` +
-    ``api_secret`` (HMAC) to sign requests. Note the public gateway proxies
+    ``api_secret`` (HMAC), **or** ``agent`` (a registered
+    :class:`~nexus_exchange.AgentSigner`), to sign requests — one request
+    credential per client, never both (see ``agent`` below). Note the public gateway proxies
     signed calls to the *site* account; for per-account auth point ``base_url``
     at a direct gateway (e.g. ``Network.LOCAL``). See the README.
 
@@ -477,6 +515,24 @@ class Client:
     which is also mainnet's required override) keeps that network's funds
     semantics because the caller has declared them. Both stay.
 
+    **Agent keys** (``agent=``). Every ``signed`` request is then sent with the
+    ``agentAuth`` headers (``x-agent`` / ``x-timestamp`` / ``x-nonce`` /
+    ``x-signature``) instead of HMAC. Combining ``agent`` with ``api_key`` or
+    ``api_secret`` raises :class:`ValueError`: the two schemes share the
+    ``x-timestamp`` and ``x-signature`` header names, and the server tries the
+    agent first and falls back to HMAC, so a request carrying both would
+    present two identities and leave the server to pick. Pick one per client;
+    use two clients to hold both. The session bearer token is unaffected —
+    :meth:`create_api_key` sends only ``Authorization: Bearer`` whichever
+    request credential the client holds.
+
+    Agent keys are trade-only: an agent client refuses withdrawals, agent
+    management (:meth:`fetch_agents`, :meth:`revoke_agent`) and
+    :meth:`mint_web_socket_token` locally with
+    :class:`~nexus_exchange.AgentKeyRefusedError`, before signing. Writes from
+    one agent key in flight concurrently can be refused as nonce replays
+    (ENG-17010); see :class:`~nexus_exchange.AgentSigner`.
+
     Usable as a context manager::
 
         with Client() as client:
@@ -495,7 +551,20 @@ class Client:
         timeout: float = DEFAULT_TIMEOUT,
         http_client: httpx.Client | None = None,
         retry: RetryConfig | None = None,
+        agent: AgentSigner | None = None,
     ) -> None:
+        if agent is not None:
+            if not isinstance(agent, AgentSigner):
+                raise TypeError(
+                    f"agent must be an AgentSigner (got {type(agent).__name__}); "
+                    f"build one with AgentSigner.from_hex(...)"
+                )
+            if api_key is not None or api_secret is not None:
+                raise ValueError(
+                    "pass either api_key/api_secret (HMAC) or agent, not both: a request "
+                    "carries one credential, and the two schemes share the x-timestamp "
+                    "and x-signature headers. Use a separate Client for each."
+                )
         config = self._resolve_config(network, base_url, direct_base_url)
         self._network = config
         # A caller-supplied base_url overrides the config default; direct_base_url
@@ -510,6 +579,7 @@ class Client:
         )
         self._api_key = api_key
         self._api_secret = api_secret
+        self._agent = agent
         # Spec tag advertised on every request. Defaults to the tag the package
         # is pinned to; overridable so a caller can target a specific contract.
         # A blank / whitespace-only override falls back to the default rather
@@ -656,7 +726,13 @@ class Client:
 
     @property
     def has_credentials(self) -> bool:
-        return bool(self._api_key and self._api_secret)
+        """Whether this client can send ``signed`` requests (HMAC or agent key)."""
+        return self._agent is not None or bool(self._api_key and self._api_secret)
+
+    @property
+    def agent(self) -> AgentSigner | None:
+        """The agent key signing this client's requests, or ``None`` for HMAC/keyless."""
+        return self._agent
 
     @property
     def network(self) -> NetworkConfig:
@@ -1766,12 +1842,20 @@ class Client:
         return self._request("DELETE", f"/keys/{quote(key_id, safe='')}", signed=True)
 
     def fetch_agents(self) -> list[AgentInfo]:
-        """``GET /agents`` — non-expired agent keys. Requires credentials."""
+        """``GET /agents`` — non-expired agent keys. Requires HMAC credentials.
+
+        Refused for an agent-key client (:class:`~nexus_exchange.AgentKeyRefusedError`):
+        an agent key cannot manage agent credentials.
+        """
         data = self._request("GET", "/agents", signed=True)
         return [AgentInfo.from_dict(a) for a in (data if isinstance(data, list) else [])]
 
     def revoke_agent(self, address: str) -> Any:
-        """``DELETE /agents/{address}`` — revoke an agent key. Requires credentials."""
+        """``DELETE /agents/{address}`` — revoke an agent key. Requires HMAC credentials.
+
+        Refused for an agent-key client (:class:`~nexus_exchange.AgentKeyRefusedError`):
+        an agent key cannot revoke itself or any other agent.
+        """
         return self._request("DELETE", f"/agents/{quote(address, safe='')}", signed=True)
 
     def mint_web_socket_token(self) -> WsToken:
@@ -1782,6 +1866,9 @@ class Client:
         the public ``/stream`` socket, while the newer route also accepts
         registered agent keys and session tokens and binds the token to the
         account. Kept because it is still a published operation.
+
+        HMAC-only: refused for an agent-key client
+        (:class:`~nexus_exchange.AgentKeyRefusedError`) — use :meth:`create_ws_token`.
         """
         data = self._request("POST", "/ws-tokens", signed=True)
         return WsToken.from_dict(data if isinstance(data, dict) else {})
@@ -1824,8 +1911,17 @@ class Client:
 
     # -- request plumbing -------------------------------------------------
     def _sign(self, method: str, path: str, query: str, body: bytes) -> dict[str, str]:
+        """Auth headers for one attempt of a ``signed`` request.
+
+        Called once per attempt, so every retry gets a fresh timestamp — and,
+        for an agent key, a fresh nonce.
+        """
+        if self._agent is not None:
+            return self._agent.headers(method, path, query, body, self._now_ms())
         if not self._api_key or not self._api_secret:
-            raise MissingCredentialsError("signed request requires api_key and api_secret")
+            raise MissingCredentialsError(
+                "signed request requires api_key and api_secret, or an agent key"
+            )
         ts = str(self._now_ms())
         body_hash = hashlib.sha256(body).hexdigest()
         # Canonical string the indexer verifies (auth.rs::verify_hmac):
@@ -1898,6 +1994,12 @@ class Client:
         # both — so this guards the plumbing, not the caller.
         if signed and bearer is not None:
             raise ValueError("a request cannot be both HMAC-signed and bearer-authenticated")
+        # Agent keys are trade-only. Refuse what the server would 403 before
+        # signing, so a refused call never consumes a nonce.
+        if signed and self._agent is not None:
+            refusal = _agent_refusal(method, full_path)
+            if refusal is not None:
+                raise AgentKeyRefusedError(method.upper(), full_path, refusal)
 
         # Build the URL by hand so the signed query matches the sent query byte
         # for byte (no client-side re-encoding).
@@ -1915,6 +2017,7 @@ class Client:
             # ride along on every request; copy so per-call headers stay local.
             # Rebuilt every attempt: the HMAC timestamp must be fresh, or a retry
             # after backoff would present a stale (server-rejected) signature.
+            # An agent key also issues a fresh nonce per attempt.
             headers: dict[str, str] = dict(self._default_headers)
             if body is not None:
                 headers["content-type"] = "application/json"

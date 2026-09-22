@@ -51,6 +51,7 @@ from the environment — no secrets in source).
 | ADL events — `GET /markets/{id}/adl-events`, `/account/{addr}/adl-history` | ✅ implemented |
 | HMAC request signing (the plumbing for authed calls) | ✅ implemented |
 | Wallet-signed auth — `sign_in` (EIP-191) + `register_agent` (EIP-712) | ✅ implemented |
+| Agent-key request signing — `x-agent` / `x-timestamp` / `x-nonce` / `x-signature` (`Client(agent=AgentSigner…)`) | ✅ implemented — trade-only; see [Agent-key request signing](#agent-key-request-signing) |
 | CCXT-compatible adapter — public market data | ✅ implemented |
 | Error taxonomy (terminal vs transient, incl. the jurisdiction `403`) | ✅ implemented |
 | Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
@@ -349,6 +350,55 @@ with Client() as client:
     registered = client.register_agent(registration)
     print(registered.agent_address, registered.expires_at)
 ```
+
+### Agent-key request signing
+
+Once an agent key is registered, it signs each **request** itself, so the wallet
+key never has to be online. Install it on a client with `agent=`; every signed
+call then sends the four agent headers instead of HMAC:
+
+```python
+from nexus_exchange import AgentSigner, Client, Network
+
+agent = AgentSigner.from_hex("0x<agent-private-key>")  # register agent.address first
+
+with Client(Network.TESTNET, agent=agent) as client:
+    client.fetch_account_state()
+```
+
+The scheme (spec `agentAuth`): the canonical string is
+
+```text
+{METHOD}\n{path}\n{query}\n{sha256hex(body)}\n{timestamp_ms}\n{nonce}
+```
+
+(method **first** — not the HMAC order), hashed with raw `keccak256` and **no
+EIP-191 prefix**, signed low-S as `0x` + 65-byte `r||s||v` with `v ∈ {27, 28}`.
+`x-timestamp` must be within ±30 s of the server's clock. The signer's output is
+pinned byte-for-byte to the spec's `x-nexus-test-vectors`.
+
+- **One credential per client.** `agent=` together with `api_key` or `api_secret`
+  raises `ValueError`: the two schemes share the `x-timestamp` / `x-signature`
+  header names, and the server would pick one identity for you. Use two clients.
+  A session token passed to `create_api_key` is unaffected — that call sends only
+  the bearer.
+- **Nonces.** The signer issues `max(last + 1, timestamp_ms)` under a lock, so
+  nonces are unique and increasing per signer, across threads and restarts.
+  Writes must carry a strictly increasing nonce; reads don't consume one. Every
+  retry attempt (`retry=RetryConfig()`) is re-signed with a fresh timestamp and
+  nonce.
+- **Keep one write in flight per agent key.** Nonces increase when *issued*, not
+  when they *arrive*: two concurrent writes from one agent can reach the server
+  out of order, and the lower nonce is then refused as a replay — with the same
+  opaque `401` as a bad signature. The SDK does not queue writes for you (the fix
+  is being decided in ENG-17010). Serialize writes per agent, or register one
+  agent key per concurrent writer (and per process).
+- **Agent keys cannot withdraw.** They are trade-only. An agent client refuses
+  any withdrawal route (`/withdrawals`, `/account/withdraw`,
+  `/bridge/withdrawals`), agent management (`fetch_agents`, `revoke_agent`) and
+  the legacy `mint_web_socket_token` **locally**, with `AgentKeyRefusedError`,
+  before anything is signed or sent — the server would `403` them. Use an HMAC
+  client for those; `create_ws_token` accepts agent keys.
 
 ## Bridge
 

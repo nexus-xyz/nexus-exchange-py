@@ -1,4 +1,4 @@
-"""EVM wallet signing for the two wallet-authorized auth flows.
+"""EVM signing: the two wallet-authorized auth flows, and agent-key requests.
 
 This mirrors the Rust SDK's ``EthSigner`` (``nexus-exchange-rs``): a pure,
 deterministic, side-effect-free signer that produces the *signed request bodies*
@@ -14,6 +14,13 @@ The signer is ignorant of the network: it never sends anything, never stores a
 session, and carries no clock — nonces and expiries are caller-supplied. Hand
 the returned body to :class:`~nexus_exchange.Client` to send it.
 
+:class:`AgentSigner` is the third piece: once a wallet has registered an agent
+key, the agent signs each *request* itself with the ``x-agent`` /
+``x-timestamp`` / ``x-nonce`` / ``x-signature`` headers. Unlike
+:class:`EthSigner` it is stateful — it issues nonces — and it is installed on a
+:class:`~nexus_exchange.Client` (``Client(agent=...)``) rather than producing a
+body.
+
 This is a *library* pattern: the caller supplies the private key. There is no
 key-input prompt and no key file handling here — that is an application/CLI
 concern, deliberately out of scope.
@@ -27,6 +34,8 @@ cross-check the digests and signatures against the Rust SDK's pinned vectors.
 
 from __future__ import annotations
 
+import hashlib
+import threading
 from dataclasses import dataclass
 from typing import Any
 
@@ -41,6 +50,8 @@ from .errors import AuthError
 
 __all__ = [
     "EthSigner",
+    "AgentSigner",
+    "agent_canonical_string",
     "LoginRequest",
     "AgentRegistration",
     "LoginResponse",
@@ -361,6 +372,164 @@ class EthSigner:
             nonce=nonce,
             signature=_to_0x(signed.signature),
             label=label,
+        )
+
+
+#: Largest value an ``x-nonce`` / ``x-timestamp`` can carry: the server parses
+#: both as ``u64``.
+_U64_MAX = (1 << 64) - 1
+
+
+def agent_canonical_string(
+    method: str, path: str, query: str, body: bytes, timestamp_ms: int, nonce: int
+) -> str:
+    """The exact string an agent key signs (spec ``agentAuth``).
+
+    ``{METHOD}\\n{path}\\n{query}\\n{sha256hex(body)}\\n{timestamp_ms}\\n{nonce}``
+
+    Six LF-joined fields, no trailing newline. The method is upper-cased and
+    comes **first** — a different order from the HMAC scheme's
+    ``{ts}\\n{METHOD}\\n...``, so the two builders are not interchangeable. An
+    empty ``query`` stays in the string as an empty line. Matches the server's
+    ``exchange_sec_utils::signing::canonical_string``.
+    """
+    body_hash = hashlib.sha256(body).hexdigest()
+    return "\n".join([method.upper(), path, query, body_hash, str(timestamp_ms), str(nonce)])
+
+
+class AgentSigner:
+    """Signs REST requests with a registered agent key.
+
+    An agent key is a secp256k1 keypair a wallet delegates trading to with
+    ``POST /agents/register`` (:meth:`EthSigner.register_agent`, then
+    :meth:`Client.register_agent <nexus_exchange.Client.register_agent>`).
+    Register :attr:`address`, then install the signer on a client::
+
+        agent = AgentSigner.from_hex("0x<agent-private-key>")
+        client = Client(Network.TESTNET, agent=agent)
+
+    Every ``signed`` request that client sends then carries the four
+    ``agentAuth`` headers instead of the HMAC ones.
+
+    **Wire format** (a port of the server verifier, pinned by the spec's
+    ``x-nexus-test-vectors``): the digest is ``keccak256`` of
+    :func:`agent_canonical_string` with **no EIP-191 prefix** — a
+    ``personal_sign`` signature recovers to some other address and ``401`` s.
+    The signature is deterministic (RFC 6979), low-S, ``0x`` + 65-byte
+    ``r||s||v`` with ``v in {27, 28}``. ``x-timestamp`` must be within ±30 s of
+    the server clock.
+
+    **Nonces.** On writes the server requires each agent's nonce to be strictly
+    greater than the last one it accepted; reads parse the nonce but neither
+    check nor consume it. The signer issues ``max(last + 1, timestamp_ms)``
+    under a lock, so nonces are unique and increasing per signer even across
+    threads, and a restarted process resumes above the nonces it issued before.
+    Every attempt of a retried request is re-signed with a fresh timestamp and a
+    fresh nonce.
+
+    **Concurrent writes can still be refused as replays** (ENG-17010). Nonces
+    are increasing when *issued*, not when they *arrive*: two writes from one
+    signer in flight together can reach the server out of order, and the lower
+    nonce is then refused with the same opaque ``401`` as a bad signature. This
+    SDK does not serialize requests for you. Until ENG-17010 settles the fix,
+    keep **one write in flight per agent key**, or register a separate agent
+    key per concurrent writer. The same goes for sharing one agent key across
+    processes: their nonces can collide, so register one agent per process.
+
+    **Agent keys are trade-only.** They cannot withdraw or move funds off the
+    account by any route, and cannot manage agent credentials. A client holding
+    an agent key refuses those operations locally with
+    :class:`~nexus_exchange.AgentKeyRefusedError` rather than spending a request
+    on a guaranteed ``403`` — see :class:`~nexus_exchange.Client`.
+
+    The caller owns the key material; this class does not read it from the
+    environment, a file, or a prompt, and its ``repr`` shows only the address.
+    """
+
+    __slots__ = ("_key", "_address", "_lock", "_last_nonce")
+
+    def __init__(self, private_key: PrivateKey, address: bytes) -> None:
+        # Prefer AgentSigner.from_hex; see EthSigner.__init__.
+        self._key = private_key
+        self._address = address
+        self._lock = threading.Lock()
+        self._last_nonce = 0
+
+    @classmethod
+    def from_hex(cls, private_key: str) -> AgentSigner:
+        """Build a signer from the agent's 32-byte hex private key (``0x`` optional).
+
+        Raises :class:`~nexus_exchange.AuthError` if the key is not 32 bytes of
+        valid hex or is not a valid secp256k1 scalar.
+        """
+        wallet = EthSigner.from_hex(private_key)
+        return cls(wallet._key, wallet._address)
+
+    def __repr__(self) -> str:
+        return f"AgentSigner(address={self.address!r})"
+
+    @property
+    def address(self) -> str:
+        """The agent's address, lowercase ``0x`` hex — the value sent as
+        ``x-agent`` and the one to register with ``POST /agents/register``."""
+        return "0x" + self._address.hex()
+
+    def next_nonce(self, floor: int) -> int:
+        """Issue the next nonce, ``max(last + 1, floor)``. Thread-safe.
+
+        ``floor`` is the request's timestamp in unix ms. Concurrent callers
+        always receive distinct, strictly increasing values.
+        """
+        with self._lock:
+            nonce = max(self._last_nonce + 1, floor)
+            if nonce > _U64_MAX:
+                raise AuthError("agent nonce space exhausted (exceeds u64)")
+            self._last_nonce = nonce
+            return nonce
+
+    def sign_request(
+        self,
+        method: str,
+        path: str,
+        query: str,
+        body: bytes,
+        timestamp_ms: int,
+        nonce: int,
+    ) -> dict[str, str]:
+        """The four ``agentAuth`` headers for one request, with an explicit nonce.
+
+        Deterministic and stateless — it neither issues nor records a nonce —
+        which is what lets the known-answer tests pin it. :meth:`headers` is the
+        form the client uses.
+
+        ``path`` is the path the server authenticates (including ``/api/v1``
+        on the direct surface, excluding the base URL's own path); ``query`` is
+        the raw query string exactly as sent, without ``?``.
+        """
+        for name, value in (("timestamp_ms", timestamp_ms), ("nonce", nonce)):
+            if isinstance(value, bool) or not isinstance(value, int):
+                raise AuthError(f"{name} must be an integer")
+            if not 0 <= value <= _U64_MAX:
+                raise AuthError(f"{name} out of u64 range")
+        canonical = agent_canonical_string(method, path, query, body, timestamp_ms, nonce)
+        digest = keccak(text=canonical)
+        # Raw prehash, no EIP-191: see EthSigner.register_agent on why
+        # `unsafe_sign_hash` is the right call for a digest we built ourselves.
+        # eth_keys emits canonical low-S signatures, which the server requires.
+        signed = Account.unsafe_sign_hash(digest, self._key.to_bytes())
+        return {
+            "x-agent": self.address,
+            "x-timestamp": str(timestamp_ms),
+            "x-nonce": str(nonce),
+            "x-signature": _to_0x(signed.signature),
+        }
+
+    def headers(
+        self, method: str, path: str, query: str, body: bytes, timestamp_ms: int
+    ) -> dict[str, str]:
+        """Sign a request, issuing a fresh nonce floored at ``timestamp_ms``."""
+        return self.sign_request(
+            method, path, query, body, timestamp_ms, self.next_nonce(timestamp_ms)
         )
 
 
