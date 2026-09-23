@@ -60,6 +60,7 @@ looking for a flow that is already here.
 | `ccxt_market_data.py` | none | CCXT adapter: `load_markets`, `fetch_ticker`, `fetch_order_book`, `fetch_trades`, `fetch_ohlcv` |
 | `ws_trades.py` | none | `GET /ws` (`trades` channel; needs the `ws` extra) |
 | `account_and_positions.py` | HMAC | `account`, `positions`, `account/rate-limit` |
+| `conditional_orders.py` | none (offline) | builds `StopMarket` / `StopLimit` / `TakeProfitMarket` / `TakeProfitLimit` / `TrailingStop` requests and prints each `POST /orders` body; sends nothing |
 | `place_and_cancel_order.py` | HMAC | `POST /orders`, `GET /orders/{id}?market_id=`, `GET /orders`, `DELETE /orders/{id}?market_id=` |
 | `fills_and_withdrawals.py` | HMAC | `fills`, `withdrawals` |
 | `paginate_fills.py` | HMAC | `fills` (cursor pagination via `iter_my_trades` / `fetch_my_trades_page`) |
