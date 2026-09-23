@@ -1347,17 +1347,20 @@ class OrderRequest:
 
         ``trailing_offset_bps`` is the trailing trigger distance and
         ``limit_offset_bps`` the fire-time limit offset, both in basis points
-        (integers; 1 bp = 0.01%). Both must be integers > 0.
+        (integers; 1 bp = 0.01%). Both must be integers >= 0. The spec accepts
+        ``0`` for each: a ``trailing_offset_bps`` of ``0`` fires at the first
+        mark-price evaluation after placement, and a ``limit_offset_bps`` of
+        ``0`` rests the fired limit exactly at the fire price.
         """
 
-        def _positive_bps(value: int, name: str) -> None:
+        def _non_negative_bps(value: int, name: str) -> None:
             # bool is an int subclass; reject it so we never serialize a JSON
             # boolean (`true`) where the wire expects an integer offset.
-            if isinstance(value, bool) or not isinstance(value, int) or value <= 0:
-                raise ValueError(f"{name} must be a positive integer (basis points)")
+            if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+                raise ValueError(f"{name} must be a non-negative integer (basis points)")
 
-        _positive_bps(trailing_offset_bps, "trailing_offset_bps")
-        _positive_bps(limit_offset_bps, "limit_offset_bps")
+        _non_negative_bps(trailing_offset_bps, "trailing_offset_bps")
+        _non_negative_bps(limit_offset_bps, "limit_offset_bps")
         return cls(
             market_id=market_id,
             side=side,
