@@ -641,6 +641,16 @@ target a specific contract version.
 | `0.2.x` | `v0.6.2` |
 | `0.3.x` | `v0.7.1` |
 
+## Benchmarks
+
+`python bench/signing_bench.py` measures client-side request signing, both HMAC
+and agent-key (`AgentSigner`), on one fixed order request (no network I/O), and
+prints p50 / p95 per signature, signatures/sec, the Python version and the
+`eth-keys` backend it used. Agent-key signing is about 35x faster with
+`pip install coincurve`, which `eth-keys` picks up automatically. Published
+results and methodology: the API Reference's Rate Limits guide, "Can your
+signer keep up?".
+
 ## Development
 
 ```bash
