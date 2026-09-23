@@ -8,7 +8,7 @@ name = "nexus-exchange"
 # PR instead (see CONTRIBUTING.md "Releasing"). The same commit rewrites the
 # `_resolve_version` fallback literal in src/nexus_exchange/client.py and
 # .release-please-manifest.json, so all three stay in step.
-version = "0.5.0"
+version = "0.6.0"
 description = "Official Python SDK for the Nexus Exchange API (experimental)"
 readme = "README.md"
 requires-python = ">=3.10"

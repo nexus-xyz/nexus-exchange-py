@@ -15,6 +15,38 @@ future release below it. To improve the wording of a release, edit
 below `0.4.0` predate this and follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.6.0](https://github.com/nexus-xyz/nexus-exchange-py/compare/v0.5.0...v0.6.0) (2026-09-23)
+
+
+### ⚠ BREAKING CHANGES
+
+* **client:** cancel_order(order_id) and fetch_order(order_id) now require a market_id argument.
+
+### Features
+
+* **auth:** agent-key request signer (ENG-17009) ([#86](https://github.com/nexus-xyz/nexus-exchange-py/issues/86)) ([5266685](https://github.com/nexus-xyz/nexus-exchange-py/commit/526668554204367686426255b22cbeede932fa62))
+* **client:** send the required market_id on cancel_order and fetch_order (ENG-17118) ([#87](https://github.com/nexus-xyz/nexus-exchange-py/issues/87)) ([36d56e8](https://github.com/nexus-xyz/nexus-exchange-py/commit/36d56e8fbd1cd2298c0a67e633f835898ee3ba7b))
+* **orders:** trigger_price and typed stop / take-profit / trailing-stop builders (ENG-17125) ([#88](https://github.com/nexus-xyz/nexus-exchange-py/issues/88)) ([388aca8](https://github.com/nexus-xyz/nexus-exchange-py/commit/388aca8d4f1276e88851097d5781554407ba1729))
+* restore client-side retries + backoff to main (ENG-5295) ([#85](https://github.com/nexus-xyz/nexus-exchange-py/issues/85)) ([3c9ad8d](https://github.com/nexus-xyz/nexus-exchange-py/commit/3c9ad8dbe0b76355bf89a2f235f705eeb9dcdc38))
+* restore the async WebSocket streaming client to main (ENG-4045) ([#84](https://github.com/nexus-xyz/nexus-exchange-py/issues/84)) ([4dd9d37](https://github.com/nexus-xyz/nexus-exchange-py/commit/4dd9d37c718a520363fd6643cd56d5fa1c528ce3))
+
+
+### Bug Fixes
+
+* **ci:** approve a gated run reported as completed/action_required (ENG-14790) ([#80](https://github.com/nexus-xyz/nexus-exchange-py/issues/80)) ([1f7d727](https://github.com/nexus-xyz/nexus-exchange-py/commit/1f7d7273a311b64ce3b2104253b94e36abb97470))
+* **ci:** approve the release PR's own CI run instead of dispatching a duplicate (ENG-13320) ([#77](https://github.com/nexus-xyz/nexus-exchange-py/issues/77)) ([2434559](https://github.com/nexus-xyz/nexus-exchange-py/commit/243455992f8887ce742c0646984d8be2fffbf1e7))
+* **ci:** stop every release from opening a phantom release PR (ENG-13319) ([#76](https://github.com/nexus-xyz/nexus-exchange-py/issues/76)) ([8ccedcd](https://github.com/nexus-xyz/nexus-exchange-py/commit/8ccedcd9f0120513cb181e5c2f13609d17757bfa))
+* **client:** stop signing the public bridge-assets read; check credentials against the spec (ENG-13303) ([#78](https://github.com/nexus-xyz/nexus-exchange-py/issues/78)) ([446fc87](https://github.com/nexus-xyz/nexus-exchange-py/commit/446fc876f96c52f9efec9d2c6fe30574db08ae4b))
+* **networks:** point testnet at its durable host, api.testnet.nexus.xyz/indexer (ENG-8868) ([#81](https://github.com/nexus-xyz/nexus-exchange-py/issues/81)) ([5d1c886](https://github.com/nexus-xyz/nexus-exchange-py/commit/5d1c886bd3a1b18b96eb9d9127e0d04dc1ce68a7))
+* **networks:** publish WebSocket URLs under the /v1 prefix (ENG-17132) ([#90](https://github.com/nexus-xyz/nexus-exchange-py/issues/90)) ([717e020](https://github.com/nexus-xyz/nexus-exchange-py/commit/717e020555087314d06073153cb12e1518e170e6))
+* **orders:** accept a 0 bps offset in trailing_limit (ENG-17125) ([#91](https://github.com/nexus-xyz/nexus-exchange-py/issues/91)) ([fe50f27](https://github.com/nexus-xyz/nexus-exchange-py/commit/fe50f276cdb694d686ed16b8295af956f372e47c))
+* **types:** read ClosedPosition's CCXT spellings ahead of spec 0.9.74 (ENG-16850) ([#89](https://github.com/nexus-xyz/nexus-exchange-py/issues/89)) ([48b7417](https://github.com/nexus-xyz/nexus-exchange-py/commit/48b7417471bd4ac5749f4cffcb0018d9248bfb0c))
+
+
+### Documentation
+
+* the bare testnet host serves /api/v1, so a trimmed base half-works (ENG-15256) ([#83](https://github.com/nexus-xyz/nexus-exchange-py/issues/83)) ([bf11423](https://github.com/nexus-xyz/nexus-exchange-py/commit/bf11423c2bd6b0b713b7bf169513cc52e6a79ecc))
+
 ## [0.5.0](https://github.com/nexus-xyz/nexus-exchange-py/compare/v0.4.0...v0.5.0) (2026-08-28)
 
 
