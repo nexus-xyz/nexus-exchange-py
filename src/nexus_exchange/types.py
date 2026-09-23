@@ -1012,13 +1012,59 @@ class OrderResponse:
         )
 
 
+# `order_type` groups from the pinned spec's `OrderRequest` description.
+_LIMIT_FAMILY = frozenset({"Limit", "StopLimit", "TakeProfitLimit"})
+_TRIGGER_ORDER_TYPES = frozenset({"StopLimit", "StopMarket", "TakeProfitLimit", "TakeProfitMarket"})
+_NO_PRICE_ORDER_TYPES = frozenset({"StopMarket", "TakeProfitMarket", "TrailingStop"})
+_KNOWN_ORDER_TYPES = frozenset(
+    {
+        "Limit",
+        "Market",
+        "StopLimit",
+        "StopMarket",
+        "TakeProfitLimit",
+        "TakeProfitMarket",
+        "TrailingStop",
+        "TrailingLimit",
+    }
+)
+
+
 @dataclass(frozen=True)
 class OrderRequest:
     """A new-order request (``POST /orders``).
 
-    Build with :meth:`limit`, :meth:`market`, or :meth:`trailing_limit`.
-    ``price`` / ``reduce_only`` / ``trailing_offset_bps`` / ``limit_offset_bps``
-    are omitted from the wire payload when ``None``.
+    Build with :meth:`limit`, :meth:`market`, :meth:`stop_limit`,
+    :meth:`stop_market`, :meth:`take_profit_limit`, :meth:`take_profit_market`,
+    :meth:`trailing_stop`, or :meth:`trailing_limit`. ``price`` /
+    ``reduce_only`` / ``trailing_offset_bps`` / ``limit_offset_bps`` /
+    ``trigger_price`` are omitted from the wire payload when ``None``.
+
+    Per-type requirements, from the pinned spec, are checked on construction
+    (direct or via a builder) and raise :class:`ValueError` before any request:
+
+    * the limit family (``Limit``, ``StopLimit``, ``TakeProfitLimit``) requires
+      ``price``;
+    * the triggerable, non-trailing types (``StopLimit``, ``StopMarket``,
+      ``TakeProfitLimit``, ``TakeProfitMarket``) require ``trigger_price``, and
+      every other type rejects it (the spec says they do not use it, so a set
+      value would be silently ignored server-side);
+    * ``StopMarket``, ``TakeProfitMarket`` and ``TrailingStop`` reject ``price``;
+    * ``TrailingStop`` requires ``trailing_offset_bps`` and rejects
+      ``limit_offset_bps``.
+
+    An ``order_type`` the SDK does not know is passed through unchecked. The
+    deprecated ``stop_price`` wire field is never sent: ``trigger_price`` is
+    the canonical trigger, and the spec only reads ``stop_price`` as a fallback
+    when ``trigger_price`` is absent.
+
+    **Trigger direction is not specified per side.** The spec says stop types
+    fire when the mark crosses ``trigger_price`` "in the adverse direction" and
+    take-profit types "on the favorable direction", but it does not define which
+    way that is for a ``Buy`` versus a ``Sell`` order (or whether it depends on
+    an open position). This SDK does not guess: it sends ``trigger_price``
+    verbatim and does not check it against the mark or the side. Confirm the
+    behaviour on a play-funds network before relying on it.
 
     ``time_in_force`` is sent verbatim and the engine is case-sensitive:
     ``"GTC"``, ``"IOC"``, ``"FOK"`` (uppercase) or ``"PostOnly"`` (PascalCase —
@@ -1037,6 +1083,31 @@ class OrderRequest:
     reduce_only: bool | None = None
     trailing_offset_bps: int | None = None
     limit_offset_bps: int | None = None
+    trigger_price: Decimal | None = None
+
+    def __post_init__(self) -> None:
+        ot = self.order_type
+        if self.trigger_price is not None:
+            if isinstance(self.trigger_price, bool) or not isinstance(self.trigger_price, Decimal):
+                raise ValueError("trigger_price must be a decimal.Decimal")
+            if not self.trigger_price.is_finite():
+                raise ValueError("trigger_price must be a finite Decimal")
+        if ot not in _KNOWN_ORDER_TYPES:
+            return
+        if ot in _TRIGGER_ORDER_TYPES:
+            if self.trigger_price is None:
+                raise ValueError(f"{ot} requires trigger_price")
+        elif self.trigger_price is not None:
+            raise ValueError(f"{ot} does not take trigger_price")
+        if ot in _LIMIT_FAMILY and self.price is None:
+            raise ValueError(f"{ot} requires price")
+        if ot in _NO_PRICE_ORDER_TYPES and self.price is not None:
+            raise ValueError(f"{ot} does not take price")
+        if ot == "TrailingStop":
+            if self.trailing_offset_bps is None:
+                raise ValueError("TrailingStop requires trailing_offset_bps")
+            if self.limit_offset_bps is not None:
+                raise ValueError("TrailingStop does not take limit_offset_bps")
 
     @classmethod
     def limit(
@@ -1082,6 +1153,154 @@ class OrderRequest:
         )
 
     @classmethod
+    def stop_limit(
+        cls,
+        market_id: str,
+        side: str,
+        trigger_price: Decimal,
+        price: Decimal,
+        quantity: Decimal,
+        time_in_force: str = "GTC",
+        *,
+        reduce_only: bool | None = None,
+    ) -> OrderRequest:
+        """A ``StopLimit`` order: once the mark crosses ``trigger_price`` it
+        becomes a limit order at ``price``.
+
+        The spec says a stop fires on the "adverse" crossing but does not define
+        that direction per ``side``; see the class docstring. The SDK does not
+        check ``trigger_price`` against ``price``, the side, or the mark."""
+        return cls(
+            market_id=market_id,
+            side=side,
+            order_type="StopLimit",
+            quantity=quantity,
+            time_in_force=time_in_force,
+            price=price,
+            reduce_only=reduce_only,
+            trigger_price=trigger_price,
+        )
+
+    @classmethod
+    def stop_market(
+        cls,
+        market_id: str,
+        side: str,
+        trigger_price: Decimal,
+        quantity: Decimal,
+        time_in_force: str = "GTC",
+        *,
+        reduce_only: bool | None = None,
+    ) -> OrderRequest:
+        """A ``StopMarket`` order: once the mark crosses ``trigger_price`` it
+        fires as a market order. Carries no ``price``.
+
+        The spec says a stop fires on the "adverse" crossing but does not define
+        that direction per ``side``; see the class docstring."""
+        return cls(
+            market_id=market_id,
+            side=side,
+            order_type="StopMarket",
+            quantity=quantity,
+            time_in_force=time_in_force,
+            price=None,
+            reduce_only=reduce_only,
+            trigger_price=trigger_price,
+        )
+
+    @classmethod
+    def take_profit_limit(
+        cls,
+        market_id: str,
+        side: str,
+        trigger_price: Decimal,
+        price: Decimal,
+        quantity: Decimal,
+        time_in_force: str = "GTC",
+        *,
+        reduce_only: bool | None = None,
+    ) -> OrderRequest:
+        """A ``TakeProfitLimit`` order: once the mark crosses ``trigger_price``
+        it becomes a limit order at ``price``.
+
+        The spec says a take-profit fires on the "favorable" crossing but does
+        not define that direction per ``side``; see the class docstring."""
+        return cls(
+            market_id=market_id,
+            side=side,
+            order_type="TakeProfitLimit",
+            quantity=quantity,
+            time_in_force=time_in_force,
+            price=price,
+            reduce_only=reduce_only,
+            trigger_price=trigger_price,
+        )
+
+    @classmethod
+    def take_profit_market(
+        cls,
+        market_id: str,
+        side: str,
+        trigger_price: Decimal,
+        quantity: Decimal,
+        time_in_force: str = "GTC",
+        *,
+        reduce_only: bool | None = None,
+    ) -> OrderRequest:
+        """A ``TakeProfitMarket`` order: once the mark crosses ``trigger_price``
+        it fires as a market order. Carries no ``price``.
+
+        The spec says a take-profit fires on the "favorable" crossing but does
+        not define that direction per ``side``; see the class docstring."""
+        return cls(
+            market_id=market_id,
+            side=side,
+            order_type="TakeProfitMarket",
+            quantity=quantity,
+            time_in_force=time_in_force,
+            price=None,
+            reduce_only=reduce_only,
+            trigger_price=trigger_price,
+        )
+
+    @classmethod
+    def trailing_stop(
+        cls,
+        market_id: str,
+        side: str,
+        quantity: Decimal,
+        trailing_offset_bps: int,
+        time_in_force: str = "GTC",
+        *,
+        reduce_only: bool | None = None,
+    ) -> OrderRequest:
+        """A ``TrailingStop`` order: fires as a market order once the mark
+        retraces from its best-seen extreme by ``trailing_offset_bps`` basis
+        points (1 bp = 0.01%). Carries no ``price`` and no ``trigger_price`` —
+        the trigger anchor is derived server-side from the mark and the offset.
+
+        ``trailing_offset_bps`` must be an integer >= 0. The spec accepts ``0``,
+        which fires at the first mark-price evaluation after placement. (Which
+        extreme is "best-seen" for each ``side`` is not spelled out by the spec;
+        see the class docstring.)"""
+        if (
+            isinstance(trailing_offset_bps, bool)
+            or not isinstance(trailing_offset_bps, int)
+            or trailing_offset_bps < 0
+        ):
+            raise ValueError("trailing_offset_bps must be a non-negative integer (basis points)")
+        return cls(
+            market_id=market_id,
+            side=side,
+            order_type="TrailingStop",
+            quantity=quantity,
+            time_in_force=time_in_force,
+            price=None,
+            reduce_only=reduce_only,
+            trailing_offset_bps=trailing_offset_bps,
+        )
+
+    @classmethod
     def trailing_limit(
         cls,
         market_id: str,
@@ -1122,9 +1341,11 @@ class OrderRequest:
         )
 
     def to_payload(self) -> dict[str, Any]:
-        """Serialize to the JSON body the API expects. Money is sent as strings
-        and basis-point offsets as integers; ``price`` / ``reduce_only`` /
-        ``trailing_offset_bps`` / ``limit_offset_bps`` are omitted when ``None``."""
+        """Serialize to the JSON body the API expects. Money (including
+        ``trigger_price``) is sent as decimal strings and basis-point offsets as
+        integers; ``price`` / ``reduce_only`` / ``trailing_offset_bps`` /
+        ``limit_offset_bps`` / ``trigger_price`` are omitted when ``None``. The
+        deprecated ``stop_price`` field is never sent."""
         body: dict[str, Any] = {
             "market_id": self.market_id,
             "side": self.side,
@@ -1140,6 +1361,8 @@ class OrderRequest:
             body["trailing_offset_bps"] = self.trailing_offset_bps
         if self.limit_offset_bps is not None:
             body["limit_offset_bps"] = self.limit_offset_bps
+        if self.trigger_price is not None:
+            body["trigger_price"] = str(self.trigger_price)
         return body
 
 

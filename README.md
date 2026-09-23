@@ -58,6 +58,7 @@ from the environment — no secrets in source).
 | Account reads — `GET /account`, `/positions`, `/positions/closed`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
 | Portfolio — `GET /account/state` (summary + positions, incl. `withdrawable`), `/account/summary`, `/account/fees`, `/account/portfolio-history`, `/account/equity-history` | ✅ implemented |
 | Trading — `POST /orders`, `/orders/batch`, `/orders/preview`; `GET /orders`, `/orders/{id}`, `/orders/history`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
+| Order types — `Limit`, `Market`, `StopLimit`, `StopMarket`, `TakeProfitLimit`, `TakeProfitMarket`, `TrailingStop`, `TrailingLimit` (typed `OrderRequest` builders; `trigger_price` for stop / take-profit; deprecated `stop_price` never sent) | ✅ implemented. The spec does not define which way a trigger fires for each side (see the `OrderRequest` docstring) |
 | Funds — `POST /account/deposit`, `/account/credit`, `/deposits`, `/faucet`; `GET /deposits`, `/funding` | ✅ implemented |
 | Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses`, `/bridge/wallets`; `POST /bridge/wallets/challenge` | ✅ implemented |
 | Keys / agents / WS token — `GET /keys`, `DELETE /keys/{id}`, `/agents`, `POST /ws-tokens`, `/ws/token` | ✅ implemented |
@@ -477,6 +478,39 @@ except RestrictedJurisdictionError as err:
 ```
 
 It subclasses `ApiError`, so an existing `except ApiError` still catches it.
+
+## Conditional orders
+
+Stop, take-profit and trailing orders have typed builders on `OrderRequest`.
+`trigger_price` is sent as a decimal string. The deprecated `stop_price` field
+is never sent.
+
+```python
+from decimal import Decimal
+from nexus_exchange import OrderRequest
+
+m, qty = "BTC-USDX-PERP", Decimal("0.01")
+OrderRequest.stop_market(m, "Sell", Decimal("58000"), qty, reduce_only=True)
+OrderRequest.stop_limit(
+    m, "Sell", Decimal("58000"), Decimal("57900"), qty
+)  # trigger, then limit price
+OrderRequest.take_profit_market(m, "Sell", Decimal("72000"), qty, reduce_only=True)
+OrderRequest.take_profit_limit(m, "Sell", Decimal("72000"), Decimal("72000"), qty)
+OrderRequest.trailing_stop(m, "Sell", qty, 150)  # fires a market order after a 150 bp retrace
+```
+
+The spec's per-type requirements are checked when the request is built, and a
+violation raises `ValueError` before anything is sent:
+
+- stop and take-profit types need `trigger_price`, and every other type rejects it;
+- the limit family (`Limit`, `StopLimit`, `TakeProfitLimit`) needs `price`;
+- `TrailingStop` needs `trailing_offset_bps`.
+
+**The trigger direction for each side is not specified.** The spec says stops
+fire on the "adverse" crossing and take-profits on the "favorable" one. It
+never says which way that is for a `Buy` or a `Sell`. The SDK sends
+`trigger_price` as given and does not check it against the side or the mark.
+See [`examples/conditional_orders.py`](./examples/conditional_orders.py).
 
 ## Pagination
 
