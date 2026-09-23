@@ -95,8 +95,8 @@ semantics and the EIP-712 signing domain:
 from nexus_exchange import Client, Funds, Network
 
 Network.TESTNET.base_url  # 'https://api.testnet.nexus.xyz/indexer'
-Network.TESTNET.ws_market_data_url  # 'wss://api.testnet.nexus.xyz/indexer/stream'
-Network.TESTNET.ws_authenticated_url  # 'wss://api.testnet.nexus.xyz/indexer/ws'
+Network.TESTNET.ws_market_data_url  # 'wss://api.testnet.nexus.xyz/v1/stream'
+Network.TESTNET.ws_authenticated_url  # 'wss://api.testnet.nexus.xyz/v1/ws'
 Network.MAINNET.funds  # Funds.REAL — branch on this, never on the host string
 
 with Client(Network.TESTNET) as client:

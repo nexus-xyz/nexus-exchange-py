@@ -7,6 +7,8 @@ instead of stopping: a host derived by interpolation, a signature made under a
 guessed domain, a faucet call aimed at mainnet.
 """
 
+from urllib.parse import urlsplit
+
 import pytest
 
 from nexus_exchange import (
@@ -61,14 +63,59 @@ class TestHostMap:
             assert network.ws_market_data_url.startswith(("wss://", "ws://"))
 
     def test_ws_bases_are_the_durable_hosts_not_the_legacy_one(self) -> None:
-        # Testnet's carries the `/indexer` route prefix its REST base does — the
-        # service is mounted under it, so a host-root WS URL would not reach the
-        # handler either (ENG-8868). Mainnet's host still does not resolve; no WS
-        # client ships here, so both remain informational.
-        assert Network.TESTNET.ws_market_data_url == "wss://api.testnet.nexus.xyz/indexer/stream"
-        assert Network.MAINNET.ws_authenticated_url == "wss://api.nexus.xyz/ws"
         for network in Network:
             assert "//exchange.nexus.xyz" not in network.ws_market_data_url
+
+    @pytest.mark.parametrize(
+        ("network", "stream", "ws"),
+        [
+            # The spec's `x-nexus-networks` values (nexus#12253, ENG-17132). The
+            # bare host 404s on both; `/v1` answers 101 on `/stream`.
+            (
+                Network.TESTNET,
+                "wss://api.testnet.nexus.xyz/v1/stream",
+                "wss://api.testnet.nexus.xyz/v1/ws",
+            ),
+            # Same shape; the host has no DNS yet (ENG-15183).
+            (Network.MAINNET, "wss://api.nexus.xyz/v1/stream", "wss://api.nexus.xyz/v1/ws"),
+            # A bare local indexer serves its root mounts, with no prefix.
+            (Network.LOCAL, "ws://localhost:9090/stream", "ws://localhost:9090/ws"),
+        ],
+    )
+    def test_resolved_ws_urls_per_network(self, network: Network, stream: str, ws: str) -> None:
+        assert network.ws_market_data_url == stream
+        assert network.ws_authenticated_url == ws
+
+    @pytest.mark.parametrize(
+        ("network", "rest_base"),
+        [
+            # Testnet's spec REST base, not its `/indexer` `base_url`: REST has not
+            # moved to `/v1` in this SDK yet. Same host, which is what `/ws/token`
+            # binds a token to.
+            (Network.TESTNET, "https://api.testnet.nexus.xyz/v1"),
+            (Network.MAINNET, Network.MAINNET.config.published_rest_base),
+            (Network.LOCAL, Network.LOCAL.config.published_rest_base),
+        ],
+    )
+    def test_ws_url_is_the_rest_base_with_the_scheme_swapped(
+        self, network: Network, rest_base: str
+    ) -> None:
+        swapped = rest_base.replace("https://", "wss://", 1).replace("http://", "ws://", 1)
+        assert network.ws_market_data_url == f"{swapped}/stream"
+        assert network.ws_authenticated_url == f"{swapped}/ws"
+
+    def test_ws_url_shares_the_rest_hosts_origin(self) -> None:
+        # `/ws/token` binds a token to the host that minted it, so the socket must
+        # be on the host the client mints over, whatever prefix either carries.
+        for network in (Network.TESTNET, Network.LOCAL):
+            assert network.base_url is not None
+            rest, sock = urlsplit(network.base_url), urlsplit(network.ws_authenticated_url)
+            assert (sock.hostname, sock.port) == (rest.hostname, rest.port)
+
+    def test_no_hosted_ws_url_uses_the_bare_host(self) -> None:
+        for network in (Network.TESTNET, Network.MAINNET):
+            for url in (network.ws_market_data_url, network.ws_authenticated_url):
+                assert urlsplit(url).path.startswith("/v1/")
 
     def test_funds_and_faucet_semantics(self) -> None:
         assert Network.MAINNET.funds is Funds.REAL

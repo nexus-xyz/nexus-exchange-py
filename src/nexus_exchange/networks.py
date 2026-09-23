@@ -540,11 +540,46 @@ class NetworkConfig:
 # either. Recording an unverified mainnet base is the expensive mistake here, so
 # it waits for ENG-8155's mainnet half rather than being improved on a guess.
 #
-# The WebSocket bases follow the same prefix — `/indexer/stream` and
-# `/indexer/ws` both reach the indexer's own handlers (400 "Connection header
-# did not include 'upgrade'" over plain HTTP, which is the route answering).
-# This SDK still ships no WebSocket client, so they are recorded, not dialled —
-# see `NetworkConfig`. Mainnet's remain unreachable along with its REST base.
+# THE WEBSOCKET BASES ARE THE SPEC'S REST BASE WITH THE SCHEME SWAPPED
+# (ENG-17132, nexus#12253), built by `_ws_bases` rather than written out, so the
+# two cannot drift apart. `/ws/token` binds a token to the host that minted it,
+# which is why the socket must sit on the REST base's host; `/v1` is the prefix
+# the spec publishes for REST (EDR-006), so the socket URLs carry it too.
+# Measured 2026-09-23 with an RFC 6455 handshake:
+#
+#   wss://api.testnet.nexus.xyz/stream                -> 404 (the bare host has no route)
+#   wss://api.testnet.nexus.xyz/v1/stream             -> 101
+#   wss://api.testnet.nexus.xyz/v1/ws?token=x         -> 401 (routed; bad token)
+#   wss://api.testnet.nexus.xyz/indexer/stream        -> 101
+#
+# `/v1` rather than the other routed prefixes: `/api/v1` exists only while a
+# kill switch is on, and `/indexer` is kept for existing consumers. The edge
+# strips both `/v1` and `/indexer` to `/`, so this move changes no signed path.
+#
+# Testnet's REST `base_url` is still `/indexer` — it answers, and moving REST is
+# its own change — so testnet's sockets derive from the spec's REST base
+# (`_TESTNET_SPEC_REST_BASE`), not from `base_url`. Same host, which is the part
+# the token binding checks. Mainnet uses the same shape from its
+# `published_rest_base`, and like that base it does not resolve yet (no DNS for
+# `api.nexus.xyz`, ENG-15183). `local` is a bare indexer with no prefix.
+_TESTNET_SPEC_REST_BASE = "https://api.testnet.nexus.xyz/v1"
+
+
+def _ws_bases(rest_base: str) -> dict[str, str]:
+    """The two WebSocket bases for ``rest_base``: its scheme swapped, plus the path.
+
+    ``https`` becomes ``wss`` and ``http`` becomes ``ws``; nothing else about the
+    URL changes. Returned as keyword arguments for :class:`NetworkConfig`.
+    """
+    parts = urlsplit(rest_base)
+    scheme = {"https": "wss", "http": "ws"}[parts.scheme]
+    base = parts._replace(scheme=scheme).geturl().rstrip("/")
+    return {
+        "ws_market_data_url": f"{base}/stream",
+        "ws_authenticated_url": f"{base}/ws",
+    }
+
+
 _CONFIGS: Mapping[str, NetworkConfig] = MappingProxyType(
     {
         "mainnet": NetworkConfig(
@@ -552,8 +587,7 @@ _CONFIGS: Mapping[str, NetworkConfig] = MappingProxyType(
             funds=Funds.REAL,
             has_faucet=False,
             published_rest_base="https://api.nexus.xyz/v1",
-            ws_market_data_url="wss://api.nexus.xyz/stream",
-            ws_authenticated_url="wss://api.nexus.xyz/ws",
+            **_ws_bases("https://api.nexus.xyz/v1"),
             signing_domain=SigningDomain(),
             base_url=None,
             direct_base_url=None,
@@ -563,8 +597,7 @@ _CONFIGS: Mapping[str, NetworkConfig] = MappingProxyType(
             funds=Funds.PLAY,
             has_faucet=True,
             published_rest_base="https://api.testnet.nexus.xyz/indexer",
-            ws_market_data_url="wss://api.testnet.nexus.xyz/indexer/stream",
-            ws_authenticated_url="wss://api.testnet.nexus.xyz/indexer/ws",
+            **_ws_bases(_TESTNET_SPEC_REST_BASE),
             signing_domain=SigningDomain(),
             base_url="https://api.testnet.nexus.xyz/indexer",
             # The /api/v1 surface is mounted UNDER the route prefix on this
@@ -578,8 +611,7 @@ _CONFIGS: Mapping[str, NetworkConfig] = MappingProxyType(
             funds=Funds.PLAY,
             has_faucet=True,
             published_rest_base="http://localhost:9090",
-            ws_market_data_url="ws://localhost:9090/stream",
-            ws_authenticated_url="ws://localhost:9090/ws",
+            **_ws_bases("http://localhost:9090"),
             signing_domain=SigningDomain(),
             base_url="http://localhost:9090",
             direct_base_url="http://localhost:9090",
