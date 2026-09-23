@@ -138,6 +138,42 @@ def test_closed_positions_decode(httpx_mock) -> None:
     assert httpx_mock.get_requests()[0].headers["x-signature"]
 
 
+def test_closed_positions_decode_the_ccxt_spelling(httpx_mock) -> None:
+    """Spec 0.9.74 (ENG-15258) serves this record under CCXT's names.
+
+    The same attributes must populate, not fall back to ``""`` / ``None`` — and
+    ``lastPrice`` must land on ``exit_price``, the CLOSED reading of that name,
+    not the open position's last traded price (ENG-16850).
+    """
+    ccxt_row = {
+        "symbol": "BTC-USDX-PERP",
+        "side": "Short",
+        "size": "0.5",
+        "entryPrice": "49000.25",
+        "lastPrice": "51000.75",
+        "realizedPnl": "-1000.25",
+        "lastUpdateTimestamp": 1776033900000,
+    }
+    httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[ccxt_row])
+    with _signed_client() as client:
+        position = client.fetch_closed_positions()[0]
+
+    assert position.market_id == "BTC-USDX-PERP"
+    assert position.side == "Short"
+    assert str(position.size) == "0.5"
+    assert str(position.entry_price) == "49000.25"
+    assert str(position.exit_price) == "51000.75"
+    assert str(position.realized_pnl) == "-1000.25"
+    assert position.closed_at_ms == 1776033900000
+    assert position.raw == ccxt_row
+
+
+def test_closed_position_malformed_ccxt_field_names_the_key_sent(httpx_mock) -> None:
+    httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[{"lastUpdateTimestamp": True}])
+    with _signed_client() as client, pytest.raises(DecodeError, match="lastUpdateTimestamp"):
+        client.fetch_closed_positions()
+
+
 def test_equity_history_decodes_json_number_equity_without_float_drift(httpx_mock) -> None:
     # `equity` is a JSON *number* on this schema (a decimal string on
     # PortfolioPoint). It decodes through str(), so the value is the decimal text
