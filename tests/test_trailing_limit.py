@@ -4,8 +4,9 @@ Covers the request side of the ``TrailingLimit`` order type (ENG-6131): a
 ``trailing_limit`` request serializes exactly the expected body — with the two
 basis-point offsets as JSON integers and no ``price`` — the request is signed
 (asserted via the ``x-api-key`` header), client-side validation rejects
-missing/zero/negative offsets before any request, and the ``Order`` response
-round-trips the nullable ``limit_offset_bps`` integer.
+negative or non-integer offsets before any request (``0`` is accepted, per the
+spec), and the ``Order`` response round-trips the nullable ``limit_offset_bps``
+integer.
 """
 
 from __future__ import annotations
@@ -99,31 +100,39 @@ def test_trailing_limit_includes_reduce_only_when_set() -> None:
 # -- client-side validation --------------------------------------------------
 
 
-@pytest.mark.parametrize("trailing_offset_bps", [0, -1])
+def test_trailing_limit_accepts_zero_offsets() -> None:
+    # The spec's minimum is 0 for both offsets: a 0 trailing offset fires at
+    # the first mark check, a 0 limit offset rests exactly at the fire price.
+    payload = OrderRequest.trailing_limit("BTC-USDX-PERP", "Buy", Decimal("1"), 0, 0).to_payload()
+    assert payload["trailing_offset_bps"] == 0
+    assert payload["limit_offset_bps"] == 0
+
+
+@pytest.mark.parametrize("trailing_offset_bps", [-1])
 def test_trailing_limit_rejects_bad_trailing_offset(trailing_offset_bps) -> None:
-    with pytest.raises(ValueError, match="trailing_offset_bps must be a positive integer"):
+    with pytest.raises(ValueError, match="trailing_offset_bps must be a non-negative integer"):
         OrderRequest.trailing_limit("BTC-USDX-PERP", "Buy", Decimal("1"), trailing_offset_bps, 25)
 
 
-@pytest.mark.parametrize("limit_offset_bps", [0, -5])
+@pytest.mark.parametrize("limit_offset_bps", [-5])
 def test_trailing_limit_rejects_bad_limit_offset(limit_offset_bps) -> None:
-    with pytest.raises(ValueError, match="limit_offset_bps must be a positive integer"):
+    with pytest.raises(ValueError, match="limit_offset_bps must be a non-negative integer"):
         OrderRequest.trailing_limit("BTC-USDX-PERP", "Buy", Decimal("1"), 100, limit_offset_bps)
 
 
 def test_trailing_limit_rejects_non_integer_offsets() -> None:
-    with pytest.raises(ValueError, match="trailing_offset_bps must be a positive integer"):
+    with pytest.raises(ValueError, match="trailing_offset_bps must be a non-negative integer"):
         OrderRequest.trailing_limit("BTC-USDX-PERP", "Buy", Decimal("1"), 1.5, 25)  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="limit_offset_bps must be a positive integer"):
+    with pytest.raises(ValueError, match="limit_offset_bps must be a non-negative integer"):
         OrderRequest.trailing_limit("BTC-USDX-PERP", "Buy", Decimal("1"), 100, "25")  # type: ignore[arg-type]
 
 
 def test_trailing_limit_rejects_bool_offsets() -> None:
     # bool is an int subclass, so True/False would otherwise slip past the
     # `isinstance(x, int)` / `x > 0` checks and serialize as a JSON boolean.
-    with pytest.raises(ValueError, match="trailing_offset_bps must be a positive integer"):
+    with pytest.raises(ValueError, match="trailing_offset_bps must be a non-negative integer"):
         OrderRequest.trailing_limit("BTC-USDX-PERP", "Buy", Decimal("1"), True, 25)  # type: ignore[arg-type]
-    with pytest.raises(ValueError, match="limit_offset_bps must be a positive integer"):
+    with pytest.raises(ValueError, match="limit_offset_bps must be a non-negative integer"):
         OrderRequest.trailing_limit("BTC-USDX-PERP", "Buy", Decimal("1"), 100, False)  # type: ignore[arg-type]
 
 
