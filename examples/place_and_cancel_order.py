@@ -44,7 +44,7 @@ def main() -> None:
                 f"status={resp.order.status}"
             )
 
-            fetched = client.fetch_order(oid)
+            fetched = client.fetch_order(oid, market_id)
             print(f"fetched {fetched.id}: status={fetched.status} filled={fetched.filled_qty}")
 
             open_orders = client.fetch_open_orders()
@@ -65,7 +65,7 @@ def main() -> None:
                     file=sys.stderr,
                 )
             else:
-                client.cancel_order(oid)
+                client.cancel_order(oid, market_id)
                 print(f"cancelled {oid}")
 
 

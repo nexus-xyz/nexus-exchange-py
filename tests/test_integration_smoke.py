@@ -147,7 +147,7 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(404, {"code": "not_found", "message": f"no route {self.path}"})
 
     def do_DELETE(self) -> None:  # noqa: N802 (http.server dispatch name)
-        if self.path == "/api/v1/orders/o-live-1":
+        if self.path == "/api/v1/orders/o-live-1?market_id=BTC-USDX-PERP":
             if self._require_signed():
                 self._send(200, {"cancelled": True})
         else:
@@ -242,7 +242,7 @@ def test_signed_order_place_and_cancel_round_trip(signed_live_client: Client) ->
     assert resp.order.id == "o-live-1"
     assert resp.order.status == "Open"
 
-    result = signed_live_client.cancel_order("o-live-1")
+    result = signed_live_client.cancel_order("o-live-1", "BTC-USDX-PERP")
     assert result == {"cancelled": True}
 
 
