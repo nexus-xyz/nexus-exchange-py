@@ -57,7 +57,7 @@ from the environment — no secrets in source).
 | Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
 | Account reads — `GET /account`, `/positions`, `/positions/closed`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
 | Portfolio — `GET /account/state` (summary + positions, incl. `withdrawable`), `/account/summary`, `/account/fees`, `/account/portfolio-history`, `/account/equity-history` | ✅ implemented |
-| Trading — `POST /orders`, `/orders/batch`, `/orders/preview`; `GET /orders`, `/orders/{id}`, `/orders/history`; `DELETE /orders`, `/orders/{id}` | ✅ implemented |
+| Trading — `POST /orders`, `/orders/batch`, `/orders/preview`; `GET /orders`, `/orders/{id}`, `/orders/history`; `DELETE /orders`, `/orders/{id}`; `PATCH /orders/{id}` | ✅ implemented — every by-id call takes the order's `market_id` (`fetch_order(id, market_id)`, `cancel_order(id, market_id)`, `amend_order(id, market_id, …)`); the engine rejects one without it |
 | Funds — `POST /account/deposit`, `/account/credit`, `/deposits`, `/faucet`; `GET /deposits`, `/funding` | ✅ implemented |
 | Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses`, `/bridge/wallets`; `POST /bridge/wallets/challenge` | ✅ implemented |
 | Keys / agents / WS token — `GET /keys`, `DELETE /keys/{id}`, `/agents`, `POST /ws-tokens`, `/ws/token` | ✅ implemented |
@@ -249,9 +249,11 @@ is the bare origin. The client appends `/api/v1` to `direct_base_url`, so
 that field carries whichever base applies. The migrated market-data and
 account/trading routes now target this direct service; the HMAC signature covers
 the full path (e.g. `/api/v1/orders`), independent of the base. Routes with no
-`/api/v1` equivalent yet — `GET /markets`, ADL history, `GET /orders/{id}`,
-deposits, keys/agents, WS tokens and admin tiers — are sent relative to the
-base with no prefix added.
+`/api/v1` equivalent in the pinned spec yet — `GET /markets`, ADL history,
+`GET /orders/{id}`, deposits, keys/agents, WS tokens and admin tiers — are sent
+relative to the base with no prefix added. (`GET /api/v1/orders/{id}` is defined
+upstream but not in a published spec release; `fetch_order` moves onto it once
+`.api-version` pins one that does.)
 This split is internal; method names and signatures are unchanged. A custom `base_url` overrides both bases; pass `direct_base_url`
 alongside it to target a deploy that serves the two surfaces apart.
 

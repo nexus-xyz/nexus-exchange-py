@@ -89,7 +89,7 @@ def test_fetch_withdrawals_parses_and_signs(httpx_mock) -> None:
 # -- single-order fetch + cancel-all -------------------------------------------
 def test_fetch_order_hits_id_path_and_parses(httpx_mock) -> None:
     httpx_mock.add_response(
-        url=f"{_BASE}/orders/o42",
+        url=f"{_BASE}/orders/o42?market_id=BTC-USDX-PERP",
         json={
             "id": "o42",
             "market_id": "BTC-USDX-PERP",
@@ -105,7 +105,7 @@ def test_fetch_order_hits_id_path_and_parses(httpx_mock) -> None:
         },
     )
     with _authed() as client:
-        order = client.fetch_order("o42")
+        order = client.fetch_order("o42", "BTC-USDX-PERP")
     assert order.id == "o42"
     assert str(order.price) == "49000"
     _assert_signed(httpx_mock.get_request(), "GET", "/orders/o42")
@@ -218,7 +218,7 @@ def test_create_order_uses_post_verb(httpx_mock) -> None:
     [
         lambda c: c.fetch_positions(),
         lambda c: c.fetch_withdrawals(),
-        lambda c: c.fetch_order("o1"),
+        lambda c: c.fetch_order("o1", "BTC-USDX-PERP"),
         lambda c: c.cancel_all_orders(),
         lambda c: c.fetch_api_keys(),
         lambda c: c.delete_api_key("nx_a"),
