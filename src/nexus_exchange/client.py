@@ -1755,20 +1755,47 @@ class Client:
             max_pages=max_pages,
         )
 
-    def fetch_order(self, order_id: str) -> Order:
+    def fetch_order(self, order_id: str, market_id: str) -> Order:
         """``GET /orders/{order_id}`` — fetch a single order. Requires credentials.
 
-        Stays on the legacy gateway: the ``/api/v1`` order-by-id route exposes
-        only ``PATCH`` (amend) and ``DELETE`` (cancel); GET-by-id was not
-        migrated to the direct service.
+        ``market_id`` is required: the engine routes single-order operations to
+        the owning market (ENG-3123) and its extractor rejects a request without
+        ``?market_id=`` before any handler runs, so the call could never succeed
+        without it (ENG-17118). It is sent as a query parameter, so it is part of
+        the signed canonical string. An empty value raises :class:`ValueError`
+        before any request.
+
+        Requested at the unprefixed path because that is the operation the pinned
+        spec defines: ``GET /api/v1/orders/{order_id}`` exists on the monorepo's
+        spec but in no published release yet, and the SDK implements only what
+        the pinned spec defines (ENG-8616). The indexer serves this route at both
+        mounts (ENG-5298), and the unprefixed one resolves against
+        :attr:`base_url` — on every published network the same host as the
+        ``/api/v1`` surface, not the retired ``/api/exchange`` gateway.
         """
-        data = self._request("GET", f"/orders/{quote(order_id, safe='')}", signed=True)
+        if not market_id:
+            raise ValueError("market_id is required")
+        query = urlencode({"market_id": market_id})
+        data = self._request("GET", f"/orders/{quote(order_id, safe='')}", query=query, signed=True)
         return Order.from_dict(data if isinstance(data, dict) else {})
 
-    def cancel_order(self, order_id: str) -> Any:
-        """``DELETE /orders/{order_id}`` — cancel a single order. Requires credentials."""
+    def cancel_order(self, order_id: str, market_id: str) -> Any:
+        """``DELETE /orders/{order_id}`` — cancel a single order. Requires credentials.
+
+        ``market_id`` is required (the engine routes the cancel by market,
+        ENG-3123; a request without it is rejected, ENG-17118) and is sent as a
+        query parameter, so it is part of the signed canonical string. An empty
+        value raises :class:`ValueError` before any request.
+        """
+        if not market_id:
+            raise ValueError("market_id is required")
+        query = urlencode({"market_id": market_id})
         return self._request(
-            "DELETE", f"/orders/{quote(order_id, safe='')}", signed=True, direct=True
+            "DELETE",
+            f"/orders/{quote(order_id, safe='')}",
+            query=query,
+            signed=True,
+            direct=True,
         )
 
     def cancel_all_orders(self) -> Any:

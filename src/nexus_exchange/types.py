@@ -476,6 +476,17 @@ class ClosedPosition:
     The spec marks no field of this schema ``required``, so each decodes
     leniently, matching :class:`Position` and :class:`Fill`. The full payload
     stays on :attr:`raw`, which is how to tell an absent field from a real zero.
+
+    **Both wire spellings decode.** Spec ``0.9.74`` (ENG-15258) serves this
+    record under CCXT's unified ``Position`` names — ``symbol``, ``entryPrice``,
+    ``lastPrice``, ``realizedPnl``, ``lastUpdateTimestamp`` — in place of
+    ``market_id``, ``entry_price``, ``exit_price``, ``realized_pnl``,
+    ``closed_at_ms``. :meth:`from_dict` reads either, so a server on either side
+    of that publish decodes to the same attributes instead of every field
+    silently becoming ``None`` / ``""`` after it (ENG-16850). ``lastPrice`` lands
+    on :attr:`exit_price` on purpose: on an OPEN position the spec's
+    ``lastPrice`` is the market's last traded price, here it is the price the
+    position closed at, so the two must never share one attribute.
     """
 
     market_id: str
@@ -507,16 +518,35 @@ class ClosedPosition:
         #     `{"closed_at_ms": True}` to 1 - the trap `opt_int` exists to close;
         #   * passing the field name means a bad value reports which field,
         #     matching `AccountSummary` two classes down.
+        #
+        # Each renamed field is read under whichever spelling the server sent
+        # (`_closed_field`), and a bad value reports the key it actually came in on.
+        market_id, _ = _closed_field(d, "market_id", "symbol")
         return cls(
-            market_id=str(d.get("market_id", "")),
+            market_id=str(market_id if market_id is not None else ""),
             side=str(d.get("side", "")),
             size=opt_decimal(d.get("size"), "size"),
-            entry_price=opt_decimal(d.get("entry_price"), "entry_price"),
-            exit_price=opt_decimal(d.get("exit_price"), "exit_price"),
-            realized_pnl=opt_decimal(d.get("realized_pnl"), "realized_pnl"),
-            closed_at_ms=opt_int(d.get("closed_at_ms"), "closed_at_ms"),
+            entry_price=opt_decimal(*_closed_field(d, "entry_price", "entryPrice")),
+            exit_price=opt_decimal(*_closed_field(d, "exit_price", "lastPrice")),
+            realized_pnl=opt_decimal(*_closed_field(d, "realized_pnl", "realizedPnl")),
+            closed_at_ms=opt_int(*_closed_field(d, "closed_at_ms", "lastUpdateTimestamp")),
             raw=d,
         )
+
+
+def _closed_field(d: dict[str, Any], legacy: str, ccxt: str) -> tuple[Any, str]:
+    """Read a `ClosedPosition` field under either of its two wire spellings.
+
+    Spec ``v0.8.1`` serves the snake_case ``legacy`` name; ``0.9.74`` renames it
+    to CCXT's ``ccxt`` name (ENG-15258). Returns the value plus the key it was
+    read from, so a malformed value names the field the server actually sent.
+    The legacy key wins when both are present, matching the pinned spec. A key
+    that is present with ``null`` counts as present, so an explicit ``null``
+    under one spelling is not overridden by the other.
+    """
+    if legacy in d:
+        return d[legacy], legacy
+    return d.get(ccxt), ccxt
 
 
 @dataclass(frozen=True)

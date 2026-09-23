@@ -61,7 +61,7 @@ looking for a flow that is already here.
 | `ws_trades.py` | none | `GET /ws` (`trades` channel; needs the `ws` extra) |
 | `account_and_positions.py` | HMAC | `account`, `positions`, `account/rate-limit` |
 | `conditional_orders.py` | none (offline) | builds `StopMarket` / `StopLimit` / `TakeProfitMarket` / `TakeProfitLimit` / `TrailingStop` requests and prints each `POST /orders` body; sends nothing |
-| `place_and_cancel_order.py` | HMAC | `POST /orders`, `GET /orders/{id}`, `GET /orders`, `DELETE /orders/{id}` |
+| `place_and_cancel_order.py` | HMAC | `POST /orders`, `GET /orders/{id}?market_id=`, `GET /orders`, `DELETE /orders/{id}?market_id=` |
 | `fills_and_withdrawals.py` | HMAC | `fills`, `withdrawals` |
 | `paginate_fills.py` | HMAC | `fills` (cursor pagination via `iter_my_trades` / `fetch_my_trades_page`) |
 | `bridge_deposit.py` | HMAC | `bridge/assets`, `bridge/deposit-addresses`, `bridge/deposits` |
@@ -72,7 +72,8 @@ looking for a flow that is already here.
 
 Most of these routes are served by the direct `/api/v1` service (the gateway is
 being retired, ENG-4740); a few (`markets`, `withdrawals`, `GET /orders/{id}`)
-remain on the legacy gateway. The client routes each method transparently — see
+are sent without the `/api/v1` prefix because the pinned spec has no `/api/v1`
+spelling for them yet. The client routes each method transparently — see
 `endpoints.txt` for the authoritative split.
 
 The public gateway proxies signed calls to the *site* account; for per-account

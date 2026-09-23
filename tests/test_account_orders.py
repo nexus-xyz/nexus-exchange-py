@@ -370,10 +370,12 @@ def test_fetch_open_orders_parses(httpx_mock) -> None:
 
 def test_cancel_order_signs_delete(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/orders/o1", method="DELETE", json={"cancelled": True}
+        url="http://localhost:9090/api/v1/orders/o1?market_id=BTC-USDX-PERP",
+        method="DELETE",
+        json={"cancelled": True},
     )
     with _authed() as client:
-        client.cancel_order("o1")
+        client.cancel_order("o1", "BTC-USDX-PERP")
     req = httpx_mock.get_request()
     assert req.method == "DELETE"
     assert req.headers["x-api-key"] == "nx_test"
