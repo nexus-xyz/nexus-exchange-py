@@ -18,7 +18,7 @@ token captured once:
     from _shared import make_signed_client
 
     rest = make_signed_client()
-    ws = WsClient(url, token_provider=lambda: rest.mint_web_socket_token().token)
+    ws = WsClient(url, token_provider=lambda: rest.create_ws_token().token)
 """
 
 from __future__ import annotations

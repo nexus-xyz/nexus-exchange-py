@@ -13,8 +13,11 @@ Mirrors the Rust and TypeScript SDKs' streaming clients (ENG-4045):
 
 Public market-data channels (``book`` / ``trades`` / ``candles``) need no auth.
 Account-scoped channels (``orders`` / ``fills`` / ``positions`` / ``balances``)
-require a short-lived token minted via ``POST /ws-tokens`` — supply a
-``token_provider`` (e.g. wrapping :meth:`Client.mint_web_socket_token`).
+require a short-lived, account-bound token minted via ``POST /ws/token``.
+Supply a ``token_provider`` that wraps :meth:`Client.create_ws_token`, e.g.
+``lambda: rest.create_ws_token().token``. That token encodes the account, so
+the account channels scope themselves to the connected wallet, and agent keys
+can mint it.
 
 The wire protocol is the op-envelope shared by all SDKs: outbound
 ``{"op":"subscribe","channel",...,"since"?}``; inbound frames tagged by ``op``

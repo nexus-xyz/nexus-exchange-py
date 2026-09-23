@@ -311,7 +311,8 @@ class NetworkConfig:
     ws_market_data_url: str
 
     #: WebSocket base for the authenticated stream (``/ws``), which takes a
-    #: token minted over REST by ``POST /ws-tokens``. Informational — see
+    #: token minted over REST by ``POST /ws/token``
+    #: (:meth:`~nexus_exchange.Client.create_ws_token`). Informational — see
     #: :attr:`ws_market_data_url`.
     ws_authenticated_url: str
 
