@@ -2,9 +2,10 @@
 
 Fifteen REST operations, taking `endpoints.txt` from 51 to 66 of the 68 the
 pinned spec declares. The two that remain — `GET /ws` and `GET /stream` — are
-WebSocket upgrades answering `101 Switching Protocols`, not REST operations;
-this SDK opens no socket, so they have no method to test here. `POST /ws/token`
-is the REST half of that story and *is* covered below.
+WebSocket upgrades answering `101 Switching Protocols`, not REST operations, so
+they have no `Client` method to test here; the streaming client (`WsClient`) is
+covered by its own tests. `POST /ws/token` is the REST half of that story and
+*is* covered below.
 
 Each operation is pinned the way `test_endpoint_surface.py` pins the rest of the
 surface: exact path (so the `/api/v1` split per `endpoints.txt` cannot drift),

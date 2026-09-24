@@ -1674,7 +1674,11 @@ class TierOverride:
 
 @dataclass(frozen=True)
 class WsToken:
-    """A freshly minted, single-use WebSocket token (``POST /ws-tokens``)."""
+    """A freshly minted, single-use WebSocket token.
+
+    Both token mints return this shape. For the ``/ws`` stream, mint it with
+    :meth:`~nexus_exchange.Client.create_ws_token` (``POST /ws/token``).
+    """
 
     token: str
     raw: dict[str, Any]
