@@ -121,9 +121,9 @@ does not imply "can mint more of it".
 The two WebSocket bases and `published_rest_base` are the **durable**
 per-network values, recorded here so they live in one place. Testnet's are live;
 mainnet's host has no DNS record at all, so treat that one as a published target
-rather than something to connect to. This SDK ships no WebSocket client either
-way, so neither WS base is dialled on your behalf. What the client actually
-sends to is `base_url` / `direct_base_url`.
+rather than something to connect to. Neither WS base is dialled on your behalf:
+the streaming client (`WsClient`) connects only to the URL you pass it. What the
+REST client actually sends to is `base_url` / `direct_base_url`.
 
 Note the `/indexer` in testnet's bases. It is a **route prefix the deployment
 mounts the service under**, not part of the API contract. Copy the base whole

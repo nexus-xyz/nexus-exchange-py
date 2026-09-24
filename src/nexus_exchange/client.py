@@ -1910,9 +1910,10 @@ class Client:
         connected wallet.
 
         The token is short-lived (60s) and single-use. Pass it as ``?token=...``
-        when upgrading to ``GET /ws`` — **this SDK opens no socket**, so minting
-        the token is where its involvement ends; hand it to the WebSocket client
-        of your choice and mint a fresh one per connection.
+        when upgrading to ``GET /ws``, and mint a fresh one per connection.
+        :class:`~nexus_exchange.ws.WsClient` does both for you: pass
+        ``token_provider=lambda: client.create_ws_token().token`` and it re-mints
+        on every (re)connect.
         """
         data = self._request("POST", "/ws/token", signed=True)
         return WsToken.from_dict(data if isinstance(data, dict) else {})

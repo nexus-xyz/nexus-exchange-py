@@ -303,9 +303,9 @@ class NetworkConfig:
     #: WebSocket base for public market data (``/stream``).
     #:
     #: Informational on the same terms as :attr:`published_rest_base`: testnet's
-    #: route answers, mainnet's host does not resolve. This SDK ships no
-    #: WebSocket client either way, so nothing here is dialled on your behalf —
-    #: the value lives here so it lives in exactly one place. It is not ``None``
+    #: route answers, mainnet's host does not resolve. Nothing here is dialled
+    #: on your behalf: :class:`~nexus_exchange.ws.WsClient` connects only to the
+    #: URL you pass it. The value lives here so it lives in exactly one place. It is not ``None``
     #: the way an absent REST base is, because there is no reachable predecessor
     #: to prefer over it: no choice is being hidden.
     ws_market_data_url: str
@@ -453,8 +453,9 @@ class NetworkConfig:
         and ``version`` are contract-level constants, identical on every
         deployment, so they are deliberately not overridable here.
 
-        The two WebSocket bases are informational and default to empty — this SDK
-        ships no WebSocket client, so nothing is dialled on your behalf either way.
+        The two WebSocket bases are informational and default to empty. Nothing
+        reads them on your behalf: :class:`~nexus_exchange.ws.WsClient` connects
+        only to the URL you pass it.
 
         ``direct_base_url`` falls back to ``base_url`` when omitted *or blank*,
         matching how a lone ``base_url`` covers both surfaces on the client and
