@@ -28,8 +28,9 @@ concern, deliberately out of scope.
 The digests are implemented by hand (rather than via ``eth_account``'s
 ``encode_typed_data``) so they pin the exact bytes the server's ``alloy``
 ``register_agent_digest`` verifies: domain ``{name: "Nexus Exchange",
-version: "1", chainId}`` with **no** ``verifyingContract``. Known-answer tests
-cross-check the digests and signatures against the Rust SDK's pinned vectors.
+version: "1", chainId, salt}`` with **no** ``verifyingContract``, where ``salt``
+is ``keccak256(network name)`` (ENG-15643). The known-answer test pins the
+server's own digest vector.
 """
 
 from __future__ import annotations
@@ -47,6 +48,7 @@ from eth_utils.conversions import to_bytes
 from eth_utils.crypto import keccak
 
 from .errors import AuthError
+from .networks import Network, NetworkConfig
 
 __all__ = [
     "EthSigner",
@@ -241,19 +243,48 @@ def _require_chain_id(chain_id: object) -> None:
         raise AuthError(f"chain_id must be a positive integer (got {chain_id})")
 
 
-def _register_agent_digest(agent: bytes, expires_at: int, nonce: int, chain_id: int) -> bytes:
+def _register_salt(network: Network | NetworkConfig | str) -> bytes:
+    """The network's ``RegisterAgent`` domain salt, or refuse to sign.
+
+    The server verifies ``RegisterAgent`` under a domain salted with its own
+    network name, with no unsalted fallback (ENG-15643). A custom target names
+    no network, so there is no salt to sign under, and an unsalted signature
+    would only be refused by the server as ``signer_mismatch``.
+    """
+    config = Network(network).config if isinstance(network, str) else network
+    salt = config.signing_domain.salt
+    if salt is None:
+        raise AuthError(
+            f"no RegisterAgent signing salt is known for network {config.label!r}: "
+            "the server binds agent registrations to its network name "
+            "(salt = keccak256(network)), and a custom target names none. Pass "
+            "network=Network.MAINNET, Network.TESTNET or Network.LOCAL, whichever "
+            "the target server runs as. The salt only names the network; the "
+            "client you send the registration through still picks the host."
+        )
+    return salt
+
+
+def _register_agent_digest(
+    agent: bytes, expires_at: int, nonce: int, chain_id: int, salt: bytes
+) -> bytes:
     """EIP-712 digest for ``RegisterAgent{agent, expiresAt, nonce}``.
 
     ``keccak256(0x1901 || domainSeparator || hashStruct(message))`` under the
-    ``Nexus Exchange`` domain (no ``verifyingContract``). Matches the server's
-    ``agent_store::eip712::register_agent_digest``.
+    ``Nexus Exchange`` domain with ``salt`` and no ``verifyingContract``. Matches
+    the server's ``agent_store::eip712::register_agent_digest``.
     """
-    domain_type_hash = keccak(text="EIP712Domain(string name,string version,uint256 chainId)")
+    if len(salt) != 32:
+        raise AuthError("salt must be 32 bytes")
+    domain_type_hash = keccak(
+        text="EIP712Domain(string name,string version,uint256 chainId,bytes32 salt)"
+    )
     domain_separator = keccak(
         domain_type_hash
         + keccak(text=_EIP712_DOMAIN_NAME)
         + keccak(text=_EIP712_DOMAIN_VERSION)
         + _u256(chain_id)
+        + salt
     )
 
     struct_type_hash = keccak(text="RegisterAgent(address agent,uint64 expiresAt,uint64 nonce)")
@@ -335,6 +366,8 @@ class EthSigner:
         nonce: int,
         chain_id: int,
         label: str | None = None,
+        *,
+        network: Network | NetworkConfig | str,
     ) -> AgentRegistration:
         """Sign an agent-key registration with EIP-712.
 
@@ -355,10 +388,18 @@ class EthSigner:
         refused here rather than signed: a wrong domain either fails
         verification or produces a signature that is valid on a *different*
         network. Never reuse a chain id observed on another network.
+
+        ``network`` is the network the registration is for, and is required: the
+        server salts the ``RegisterAgent`` domain with its network name
+        (``salt = keccak256(network)``, ENG-15643), so a registration verifies
+        only on the network it was signed for. The salt comes from
+        :attr:`SigningDomain.salt <nexus_exchange.SigningDomain.salt>`; a custom
+        target has none and is refused.
         """
         _require_chain_id(chain_id)
+        salt = _register_salt(network)
         agent_addr = _parse_address(agent)
-        digest = _register_agent_digest(agent_addr, expires_at_ms, nonce, chain_id)
+        digest = _register_agent_digest(agent_addr, expires_at_ms, nonce, chain_id, salt)
         # ``unsafe_sign_hash`` signs a 32-byte prehash directly. It is "unsafe"
         # in the general sense that a raw digest hides what is being signed —
         # but here the digest is a domain-separated EIP-712 hash we computed

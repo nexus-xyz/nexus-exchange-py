@@ -44,6 +44,8 @@ from enum import Enum
 from types import MappingProxyType
 from urllib.parse import urlsplit
 
+from eth_utils.crypto import keccak
+
 __all__ = ["Funds", "Network", "NetworkConfig", "SigningDomain"]
 
 
@@ -115,8 +117,9 @@ _RESERVED_LABELS = frozenset({"mainnet", "testnet", "local", LEGACY_BASE_URL_LAB
 _LABEL_MAX_LEN = 64
 
 #: EIP-712 domain ``name`` and ``version`` for ``POST /agents/register``. These
-#: two have been stable across every published contract; ``chain_id`` is the one
-#: that is per-network and server-authoritative.
+#: two have been stable across every published contract; ``chain_id`` (caller
+#: supplied) and ``salt`` (derived from the network name) are the per-network
+#: parts.
 _DOMAIN_NAME = "Nexus Exchange"
 _DOMAIN_VERSION = "1"
 
@@ -138,11 +141,25 @@ class SigningDomain:
     the USDX bridge, not a Nexus L1 chain, so a Nexus L1 chain id is never
     correct there. Read the live value from the edge's ``/metadata`` payload for
     the network you are connected to.
+
+    ``salt`` is ``keccak256(network name)`` and is what the server binds a
+    ``RegisterAgent`` signature to its network with (ENG-15643): a registration
+    signed for testnet does not verify on mainnet. It is published per network
+    in the spec's ``x-nexus-networks[*].signing_domain``. Only ``RegisterAgent``
+    is signed under it; the server leaves ``RevokeAgent`` and ``WithdrawIntent``
+    unsalted. ``None`` on a custom target, where no network name is known, and
+    agent registration refuses to sign there rather than drop the salt.
     """
 
     name: str = _DOMAIN_NAME
     version: str = _DOMAIN_VERSION
     chain_id: int | None = None
+    salt: bytes | None = None
+
+
+def _network_salt(network: str) -> bytes:
+    """The ``RegisterAgent`` domain salt for a named network: ``keccak256(network)``."""
+    return keccak(text=network)
 
 
 def _clean_label(label: object) -> str:
@@ -451,7 +468,10 @@ class NetworkConfig:
         refuses rather than guessing — the same rule the named networks follow.
         Read the live value from the target's ``/metadata``. The EIP-712 ``name``
         and ``version`` are contract-level constants, identical on every
-        deployment, so they are deliberately not overridable here.
+        deployment, so they are deliberately not overridable here. The domain
+        carries no ``salt``: a custom target names no network, so
+        :meth:`EthSigner.register_agent <nexus_exchange.EthSigner.register_agent>`
+        refuses on it rather than sign a registration the server cannot verify.
 
         The two WebSocket bases are informational and default to empty. Nothing
         reads them on your behalf: :class:`~nexus_exchange.ws.WsClient` connects
@@ -590,7 +610,7 @@ _CONFIGS: Mapping[str, NetworkConfig] = MappingProxyType(
             has_faucet=False,
             published_rest_base="https://api.nexus.xyz/v1",
             **_ws_bases("https://api.nexus.xyz/v1"),
-            signing_domain=SigningDomain(),
+            signing_domain=SigningDomain(salt=_network_salt("mainnet")),
             base_url=None,
             direct_base_url=None,
         ),
@@ -600,7 +620,7 @@ _CONFIGS: Mapping[str, NetworkConfig] = MappingProxyType(
             has_faucet=True,
             published_rest_base="https://api.testnet.nexus.xyz/indexer",
             **_ws_bases(_TESTNET_SPEC_REST_BASE),
-            signing_domain=SigningDomain(),
+            signing_domain=SigningDomain(salt=_network_salt("testnet")),
             base_url="https://api.testnet.nexus.xyz/indexer",
             # The /api/v1 surface is mounted UNDER the route prefix on this
             # deploy, so this is the same base — not the host root, which 404s
@@ -614,7 +634,7 @@ _CONFIGS: Mapping[str, NetworkConfig] = MappingProxyType(
             has_faucet=True,
             published_rest_base="http://localhost:9090",
             **_ws_bases("http://localhost:9090"),
-            signing_domain=SigningDomain(),
+            signing_domain=SigningDomain(salt=_network_salt("local")),
             base_url="http://localhost:9090",
             direct_base_url="http://localhost:9090",
         ),

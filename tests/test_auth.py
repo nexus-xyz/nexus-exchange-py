@@ -1,12 +1,14 @@
 """Wallet-signed auth tests.
 
-The known-answer vectors are copied verbatim from the Rust SDK
-(``nexus-exchange-rs`` ``src/auth/eth.rs``), which in turn pins them against an
-independent ethers v6 implementation and cross-checks the EIP-712 digest against
-the server's alloy ``register_agent_digest``. Matching them here proves the
-Python signer is byte-for-byte interoperable with the server and the Rust SDK —
-a wrong-but-self-consistent domain separator, type string, or field order would
-fail. Auth correctness is critical, so these are the load-bearing tests.
+The sign-in vectors are copied verbatim from the Rust SDK
+(``nexus-exchange-rs`` ``src/auth/eth.rs``), which pins them against an
+independent ethers v6 implementation. The ``RegisterAgent`` digest is the
+server's own pinned vector (``agent_store::tests::eip712_register_agent_digest_pinned``,
+alloy, salted with ``Network::Testnet`` since ENG-15643), with the same inputs.
+Matching it proves the Python signer builds the exact domain the server
+verifies: a wrong-but-self-consistent domain separator, type string, salt or
+field order would fail. Auth correctness is critical, so these are the
+load-bearing tests.
 """
 
 from __future__ import annotations
@@ -23,8 +25,10 @@ from nexus_exchange import (
     AuthError,
     Client,
     EthSigner,
+    Funds,
     LoginResponse,
     Network,
+    NetworkConfig,
 )
 from nexus_exchange.auth import _parse_address, _register_agent_digest, _u64
 
@@ -33,21 +37,24 @@ from nexus_exchange.auth import _parse_address, _register_agent_digest, _u64
 TEST_KEY = "ac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80"
 TEST_ADDR = "0xf39fd6e51aad88f6f4ce6ab8827279cfffb92266"
 
-# Pinned vectors, identical to the Rust SDK's known-answer tests.
-KAT_AGENT = "0x1234567890abcdef1234567890abcdef12345678"
-KAT_EXPIRES_MS = 1_782_000_000_000
+# The server's RegisterAgent digest inputs, verbatim.
+KAT_AGENT = "0xaaaaaaaaaaaaaaaaaaaabbbbbbbbbbbbbbbbbbbb"
+KAT_EXPIRES_MS = 1_700_000_000
 KAT_NONCE = 1
-KAT_CHAIN_ID = 393
+KAT_CHAIN_ID = 20056
+KAT_NETWORK = Network.TESTNET
 
 SIGN_IN_DIGEST = "0x99efa412eaa32f8d4ad2be2cad8835efc063776eff7834ddd3a8e34da9cd6268"
 SIGN_IN_SIG = (
     "0xff4ddf3b1af438fe00d02368ad8fa5fc5e57667e6826dbda3ddddc395a5287bb"
     "6eab0bc97652f6e7e1f08f665b868ca143da79e18dae8021799cdafc4af670ea1b"
 )
-REGISTER_DIGEST = "0x356e6f3d741f48279c78b228d4ed9217eb49ad9179d549c618215be57817bfd6"
+# The server's pinned digest. The signature over it by TEST_KEY is pinned
+# identically in the Rust and TypeScript SDKs (RFC 6979, three implementations).
+REGISTER_DIGEST = "0x5a52159bdde9c9ba6c1880598078c3326e8e32ea39c93425baafc76590d2a902"
 REGISTER_SIG = (
-    "0x5df263ed6d1b619a72d436a01104f9036af6258cacf56dea973321cbe722a995"
-    "50644eea6bf75656d48e982d2ce5db9ef13c4aced4539cf3c2ff87802b0197cc1b"
+    "0x40cc533ba443982d33463c30426a3e81569d07d68be841daefb2bf6baf4c8904"
+    "03efb48f19c76ab06bceec7530b149a5c91d71688f6c7009de47a99d2e68af951c"
 )
 
 
@@ -105,19 +112,25 @@ def test_sign_in_recovers_to_signer() -> None:
 
 def test_register_agent_digest_matches_known_answer() -> None:
     digest = _register_agent_digest(
-        _parse_address(KAT_AGENT), KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID
+        _parse_address(KAT_AGENT),
+        KAT_EXPIRES_MS,
+        KAT_NONCE,
+        KAT_CHAIN_ID,
+        KAT_NETWORK.signing_domain.salt,  # type: ignore[arg-type]
     )
     assert "0x" + digest.hex() == REGISTER_DIGEST
 
 
 def test_register_agent_signature_matches_known_answer() -> None:
-    req = signer().register_agent(KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID)
+    req = signer().register_agent(
+        KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID, network=KAT_NETWORK
+    )
     assert req.signature == REGISTER_SIG
 
 
 def test_register_agent_recovers_to_wallet() -> None:
     req = signer().register_agent(
-        KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID, label="my-bot"
+        KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID, label="my-bot", network=KAT_NETWORK
     )
     assert req.wallet == TEST_ADDR
     assert req.agent == KAT_AGENT
@@ -128,7 +141,11 @@ def test_register_agent_recovers_to_wallet() -> None:
     # Recover the wallet from the 65-byte r||s||v signature over the prehash,
     # via eth_keys directly — this proves the signature is over our digest.
     digest = _register_agent_digest(
-        _parse_address(KAT_AGENT), KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID
+        _parse_address(KAT_AGENT),
+        KAT_EXPIRES_MS,
+        KAT_NONCE,
+        KAT_CHAIN_ID,
+        KAT_NETWORK.signing_domain.salt,  # type: ignore[arg-type]
     )
     raw = bytes.fromhex(req.signature[2:])
     sig = keys.Signature(
@@ -138,9 +155,46 @@ def test_register_agent_recovers_to_wallet() -> None:
     assert "0x" + pub.to_canonical_address().hex() == TEST_ADDR
 
 
+# Published in the spec's x-nexus-networks[*].signing_domain.salt.
+SPEC_SALTS = {
+    Network.TESTNET: "d992b760ba3914309086be769796784454b6684e49ebfe3005bb9455433b7c8e",
+    Network.MAINNET: "7beafa94c8bfb8f1c1a43104a34f72c524268aafbfe83bff17485539345c66ff",
+    Network.LOCAL: "98591f89798185a27bc859ebabeeae88a1ed96bfbdf2f01b32ac97474b024894",
+}
+
+
+@pytest.mark.parametrize("network", list(Network))
+def test_network_salt_matches_the_spec(network: Network) -> None:
+    salt = network.signing_domain.salt
+    assert salt is not None
+    assert salt.hex() == SPEC_SALTS[network]
+
+
+def test_register_agent_signature_is_network_scoped() -> None:
+    sigs = {
+        n: signer().register_agent(KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID, network=n)
+        for n in Network
+    }
+    assert len(set(r.signature for r in sigs.values())) == len(Network)
+    # A plain network name resolves to the same domain as the enum member.
+    by_name = signer().register_agent(
+        KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID, network="testnet"
+    )
+    assert by_name.signature == REGISTER_SIG
+
+
+def test_register_agent_refuses_a_target_with_no_salt() -> None:
+    # A custom target names no network, so there is no salt; signing unsalted
+    # would only produce a registration the server refuses.
+    custom = NetworkConfig.custom(label="dev", funds=Funds.PLAY, base_url="http://localhost:1")
+    assert custom.signing_domain.salt is None
+    with pytest.raises(AuthError, match="no RegisterAgent signing salt"):
+        signer().register_agent(KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID, network=custom)
+
+
 def test_register_agent_rejects_bad_agent_address() -> None:
     with pytest.raises(AuthError):
-        signer().register_agent("0x1234", 1, 1, 1)
+        signer().register_agent("0x1234", 1, 1, 1, network=KAT_NETWORK)
 
 
 # -- uint64 field bounds (expiresAt / nonce) ------------------------------
@@ -164,9 +218,11 @@ def test_u64_rejects_out_of_range() -> None:
 
 def test_register_agent_rejects_out_of_range_expiry_or_nonce() -> None:
     with pytest.raises(AuthError):
-        signer().register_agent(KAT_AGENT, 1 << 64, KAT_NONCE, KAT_CHAIN_ID)
+        signer().register_agent(KAT_AGENT, 1 << 64, KAT_NONCE, KAT_CHAIN_ID, network=KAT_NETWORK)
     with pytest.raises(AuthError):
-        signer().register_agent(KAT_AGENT, KAT_EXPIRES_MS, 1 << 64, KAT_CHAIN_ID)
+        signer().register_agent(
+            KAT_AGENT, KAT_EXPIRES_MS, 1 << 64, KAT_CHAIN_ID, network=KAT_NETWORK
+        )
 
 
 # -- credential-safe reprs ------------------------------------------------
@@ -190,13 +246,19 @@ def test_login_response_repr_redacts_token() -> None:
 
 
 def test_label_omitted_when_none() -> None:
-    body = signer().register_agent(KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID).to_dict()
-    assert "label" not in body
+    body = signer().register_agent(
+        KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID, network=KAT_NETWORK
+    )
+    assert "label" not in body.to_dict()
 
 
 def test_label_present_when_set() -> None:
     body = (
-        signer().register_agent(KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID, "bot").to_dict()
+        signer()
+        .register_agent(
+            KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID, "bot", network=KAT_NETWORK
+        )
+        .to_dict()
     )
     assert body["label"] == "bot"
 
@@ -232,7 +294,7 @@ def test_register_agent_posts_eip712_body_and_parses(httpx_mock) -> None:
         json={"agent_address": KAT_AGENT, "expires_at": KAT_EXPIRES_MS},
     )
     registration = signer().register_agent(
-        KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID, "my-bot"
+        KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID, "my-bot", network=KAT_NETWORK
     )
     with Client(Network.LOCAL) as client:
         resp = client.register_agent(registration)

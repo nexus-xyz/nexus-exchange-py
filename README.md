@@ -148,6 +148,9 @@ Three things worth knowing before you pick one:
   the edge's `/metadata` for the network you are on. `register_agent` refuses to
   sign without one rather than defaulting: a wrong domain either fails
   verification or produces a signature valid on a *different* network.
+- **`register_agent` needs the network.** The server salts the `RegisterAgent`
+  domain with `keccak256(network name)`, so pass `network=` (the salt is in
+  `signing_domain.salt`). A custom target has no salt and is refused.
 
 The retired `stable` / `beta` release channels were never networks. `stable`
 became `Network.TESTNET` (same target); `beta` is now a custom target:
@@ -348,6 +351,7 @@ with Client() as client:
         expires_at_ms=1_782_000_000_000,
         nonce=1,
         chain_id=393,
+        network=client.network,  # salts the domain: valid on this network only
         label="my-bot",
     )
     registered = client.register_agent(registration)
