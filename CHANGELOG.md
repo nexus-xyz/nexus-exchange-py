@@ -15,6 +15,22 @@ future release below it. To improve the wording of a release, edit
 below `0.4.0` predate this and follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.0](https://github.com/nexus-xyz/nexus-exchange-py/compare/v0.6.0...v0.7.0) (2026-09-25)
+
+
+### ⚠ BREAKING CHANGES
+
+* **auth:** EthSigner.register_agent requires `network=`.
+
+### Bug Fixes
+
+* **auth:** salt the RegisterAgent domain with the network (ENG-17753) ([#95](https://github.com/nexus-xyz/nexus-exchange-py/issues/95)) ([127ad56](https://github.com/nexus-xyz/nexus-exchange-py/commit/127ad56c12f78ae76555fdc6252d5222c2db730c))
+
+
+### Documentation
+
+* **ws:** point the streaming client's token guidance at create_ws_token (ENG-17335) ([#93](https://github.com/nexus-xyz/nexus-exchange-py/issues/93)) ([aee0dd1](https://github.com/nexus-xyz/nexus-exchange-py/commit/aee0dd16eb33cf1efee842db5e3b5ee1cfd0a3f5))
+
 ## [0.6.0](https://github.com/nexus-xyz/nexus-exchange-py/compare/v0.5.0...v0.6.0) (2026-09-23)
 
 
