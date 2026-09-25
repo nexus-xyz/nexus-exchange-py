@@ -366,6 +366,7 @@ class TestSigningDomain:
                 expires_at_ms=1,
                 nonce=1,
                 chain_id=Network.MAINNET.signing_domain.chain_id,  # type: ignore[arg-type]
+                network=Network.MAINNET,
             )
 
     @pytest.mark.parametrize("bad", [0, -1, True])
@@ -379,11 +380,14 @@ class TestSigningDomain:
                 expires_at_ms=1,
                 nonce=1,
                 chain_id=bad,  # type: ignore[arg-type]
+                network=Network.TESTNET,
             )
 
     def test_a_valid_chain_id_still_signs(self) -> None:
         signer = EthSigner.from_hex(_KEY)
-        reg = signer.register_agent(agent="0x" + "22" * 20, expires_at_ms=1, nonce=1, chain_id=1)
+        reg = signer.register_agent(
+            agent="0x" + "22" * 20, expires_at_ms=1, nonce=1, chain_id=1, network=Network.TESTNET
+        )
         assert reg.signature.startswith("0x")
 
     def test_domain_defaults_match_the_contract(self) -> None:

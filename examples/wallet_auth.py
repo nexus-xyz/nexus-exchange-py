@@ -45,6 +45,7 @@ def main() -> None:
             expires_at_ms=now_ms + 30 * 24 * 60 * 60 * 1000,
             nonce=now_ms,
             chain_id=CHAIN_ID,
+            network=client.network,  # the domain salt binds it to this network
             label="example-bot",
         )
         registered = client.register_agent(registration)
