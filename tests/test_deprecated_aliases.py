@@ -99,14 +99,28 @@ def test_the_warning_points_at_the_caller() -> None:
     assert caught[0].filename == __file__
 
 
-@pytest.mark.parametrize(
-    ("name", "args"),
-    [("create_bridge_deposit_address", ("base",)), ("list_bridge_deposit_addresses", ())],
-)
-def test_unserved_deposit_address_methods_warn(name: str, args: tuple[Any, ...]) -> None:
-    # ENG-18023: nothing serves /bridge/deposit-addresses, so these warn rather
-    # than alias; the request itself is stubbed out.
+def test_create_bridge_deposit_address_warns() -> None:
+    # ENG-18023: nothing serves /bridge/deposit-addresses, so this warns; the
+    # request itself is stubbed out.
     client = Client(Network.LOCAL)
     client._request = Mock(return_value={})  # type: ignore[method-assign]
-    with pytest.warns(DeprecationWarning, match=f"`{name}` is deprecated: no server implements"):
-        getattr(client, name)(*args)
+    with pytest.warns(DeprecationWarning, match="`create_bridge_deposit_address` is deprecated"):
+        client.create_bridge_deposit_address("base")
+
+
+@pytest.mark.parametrize(
+    "name", ["fetch_bridge_deposit_addresses", "list_bridge_deposit_addresses"]
+)
+def test_fetch_bridge_deposit_addresses_warns_once_under_either_name(name: str) -> None:
+    # ENG-18009 renamed it, ENG-18023 deprecated it: the old name is the same
+    # method, so a call under either name warns exactly once, at the caller.
+    client = Client(Network.LOCAL)
+    client._request = Mock(return_value=[])  # type: ignore[method-assign]
+    with pytest.warns(DeprecationWarning) as caught:
+        assert getattr(client, name)() == []
+    assert len(caught) == 1
+    assert "no server implements GET /bridge/deposit-addresses" in str(caught[0].message)
+    assert caught[0].filename == __file__
+    client._request.assert_called_once_with(
+        "GET", "/bridge/deposit-addresses", signed=True, direct=True
+    )

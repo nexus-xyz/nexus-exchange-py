@@ -20,7 +20,6 @@ from ._parse import (
     opt_decimal,
     opt_int,
     opt_str,
-    to_bool,
     to_decimal,
     to_dict_list,
     to_int,
@@ -2143,96 +2142,6 @@ class PreviewResponse:
             ),
             expected_fill_vwap=opt_decimal(d.get("expected_fill_vwap"), "expected_fill_vwap"),
             projected_fees=opt_decimal(d.get("projected_fees"), "projected_fees"),
-            raw=d,
-        )
-
-
-@dataclass(frozen=True)
-class BridgeWallet:
-    """An ownership-proven wallet that withdrawals can be paid to
-    (``GET``/``POST /api/v1/bridge/wallets``).
-
-    All three fields are spec-``required`` and decode strictly.
-
-    The spec is explicit that :attr:`verified` and :attr:`is_default` are
-    **always true in this cut** and must not be branched on: a failed ownership
-    check returns ``400`` rather than storing an unproven record, and an account
-    holds at most one registered wallet. They exist now so that the
-    wallet-lifecycle follow-up — several wallets, a movable default, records not
-    yet proven — does not churn every generated SDK. Treat a ``False`` from a
-    future server as meaningful; do not write logic today that assumes it.
-    """
-
-    address: str
-    verified: bool
-    is_default: bool
-    raw: dict[str, Any]
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> BridgeWallet:
-        return cls(
-            address=to_str(d.get("address"), "address"),
-            verified=to_bool(d.get("verified"), "verified"),
-            is_default=to_bool(d.get("is_default"), "is_default"),
-            raw=d,
-        )
-
-
-@dataclass(frozen=True)
-class BridgeWalletsResponse:
-    """The account's registered withdrawal wallets (``GET /api/v1/bridge/wallets``).
-
-    ``wallets`` is spec-``required``, so a payload missing it is a decode
-    failure rather than an empty list — "no wallets registered" and "the server
-    did not send the field" are different facts, and only the first should read
-    as an empty account.
-    """
-
-    wallets: list[BridgeWallet]
-    raw: dict[str, Any]
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> BridgeWalletsResponse:
-        return cls(
-            wallets=[BridgeWallet.from_dict(w) for w in to_dict_list(d.get("wallets"), "wallets")],
-            raw=d,
-        )
-
-
-@dataclass(frozen=True)
-class BridgeWalletChallenge:
-    """A message proving control of a wallet
-    (``POST /api/v1/bridge/wallets/challenge``).
-
-    Sign :attr:`message` — **not** :attr:`nonce` — with EIP-191
-    ``personal_sign``, then echo the same ``message`` verbatim to
-    :meth:`Client.register_bridge_wallet`. Its format is server-defined, so
-    treat it as opaque: do not reformat, re-encode or trim it. The server keeps
-    no state between the two calls and re-derives the signed bytes from what you
-    send back, so any edit invalidates the proof.
-
-    Not single-use: until :attr:`expires_at` the same signature can be replayed,
-    which is a no-op because it only re-registers the same address for the same
-    account.
-
-    All four fields are spec-``required`` and decode strictly — a challenge
-    missing its message or expiry is unusable, and defaulting either would send
-    a signature over fabricated bytes.
-    """
-
-    address: str
-    nonce: str
-    message: str
-    expires_at: int
-    raw: dict[str, Any]
-
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> BridgeWalletChallenge:
-        return cls(
-            address=to_str(d.get("address"), "address"),
-            nonce=to_str(d.get("nonce"), "nonce"),
-            message=to_str(d.get("message"), "message"),
-            expires_at=to_int(d.get("expires_at"), "expires_at"),
             raw=d,
         )
 

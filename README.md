@@ -60,7 +60,7 @@ from the environment — no secrets in source).
 | Trading — `POST /orders`, `/orders/batch`, `/orders/preview`; `GET /orders`, `/orders/{id}`, `/orders/history`; `DELETE /orders`, `/orders/{id}`; `PATCH /orders/{id}` | ✅ implemented — every by-id call takes the order's `market_id` (`fetch_order(id, market_id)`, `cancel_order(id, market_id)`, `edit_order(id, market_id, …)`); the engine rejects one without it |
 | Order types — `Limit`, `Market`, `StopLimit`, `StopMarket`, `TakeProfitLimit`, `TakeProfitMarket`, `TrailingStop`, `TrailingLimit` (typed `OrderRequest` builders; `trigger_price` for stop / take-profit; deprecated `stop_price` never sent) | ✅ implemented. The spec does not define which way a trigger fires for each side (see the `OrderRequest` docstring) |
 | Funds — `POST /account/deposit`, `/account/credit`, `/deposits`, `/faucet`; `GET /deposits`, `/funding` | ✅ implemented |
-| Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`), `/bridge/wallets`; `POST /bridge/wallets/challenge` | ✅ implemented. `POST`/`GET /bridge/deposit-addresses` are deprecated: nothing serves them |
+| Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`) | ✅ implemented. `POST`/`GET /bridge/deposit-addresses` are deprecated: nothing serves them. `/bridge/wallets` and `POST /bridge/wallets/challenge` are not wrapped: EX-Bridge, wrapped under ENG-5639 not here (see the migration note below) |
 | Keys / agents / WS token — `GET /keys`, `DELETE /keys/{id}`, `/agents`, `POST /ws/token` | ✅ implemented. The legacy `POST /ws-tokens` is deliberately not wrapped: use `create_ws_token()` |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
 | Cursor pagination — `cursor` + `X-Next-Cursor` on all five paginated GETs | ✅ implemented |
@@ -73,11 +73,22 @@ from the environment — no secrets in source).
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
 Anything not listed there is not wrapped yet — contributions welcome.
 
-Against the pinned spec (`.api-version`), that is **66 of 67 operations**, not
-counting the legacy `POST /ws-tokens`, which is deliberately not wrapped. The one
-uncovered operation is `GET /stream`, the public market-data WebSocket upgrade.
-`GET /ws` is covered by `WsClient` (see below), with a token from
-`create_ws_token()`.
+Against the pinned spec (`.api-version`), that is **63 of 67 operations**, not
+counting the legacy `POST /ws-tokens`, which is deliberately not wrapped. One of
+the four uncovered operations is `GET /stream`, the public market-data WebSocket
+upgrade. `GET /ws` is covered by `WsClient` (see below), with a token from
+`create_ws_token()`. The other three are the `/bridge/wallets` operations, which
+this SDK does not wrap, the same as nexus-exchange-rs: EX-Bridge, wrapped under
+ENG-5639 not here.
+
+**Migrating off the bridge wallet methods (ENG-18009).** `list_bridge_wallets`,
+`create_bridge_wallet_challenge` and `register_bridge_wallet` (with the
+`BridgeWallet`, `BridgeWalletsResponse` and `BridgeWalletChallenge` types) were
+removed outright, not deprecated. Their routes are not in the spec on the
+monorepo's main, the server deleted them (ENG-13801), and they are EX-Bridge
+scope (ENG-5639), which nexus-exchange-rs does not wrap either. There is no
+replacement: nothing in the spec takes their place, so delete the calls rather
+than looking for a new method.
 
 ### Method names
 
@@ -106,6 +117,7 @@ still work for one minor release, and raise `DeprecationWarning`. One exception:
 | `set_account_tier` | `set_tier` |
 | `fetch_tier_overrides` | `fetch_tiers` |
 | `reset_account_tier` | `delete_tier` |
+| `list_bridge_deposit_addresses` | `fetch_bridge_deposit_addresses` (both deprecated: the route is unserved, see [Bridge](#bridge)) |
 
 ### Networks
 
@@ -452,8 +464,8 @@ deposits = client.fetch_bridge_deposits(limit=1, chain=assets.chains[0].chain)
 ```
 
 The SDK has no way to get a deposit address today.
-`create_bridge_deposit_address` and `list_bridge_deposit_addresses` are
-deprecated: no server implements `/bridge/deposit-addresses` (its design was
+`create_bridge_deposit_address` and `fetch_bridge_deposit_addresses` (old name
+`list_bridge_deposit_addresses`) are deprecated: no server implements `/bridge/deposit-addresses` (its design was
 cancelled), and no replacement has shipped yet. To fund a testnet account, use
 `claim_faucet()` or `claim_credit()`.
 

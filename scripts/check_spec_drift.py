@@ -63,7 +63,10 @@ Five invariants are enforced:
    (`fetchTradingFeesV1` -> `fetch_trading_fees`) and a `_page` suffix allowed,
    since the paging helper keeps its operation's stem (`fetch_orders_page`). Where
    the canonical operationId has not reached the pinned spec yet, it comes from
-   OPERATION_IDS_AHEAD_OF_PIN, which is stale-checked in both directions.
+   OPERATION_IDS_AHEAD_OF_PIN, which is stale-checked in both directions. A method
+   that deliberately does not carry its operation's name is in METHOD_NAME_EXEMPT
+   with its reason, stale-checked the same way (ENG-18009, mirroring
+   nexus-exchange-rs).
 
 Usage: check_spec_drift.py <openapi.json>
 """
@@ -922,6 +925,17 @@ OPERATION_IDS_AHEAD_OF_PIN: dict[tuple[str, str], str] = {
     ("GET", "/keys"): "fetchApiKeys",
 }
 
+# Methods whose name deliberately is not `snake_case(operationId)` (or that plus
+# PAGE_HELPER_SUFFIX), with the reason. The same table, entry and reason as
+# nexus-exchange-rs's (ENG-18009). Stale-checked: an entry that holds no request
+# any more, or whose name now passes, fails until it is deleted.
+METHOD_NAME_EXEMPT: dict[str, str] = {
+    "fetch_bridge_deposit_addresses": "pinned id is listBridgeDepositAddresses and "
+    "the monorepo spec has since removed the route (ENG-10373), so there is no "
+    "canonical id to rename to; the name follows the fetch grammar ENG-17740 "
+    "gives the other bridge reads",
+}
+
 # The paging helper of a paginated operation keeps the operation's stem.
 PAGE_HELPER_SUFFIX = "_page"
 
@@ -996,6 +1010,14 @@ def check_method_names(spec):
         want = method_name_for(operation_id)
         for call in calls:
             name = (call.func or "<module>").removesuffix(PAGE_HELPER_SUFFIX)
+            if call.func in METHOD_NAME_EXEMPT:
+                if name == want:
+                    errors += 1
+                    print(
+                        f"\nERROR: METHOD_NAME_EXEMPT entry `{call.func}` is stale: the "
+                        f"name now matches {operation_id}. Delete it."
+                    )
+                continue
             if name != want:
                 errors += 1
                 print(
@@ -1005,11 +1027,20 @@ def check_method_names(spec):
                     f"keep the old name as a deprecated alias for one minor (R2.25)."
                 )
 
+    requesting = {call.func for calls in requested.values() for call in calls}
+    for func in sorted(set(METHOD_NAME_EXEMPT) - requesting):
+        errors += 1
+        print(
+            f"\nERROR: METHOD_NAME_EXEMPT entry `{func}` is stale: no method of that "
+            f"name issues a request. Delete it."
+        )
+
     if not errors:
         print(
             f"\nOK: every method that issues a request is named snake_case(operationId) "
             f"of its operation ({len(OPERATION_IDS_AHEAD_OF_PIN)} operationId(s) read "
-            f"from OPERATION_IDS_AHEAD_OF_PIN until the pin catches up)."
+            f"from OPERATION_IDS_AHEAD_OF_PIN until the pin catches up, "
+            f"{len(METHOD_NAME_EXEMPT)} exempt)."
         )
     return errors
 
