@@ -61,7 +61,7 @@ from the environment — no secrets in source).
 | Order types — `Limit`, `Market`, `StopLimit`, `StopMarket`, `TakeProfitLimit`, `TakeProfitMarket`, `TrailingStop`, `TrailingLimit` (typed `OrderRequest` builders; `trigger_price` for stop / take-profit; deprecated `stop_price` never sent) | ✅ implemented. The spec does not define which way a trigger fires for each side (see the `OrderRequest` docstring) |
 | Funds — `POST /account/deposit`, `/account/credit`, `/deposits`, `/faucet`; `GET /deposits`, `/funding` | ✅ implemented |
 | Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses`, `/bridge/wallets`; `POST /bridge/wallets/challenge` | ✅ implemented |
-| Keys / agents / WS token — `GET /keys`, `DELETE /keys/{id}`, `/agents`, `POST /ws-tokens`, `/ws/token` | ✅ implemented |
+| Keys / agents / WS token — `GET /keys`, `DELETE /keys/{id}`, `/agents`, `POST /ws/token` | ✅ implemented. The legacy `POST /ws-tokens` is deliberately not wrapped: use `create_ws_token()` |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
 | Cursor pagination — `cursor` + `X-Next-Cursor` on all five paginated GETs | ✅ implemented |
 | Create API key — `POST /keys` | ✅ implemented (session-token authenticated: pass `login().token` to `create_api_key`) |
@@ -73,11 +73,11 @@ from the environment — no secrets in source).
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
 Anything not listed there is not wrapped yet — contributions welcome.
 
-Against the pinned spec (`.api-version`), that is **66 of 68 operations**. The two
-uncovered ones are `GET /ws` and `GET /stream`: both answer `101 Switching
-Protocols` rather than a JSON body, so they are WebSocket upgrades rather than
-REST operations this client can wrap. Mint a token with `create_ws_token()` and
-open the socket with a WebSocket library of your choice.
+Against the pinned spec (`.api-version`), that is **66 of 67 operations**, not
+counting the legacy `POST /ws-tokens`, which is deliberately not wrapped. The one
+uncovered operation is `GET /stream`, the public market-data WebSocket upgrade.
+`GET /ws` is covered by `WsClient` (see below), with a token from
+`create_ws_token()`.
 
 ### Method names
 
@@ -85,7 +85,10 @@ Each method is `snake_case` of its operation's spec `operationId`
 (`fetchTradingFees` → `fetch_trading_fees`), and paging helpers keep that stem
 (`fetch_orders_page`, `iter_orders`). `scripts/check_spec_drift.py` enforces it.
 The methods below were renamed to follow that rule (ENG-17744). The old names
-still work for one minor release, and raise `DeprecationWarning`:
+still work for one minor release, and raise `DeprecationWarning`. One exception:
+`mint_web_socket_token` (briefly `create_ws_token_legacy`) wrapped the legacy
+`POST /ws-tokens` and was removed outright (ENG-18010); call `create_ws_token()`
+(`POST /ws/token`) instead.
 
 | Old | New |
 |---|---|
@@ -100,7 +103,6 @@ still work for one minor release, and raise `DeprecationWarning`:
 | `adjust_margin` | `add_margin` |
 | `fetch_order_history`, `fetch_order_history_page`, `iter_order_history` | `fetch_orders`, `fetch_orders_page`, `iter_orders` |
 | `amend_order` | `edit_order` |
-| `mint_web_socket_token` | `create_ws_token_legacy` |
 | `set_account_tier` | `set_tier` |
 | `fetch_tier_overrides` | `fetch_tiers` |
 | `reset_account_tier` | `delete_tier` |
@@ -428,10 +430,10 @@ pinned byte-for-byte to the spec's `x-nexus-test-vectors`.
   agent key per concurrent writer (and per process).
 - **Agent keys cannot withdraw.** They are trade-only. An agent client refuses
   any withdrawal route (`/withdrawals`, `/account/withdraw`,
-  `/bridge/withdrawals`), agent management (`fetch_agents`, `revoke_agent`) and
-  the legacy `create_ws_token_legacy` **locally**, with `AgentKeyRefusedError`,
-  before anything is signed or sent — the server would `403` them. Use an HMAC
-  client for those; `create_ws_token` accepts agent keys.
+  `/bridge/withdrawals`) and agent management (`fetch_agents`, `revoke_agent`)
+  **locally**, with `AgentKeyRefusedError`, before anything is signed or sent —
+  the server would `403` them. Use an HMAC client for those; `create_ws_token`
+  accepts agent keys.
 
 ## Bridge
 

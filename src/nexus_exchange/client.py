@@ -190,12 +190,11 @@ _READ_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 _AGENT_WITHDRAWAL_PATHS = frozenset({"/withdrawals", "/account/withdraw", "/bridge/withdrawals"})
 
 #: Non-withdrawal operations the spec leaves off ``agentAuth`` and the server
-#: refuses for agent keys with ``403 AGENT_KEY_FORBIDDEN``: agent management
-#: and the HMAC-only legacy WS token. ``(METHOD, path regex)``.
+#: refuses for agent keys with ``403 AGENT_KEY_FORBIDDEN``: agent management.
+#: ``(METHOD, path regex)``.
 _AGENT_FORBIDDEN_OPS = (
     ("GET", re.compile(r"/agents")),
     ("DELETE", re.compile(r"/agents/[^/]+")),
-    ("POST", re.compile(r"/ws-tokens")),
 )
 
 
@@ -543,8 +542,7 @@ class Client:
     request credential the client holds.
 
     Agent keys are trade-only: an agent client refuses withdrawals, agent
-    management (:meth:`fetch_agents`, :meth:`revoke_agent`) and
-    :meth:`create_ws_token_legacy` locally with
+    management (:meth:`fetch_agents`, :meth:`revoke_agent`) locally with
     :class:`~nexus_exchange.AgentKeyRefusedError`, before signing. Writes from
     one agent key in flight concurrently can be refused as nonce replays
     (ENG-17010); see :class:`~nexus_exchange.AgentSigner`.
@@ -1899,29 +1897,13 @@ class Client:
         """
         return self._request("DELETE", f"/agents/{quote(address, safe='')}", signed=True)
 
-    def create_ws_token_legacy(self) -> WsToken:
-        """``POST /ws-tokens`` — mint a single-use WebSocket token. Requires credentials.
-
-        **Legacy.** The spec names this operation ``createWsTokenLegacy`` and
-        points at :meth:`create_ws_token` instead: this one mints a token for
-        the public ``/stream`` socket, while the newer route also accepts
-        registered agent keys and session tokens and binds the token to the
-        account. Kept because it is still a published operation.
-
-        HMAC-only: refused for an agent-key client
-        (:class:`~nexus_exchange.AgentKeyRefusedError`) — use :meth:`create_ws_token`.
-        """
-        data = self._request("POST", "/ws-tokens", signed=True)
-        return WsToken.from_dict(data if isinstance(data, dict) else {})
-
     def create_ws_token(self) -> WsToken:
         """``POST /ws/token`` — mint a single-use WebSocket token. Requires credentials.
 
-        The preferred route over :meth:`create_ws_token_legacy`: it accepts HMAC
-        keys, registered agent keys and session tokens, and the token it returns
-        encodes the account identity, so the per-account channels (orders,
-        fills, positions, balances, liquidations) scope themselves to the
-        connected wallet.
+        Accepts HMAC keys, registered agent keys and session tokens, and the
+        token it returns encodes the account identity, so the per-account
+        channels (orders, fills, positions, balances, liquidations) scope
+        themselves to the connected wallet.
 
         The token is short-lived (60s) and single-use. Pass it as ``?token=...``
         when upgrading to ``GET /ws``, and mint a fresh one per connection.
@@ -2046,11 +2028,6 @@ class Client:
         """Deprecated alias for :meth:`edit_order`."""
         _warn_renamed("amend_order", "edit_order")
         return self.edit_order(order_id, market_id, amend)
-
-    def mint_web_socket_token(self) -> WsToken:
-        """Deprecated alias for :meth:`create_ws_token_legacy`."""
-        _warn_renamed("mint_web_socket_token", "create_ws_token_legacy")
-        return self.create_ws_token_legacy()
 
     def set_account_tier(self, address: str, tier: str) -> TierOverride:
         """Deprecated alias for :meth:`set_tier`."""

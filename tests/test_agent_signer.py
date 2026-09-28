@@ -288,7 +288,6 @@ def test_public_call_on_an_agent_client_sends_no_credential(httpx_mock) -> None:
     [
         (lambda c: c.fetch_agents(), "GET", "/agents"),
         (lambda c: c.revoke_agent("0xabc"), "DELETE", "/agents/0xabc"),
-        (lambda c: c.create_ws_token_legacy(), "POST", "/ws-tokens"),
     ],
 )
 def test_agent_forbidden_operations_are_refused_before_any_request(
