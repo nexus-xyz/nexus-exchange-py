@@ -73,13 +73,12 @@ from the environment — no secrets in source).
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
 Anything not listed there is not wrapped yet — contributions welcome.
 
-Against the pinned spec (`.api-version`), that is **63 of 68 operations**. Two of
-the five uncovered ones are `GET /ws` and `GET /stream`: both answer `101 Switching
-Protocols` rather than a JSON body, so they are WebSocket upgrades rather than
-REST operations this client can wrap. Mint a token with `create_ws_token()` and
-open the socket with a WebSocket library of your choice. The other three are the
-`/bridge/wallets` operations, which this SDK does not wrap, the same as
-nexus-exchange-rs: EX-Bridge, wrapped under ENG-5639 not here.
+Against the pinned spec (`.api-version`), that is **64 of 68 operations**. One of
+the four uncovered ones is `GET /stream`, a WebSocket upgrade answering `101
+Switching Protocols` rather than a REST operation this client can wrap (`GET /ws`
+is reached through `WsClient`; mint a token with `create_ws_token()`). The other
+three are the `/bridge/wallets` operations, which this SDK does not wrap, the same
+as nexus-exchange-rs: EX-Bridge, wrapped under ENG-5639 not here.
 
 ### Method names
 
