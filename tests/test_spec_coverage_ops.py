@@ -5,12 +5,14 @@ pinned spec declares. The two that remain — `GET /ws` and `GET /stream` — ar
 WebSocket upgrades answering `101 Switching Protocols`, not REST operations, so
 they have no `Client` method to test here; the streaming client (`WsClient`) is
 covered by its own tests. `POST /ws/token` is the REST half of that story and
-*is* covered below.
+*is* covered below. The three `/bridge/wallets` operations of that batch were
+removed again (ENG-18009): nexus-exchange-rs does not wrap them either (EX-Bridge,
+wrapped under ENG-5639 not here).
 
 Each operation is pinned the way `test_endpoint_surface.py` pins the rest of the
 surface: exact path (so the `/api/v1` split per `endpoints.txt` cannot drift),
 verb, whether the request was signed, and that the response parses into its
-typed model. On top of that, three things specific to this batch get their own
+typed model. On top of that, two things specific to this batch get their own
 tests because they are where the surface can go quietly wrong:
 
   * **`POST /faucet` is testnet/local only.** It carries the same
@@ -25,10 +27,6 @@ tests because they are where the surface can go quietly wrong:
     settle.) The bearer path is a second auth path through `_send`, and the
     tests pin that it carries a bearer token, carries *no* signature, and
     refuses a token that could forge a header.
-  * **Required fields decode strictly.** `BridgeWallet` and
-    `BridgeWalletChallenge` have spec-`required` fields whose absence must fail
-    rather than default — a fabricated `verified=True` or an empty challenge
-    `message` is worse than a `DecodeError`.
 """
 
 from __future__ import annotations
@@ -265,88 +263,6 @@ def test_the_three_new_limits_are_not_interchangeable() -> None:
     assert DEPOSITS_LIMIT_MAX == 100
     assert ACCOUNT_FUNDING_LIMIT_MAX == 1000
     assert FUNDING_SAMPLES_LIMIT_MAX == 480
-
-
-# -- bridge withdrawal wallets -------------------------------------------------
-
-
-def test_list_bridge_wallets_signs_and_parses(httpx_mock) -> None:
-    httpx_mock.add_response(
-        url=f"{_BASE}/api/v1/bridge/wallets",
-        json={"wallets": [{"address": "0xabc", "verified": True, "is_default": True}]},
-    )
-    with _authed() as client:
-        wallets = client.list_bridge_wallets()
-
-    _assert_signed(httpx_mock.get_request(), "GET", "/api/v1/bridge/wallets")
-    assert wallets.wallets[0].address == "0xabc"
-    assert wallets.wallets[0].verified is True
-
-
-def test_missing_wallets_array_is_a_decode_error_not_an_empty_account(httpx_mock) -> None:
-    # `wallets` is spec-required. "No wallets registered" and "the server did not
-    # send the field" are different facts, and only the first may read as empty —
-    # an account that silently looks wallet-less cannot be paid a withdrawal.
-    httpx_mock.add_response(url=f"{_BASE}/api/v1/bridge/wallets", json={})
-    with _authed() as client, pytest.raises(DecodeError, match="wallets"):
-        client.list_bridge_wallets()
-
-
-def test_bridge_wallet_flags_must_be_real_booleans(httpx_mock) -> None:
-    # `bool("false")` is True. A wallet that reports `verified` when the payload
-    # says otherwise is undetectable downstream, so a non-boolean is a decode
-    # failure rather than a coercion.
-    httpx_mock.add_response(
-        url=f"{_BASE}/api/v1/bridge/wallets",
-        json={"wallets": [{"address": "0xabc", "verified": "false", "is_default": True}]},
-    )
-    with _authed() as client, pytest.raises(DecodeError, match="verified"):
-        client.list_bridge_wallets()
-
-
-def test_the_wallet_registration_round_trip(httpx_mock) -> None:
-    httpx_mock.add_response(
-        url=f"{_BASE}/api/v1/bridge/wallets/challenge",
-        json={
-            "address": "0xabc",
-            "nonce": "n1",
-            "message": "Nexus wants you to sign in...\nNonce: n1",
-            "expires_at": 1750000060000,
-        },
-    )
-    httpx_mock.add_response(
-        url=f"{_BASE}/api/v1/bridge/wallets",
-        json={"address": "0xabc", "verified": True, "is_default": True},
-    )
-    with _authed() as client:
-        challenge = client.create_bridge_wallet_challenge("0xabc")
-        wallet = client.register_bridge_wallet("0xabc", challenge.message, "0xsig")
-
-    challenge_req, register_req = httpx_mock.get_requests()
-    _assert_signed(challenge_req, "POST", "/api/v1/bridge/wallets/challenge")
-    _assert_signed(register_req, "POST", "/api/v1/bridge/wallets")
-    # The server keeps no state between the two calls and re-derives the signed
-    # bytes from what comes back, so the message must survive byte for byte —
-    # including the embedded newline a helpful `.strip()` would eat.
-    assert b'"Nexus wants you to sign in...\\nNonce: n1"' in register_req.content
-    assert wallet.verified is True
-
-
-def test_a_challenge_missing_its_message_fails_to_decode(httpx_mock) -> None:
-    # Defaulting `message` to "" would have the caller sign fabricated bytes and
-    # send a signature that can never verify.
-    httpx_mock.add_response(
-        url=f"{_BASE}/api/v1/bridge/wallets/challenge",
-        json={"address": "0xabc", "nonce": "n1", "expires_at": 1750000060000},
-    )
-    with _authed() as client, pytest.raises(DecodeError, match="message"):
-        client.create_bridge_wallet_challenge("0xabc")
-
-
-@pytest.mark.parametrize("args", [("", "m", "s"), ("0xabc", "", "s"), ("0xabc", "m", "")])
-def test_register_bridge_wallet_rejects_blank_arguments(args: tuple[str, str, str]) -> None:
-    with _authed() as client, pytest.raises(ValueError, match="required"):
-        client.register_bridge_wallet(*args)
 
 
 # -- signed account writes -----------------------------------------------------

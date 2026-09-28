@@ -67,6 +67,7 @@ _ALIASES = [
     ("set_account_tier", "set_tier", ("0xabc", "mm"), {}, ("0xabc", "mm"), {}),
     ("fetch_tier_overrides", "fetch_tiers", (), {}, (), {}),
     ("reset_account_tier", "delete_tier", ("0xabc",), {}, ("0xabc",), {}),
+    ("list_bridge_deposit_addresses", "fetch_bridge_deposit_addresses", (), {}, (), {}),
 ]
 
 

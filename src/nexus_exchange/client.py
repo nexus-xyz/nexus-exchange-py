@@ -53,9 +53,6 @@ from .types import (
     BridgeAssetsResponse,
     BridgeDeposit,
     BridgeDepositAddress,
-    BridgeWallet,
-    BridgeWalletChallenge,
-    BridgeWalletsResponse,
     CancelOnDisconnectStatus,
     ClosedPosition,
     CreditResult,
@@ -1398,7 +1395,7 @@ class Client:
         )
         return BridgeDepositAddress.from_dict(data if isinstance(data, dict) else {})
 
-    def list_bridge_deposit_addresses(self) -> list[BridgeDepositAddress]:
+    def fetch_bridge_deposit_addresses(self) -> list[BridgeDepositAddress]:
         """``GET /bridge/deposit-addresses`` — list deposit addresses. Requires credentials."""
         data = self._request("GET", "/bridge/deposit-addresses", signed=True, direct=True)
         return [BridgeDepositAddress.from_dict(a) for a in (data if isinstance(data, list) else [])]
@@ -1427,77 +1424,6 @@ class Client:
             direct=True,
         )
         return BridgeDeposit.from_dict(data if isinstance(data, dict) else {})
-
-    # -- bridge (withdrawal wallets) -----------------------------------------
-    # Registering a payout address is a two-step proof: mint a challenge, sign
-    # its `message` with the wallet's key, hand both back. The server keeps no
-    # state between the calls — it re-derives the signed bytes from the message
-    # echoed back — so the message must survive the round trip byte for byte.
-
-    def list_bridge_wallets(self) -> BridgeWalletsResponse:
-        """``GET /bridge/wallets`` — registered withdrawal wallets. Requires credentials.
-
-        Only a verified wallet can receive a withdrawal. In this cut an account
-        holds at most one, and both its flags are always true — see
-        :class:`~nexus_exchange.BridgeWallet` before branching on either.
-        """
-        data = self._request("GET", "/bridge/wallets", signed=True, direct=True)
-        return BridgeWalletsResponse.from_dict(data if isinstance(data, dict) else {})
-
-    def create_bridge_wallet_challenge(self, address: str) -> BridgeWalletChallenge:
-        """``POST /bridge/wallets/challenge`` — mint a wallet-registration challenge.
-
-        Requires credentials. Step 1 of 2: sign the returned ``message`` with
-        ``address``'s own key (EIP-191 ``personal_sign``), then pass the message
-        and signature to :meth:`register_bridge_wallet`.
-
-        ``address`` is the wallet being registered, which need not be the
-        account's own address — that is the point of proving control of it.
-        """
-        if not address:
-            raise ValueError("address is required")
-        data = self._request(
-            "POST",
-            "/bridge/wallets/challenge",
-            body={"address": address},
-            signed=True,
-            direct=True,
-        )
-        return BridgeWalletChallenge.from_dict(data if isinstance(data, dict) else {})
-
-    def register_bridge_wallet(self, address: str, message: str, signature: str) -> BridgeWallet:
-        """``POST /bridge/wallets`` — register a proven withdrawal wallet.
-
-        Requires credentials. Step 2 of 2, following
-        :meth:`create_bridge_wallet_challenge`.
-
-        ``message`` must be the challenge's ``message`` **verbatim** — the
-        server re-derives the signed bytes from it and re-checks the integrity
-        tag, the account binding and the expiry against what you send, so any
-        reformatting, re-encoding or trimming invalidates a valid signature and
-        returns ``400``. Pass ``challenge.message`` straight through rather than
-        rebuilding it.
-
-        ``signature`` is the 0x-prefixed 65-byte EIP-191 signature over that
-        message, and ``address`` must be the address it recovers to.
-
-        A failed ownership check returns ``400`` and stores nothing; there is no
-        partially-registered state to clean up.
-        """
-        if not address:
-            raise ValueError("address is required")
-        if not message:
-            raise ValueError("message is required: pass the challenge's `message` verbatim")
-        if not signature:
-            raise ValueError("signature is required")
-        data = self._request(
-            "POST",
-            "/bridge/wallets",
-            body={"address": address, "message": message, "signature": signature},
-            signed=True,
-            direct=True,
-        )
-        return BridgeWallet.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_rate_limit_status(self) -> RateLimitStatus:
         """``GET /account/rate-limit`` — the caller's rate-limit status.
@@ -2066,6 +1992,11 @@ class Client:
         """Deprecated alias for :meth:`delete_tier`."""
         _warn_renamed("reset_account_tier", "delete_tier")
         return self.delete_tier(address)
+
+    def list_bridge_deposit_addresses(self) -> list[BridgeDepositAddress]:
+        """Deprecated alias for :meth:`fetch_bridge_deposit_addresses`."""
+        _warn_renamed("list_bridge_deposit_addresses", "fetch_bridge_deposit_addresses")
+        return self.fetch_bridge_deposit_addresses()
 
     # -- request plumbing -------------------------------------------------
     def _sign(self, method: str, path: str, query: str, body: bytes) -> dict[str, str]:

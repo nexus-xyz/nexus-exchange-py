@@ -56,9 +56,10 @@ GET /api/v1/bridge/deposit-addresses
 GET /api/v1/bridge/assets
 GET /api/v1/bridge/deposits
 GET /api/v1/bridge/deposits/{id}
-GET /api/v1/bridge/wallets
-POST /api/v1/bridge/wallets
-POST /api/v1/bridge/wallets/challenge
+# Deliberately not targeted, as in nexus-exchange-rs's NOT_TARGETED (ENG-18009):
+#   GET /api/v1/bridge/wallets            EX-Bridge, wrapped under ENG-5639 not here
+#   POST /api/v1/bridge/wallets           EX-Bridge, wrapped under ENG-5639 not here
+#   POST /api/v1/bridge/wallets/challenge EX-Bridge, wrapped under ENG-5639 not here
 
 # -- legacy gateway (no /api/v1 route yet) --
 GET /markets

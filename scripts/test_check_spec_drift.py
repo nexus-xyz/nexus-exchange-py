@@ -870,14 +870,15 @@ def spec_with_ids(**ops):
 class TestMethodNames(unittest.TestCase):
     """Invariant 4: each requesting method is named snake_case(operationId) (R2.25)."""
 
-    def _errors(self, client_body, spec, ahead=None):
-        saved = csd.OPERATION_IDS_AHEAD_OF_PIN
+    def _errors(self, client_body, spec, ahead=None, exempt=None):
+        saved = csd.OPERATION_IDS_AHEAD_OF_PIN, csd.METHOD_NAME_EXEMPT
         csd.OPERATION_IDS_AHEAD_OF_PIN = dict(ahead or {})
+        csd.METHOD_NAME_EXEMPT = dict(exempt or {})
         try:
             with synthetic_package(client_body=client_body, manifest="GET /x\n"):
                 return _quiet(csd.check_method_names, spec)
         finally:
-            csd.OPERATION_IDS_AHEAD_OF_PIN = saved
+            csd.OPERATION_IDS_AHEAD_OF_PIN, csd.METHOD_NAME_EXEMPT = saved
 
     def test_snake_case_rules(self):
         for op_id, want in (
@@ -922,6 +923,19 @@ class TestMethodNames(unittest.TestCase):
         spec = spec_with_ids(**{"GET /orders/history": "fetchOrders", "GET /keys": "listApiKeys"})
         ahead = {("GET", "/keys"): "fetchApiKeys"}
         self.assertEqual(self._errors(body, spec, ahead), 1)
+
+    def test_an_exempt_name_passes_and_goes_stale_both_ways(self):
+        # METHOD_NAME_EXEMPT, as nexus-exchange-rs has it (ENG-18009): the exempt
+        # name passes; the entry fails once the name matches, and once no method
+        # of that name issues a request.
+        body = 'def fetch_orders(self):\n    self._request("GET", "/orders/history")\n'
+        listed = spec_with_ids(**{"GET /orders/history": "listOrders"})
+        matched = spec_with_ids(**{"GET /orders/history": "fetchOrders"})
+        exempt = {"fetch_orders": "reason"}
+        self.assertEqual(self._errors(body, listed), 1)
+        self.assertEqual(self._errors(body, listed, exempt=exempt), 0)
+        self.assertEqual(self._errors(body, matched, exempt=exempt), 1)
+        self.assertEqual(self._errors(body, matched, exempt={"fetch_gone": "reason"}), 1)
 
 
 class TestPinMatchesSpec(unittest.TestCase):

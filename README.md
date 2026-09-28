@@ -60,7 +60,7 @@ from the environment — no secrets in source).
 | Trading — `POST /orders`, `/orders/batch`, `/orders/preview`; `GET /orders`, `/orders/{id}`, `/orders/history`; `DELETE /orders`, `/orders/{id}`; `PATCH /orders/{id}` | ✅ implemented — every by-id call takes the order's `market_id` (`fetch_order(id, market_id)`, `cancel_order(id, market_id)`, `edit_order(id, market_id, …)`); the engine rejects one without it |
 | Order types — `Limit`, `Market`, `StopLimit`, `StopMarket`, `TakeProfitLimit`, `TakeProfitMarket`, `TrailingStop`, `TrailingLimit` (typed `OrderRequest` builders; `trigger_price` for stop / take-profit; deprecated `stop_price` never sent) | ✅ implemented. The spec does not define which way a trigger fires for each side (see the `OrderRequest` docstring) |
 | Funds — `POST /account/deposit`, `/account/credit`, `/deposits`, `/faucet`; `GET /deposits`, `/funding` | ✅ implemented |
-| Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses`, `/bridge/wallets`; `POST /bridge/wallets/challenge` | ✅ implemented |
+| Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses` | ✅ implemented. `/bridge/wallets` and `POST /bridge/wallets/challenge` are not wrapped: EX-Bridge, wrapped under ENG-5639 not here |
 | Keys / agents / WS token — `GET /keys`, `DELETE /keys/{id}`, `/agents`, `POST /ws-tokens`, `/ws/token` | ✅ implemented |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
 | Cursor pagination — `cursor` + `X-Next-Cursor` on all five paginated GETs | ✅ implemented |
@@ -73,11 +73,13 @@ from the environment — no secrets in source).
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
 Anything not listed there is not wrapped yet — contributions welcome.
 
-Against the pinned spec (`.api-version`), that is **66 of 68 operations**. The two
-uncovered ones are `GET /ws` and `GET /stream`: both answer `101 Switching
+Against the pinned spec (`.api-version`), that is **63 of 68 operations**. Two of
+the five uncovered ones are `GET /ws` and `GET /stream`: both answer `101 Switching
 Protocols` rather than a JSON body, so they are WebSocket upgrades rather than
 REST operations this client can wrap. Mint a token with `create_ws_token()` and
-open the socket with a WebSocket library of your choice.
+open the socket with a WebSocket library of your choice. The other three are the
+`/bridge/wallets` operations, which this SDK does not wrap, the same as
+nexus-exchange-rs: EX-Bridge, wrapped under ENG-5639 not here.
 
 ### Method names
 
@@ -104,6 +106,7 @@ still work for one minor release, and raise `DeprecationWarning`:
 | `set_account_tier` | `set_tier` |
 | `fetch_tier_overrides` | `fetch_tiers` |
 | `reset_account_tier` | `delete_tier` |
+| `list_bridge_deposit_addresses` | `fetch_bridge_deposit_addresses` |
 
 ### Networks
 
