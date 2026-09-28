@@ -42,7 +42,7 @@ def test_retries_transient_5xx_on_get_then_succeeds(httpx_mock) -> None:
     httpx_mock.add_response(url=_SUMMARY_URL, json=[])
     delays: list[float] = []
     with _client(delays, min_delay=0.01) as client:
-        assert client.fetch_market_summaries() == []
+        assert client.fetch_markets_summary() == []
     assert len(httpx_mock.get_requests()) == 3, "one initial + two retries"
     assert len(delays) == 2, "slept once per retry"
 
@@ -52,7 +52,7 @@ def test_retries_transport_error_on_get(httpx_mock) -> None:
     httpx_mock.add_response(url=_SUMMARY_URL, json=[])
     delays: list[float] = []
     with _client(delays, min_delay=0.01) as client:
-        client.fetch_market_summaries()
+        client.fetch_markets_summary()
     assert len(httpx_mock.get_requests()) == 2
 
 
@@ -73,7 +73,7 @@ def test_does_not_retry_terminal_4xx(httpx_mock) -> None:
     delays: list[float] = []
     with _client(delays) as client:
         with pytest.raises(ApiError) as exc:
-            client.fetch_market_summaries()
+            client.fetch_markets_summary()
     assert exc.value.status == 400
     assert len(httpx_mock.get_requests()) == 1
 
@@ -84,7 +84,7 @@ def test_gives_up_after_max_retries(httpx_mock) -> None:
     delays: list[float] = []
     with _client(delays, max_retries=2, min_delay=0.01) as client:
         with pytest.raises(ApiError) as exc:
-            client.fetch_market_summaries()
+            client.fetch_markets_summary()
     assert exc.value.status == 500
     assert len(httpx_mock.get_requests()) == 3, "initial + 2 retries"
 
@@ -94,7 +94,7 @@ def test_retries_are_off_by_default(httpx_mock) -> None:
     httpx_mock.add_response(url=_SUMMARY_URL, status_code=503)
     with Client(Network.LOCAL) as client:
         with pytest.raises(ApiError):
-            client.fetch_market_summaries()
+            client.fetch_markets_summary()
     assert len(httpx_mock.get_requests()) == 1
 
 
@@ -103,7 +103,7 @@ def test_max_retries_zero_disables_retries(httpx_mock) -> None:
     delays: list[float] = []
     with _client(delays, max_retries=0) as client:
         with pytest.raises(ApiError):
-            client.fetch_market_summaries()
+            client.fetch_markets_summary()
     assert len(httpx_mock.get_requests()) == 1
 
 
@@ -113,7 +113,7 @@ def test_retries_429_and_waits_at_least_retry_after(httpx_mock) -> None:
     delays: list[float] = []
     # Tiny backoff so the only way a delay reaches >= 2s is honoring Retry-After.
     with _client(delays, min_delay=0.001, max_delay=0.005) as client:
-        client.fetch_market_summaries()
+        client.fetch_markets_summary()
     assert len(httpx_mock.get_requests()) == 2
     assert delays[0] >= 2.0, f"expected >= 2s (Retry-After), got {delays[0]}"
 
@@ -123,7 +123,7 @@ def test_clamps_oversized_retry_after(httpx_mock) -> None:
     httpx_mock.add_response(url=_SUMMARY_URL, json=[])
     delays: list[float] = []
     with _client(delays, min_delay=0.001, max_delay=0.005) as client:
-        client.fetch_market_summaries()
+        client.fetch_markets_summary()
     assert delays[0] <= 60.0, f"expected clamped to <= 60s, got {delays[0]}"
 
 
@@ -132,7 +132,7 @@ def test_429_apierror_carries_retry_after_ms(httpx_mock) -> None:
     delays: list[float] = []
     with _client(delays, max_retries=0) as client:
         with pytest.raises(ApiError) as exc:
-            client.fetch_market_summaries()
+            client.fetch_markets_summary()
     assert exc.value.status == 429
     assert exc.value.retry_after_ms == 3000
 

@@ -33,7 +33,7 @@ def main() -> None:
 
     with Client(Network.LOCAL) as client:
         # EIP-191 personal_sign → POST /auth/login.
-        session = client.sign_in(signer)
+        session = client.login(signer)
         print("logged in as", session.address)
         print("session token (secret):", session.token)
 

@@ -274,7 +274,7 @@ def test_bearer_call_on_an_agent_client_sends_only_the_bearer(httpx_mock) -> Non
 def test_public_call_on_an_agent_client_sends_no_credential(httpx_mock) -> None:
     httpx_mock.add_response(url="http://localhost:9090/api/v1/markets/summary", json=[])
     with _agent_client() as client:
-        client.fetch_market_summaries()
+        client.fetch_markets_summary()
     (req,) = httpx_mock.get_requests()
     assert "x-agent" not in req.headers
     assert "x-signature" not in req.headers
@@ -288,7 +288,7 @@ def test_public_call_on_an_agent_client_sends_no_credential(httpx_mock) -> None:
     [
         (lambda c: c.fetch_agents(), "GET", "/agents"),
         (lambda c: c.revoke_agent("0xabc"), "DELETE", "/agents/0xabc"),
-        (lambda c: c.mint_web_socket_token(), "POST", "/ws-tokens"),
+        (lambda c: c.create_ws_token_legacy(), "POST", "/ws-tokens"),
     ],
 )
 def test_agent_forbidden_operations_are_refused_before_any_request(

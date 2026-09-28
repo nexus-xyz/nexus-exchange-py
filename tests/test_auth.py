@@ -273,7 +273,7 @@ def test_sign_in_posts_eip191_body_and_parses_token(httpx_mock) -> None:
         json={"token": "a1b2c3d4e5f6", "address": TEST_ADDR},
     )
     with Client(Network.LOCAL) as client:
-        resp = client.sign_in(signer())
+        resp = client.login(signer())
 
     assert isinstance(resp, LoginResponse)
     assert resp.token == "a1b2c3d4e5f6"

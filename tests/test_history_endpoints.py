@@ -85,7 +85,7 @@ def _point(ts: int, equity: float = 10000.5) -> dict[str, object]:
 def test_order_history_decodes_and_signs(httpx_mock) -> None:
     httpx_mock.add_response(url=ORDER_HISTORY_URL, json=[_order("o1")])
     with _signed_client() as client:
-        entries = client.fetch_order_history()
+        entries = client.fetch_orders()
 
     assert len(entries) == 1
     entry = entries[0]
@@ -116,7 +116,7 @@ def test_order_history_market_order_price_is_none(httpx_mock) -> None:
         ],
     )
     with _signed_client() as client:
-        entry = client.fetch_order_history()[0]
+        entry = client.fetch_orders()[0]
 
     assert entry.price is None
     assert entry.cancellation_reason == "user_requested"
@@ -125,7 +125,7 @@ def test_order_history_market_order_price_is_none(httpx_mock) -> None:
 def test_closed_positions_decode(httpx_mock) -> None:
     httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[_closed()])
     with _signed_client() as client:
-        closed = client.fetch_closed_positions()
+        closed = client.fetch_positions_history()
 
     assert len(closed) == 1
     position = closed[0]
@@ -156,7 +156,7 @@ def test_closed_positions_decode_the_ccxt_spelling(httpx_mock) -> None:
     }
     httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[ccxt_row])
     with _signed_client() as client:
-        position = client.fetch_closed_positions()[0]
+        position = client.fetch_positions_history()[0]
 
     assert position.market_id == "BTC-USDX-PERP"
     assert position.side == "Short"
@@ -171,7 +171,7 @@ def test_closed_positions_decode_the_ccxt_spelling(httpx_mock) -> None:
 def test_closed_position_malformed_ccxt_field_names_the_key_sent(httpx_mock) -> None:
     httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[{"lastUpdateTimestamp": True}])
     with _signed_client() as client, pytest.raises(DecodeError, match="lastUpdateTimestamp"):
-        client.fetch_closed_positions()
+        client.fetch_positions_history()
 
 
 def test_equity_history_decodes_json_number_equity_without_float_drift(httpx_mock) -> None:
@@ -194,8 +194,8 @@ def test_missing_fields_decode_leniently(httpx_mock) -> None:
     httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[{}])
     httpx_mock.add_response(url=EQUITY_HISTORY_URL, json=[{}])
     with _signed_client() as client:
-        assert client.fetch_order_history()[0].id == ""
-        assert client.fetch_closed_positions()[0].market_id == ""
+        assert client.fetch_orders()[0].id == ""
+        assert client.fetch_positions_history()[0].market_id == ""
         assert client.fetch_equity_history()[0].timestamp_ms is None
 
 
@@ -211,7 +211,7 @@ def test_absent_money_and_timestamps_are_none_not_zero(httpx_mock) -> None:
     httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[{"market_id": "BTC-USDX-PERP"}])
     httpx_mock.add_response(url=EQUITY_HISTORY_URL, json=[{}])
     with _signed_client() as client:
-        pos = client.fetch_closed_positions()[0]
+        pos = client.fetch_positions_history()[0]
         assert pos.realized_pnl is None
         assert pos.entry_price is None
         assert pos.size is None
@@ -232,8 +232,8 @@ def test_absent_and_null_agree(httpx_mock) -> None:
     httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[{"realized_pnl": None}])
     httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[{}])
     with _signed_client() as client:
-        explicit_null = client.fetch_closed_positions()[0].realized_pnl
-        absent = client.fetch_closed_positions()[0].realized_pnl
+        explicit_null = client.fetch_positions_history()[0].realized_pnl
+        absent = client.fetch_positions_history()[0].realized_pnl
     assert explicit_null is None
     assert absent is None
 
@@ -245,7 +245,7 @@ def test_a_bool_is_not_a_timestamp(httpx_mock) -> None:
     httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[{"closed_at_ms": True}])
     with _signed_client() as client:
         with pytest.raises(DecodeError):
-            client.fetch_closed_positions()
+            client.fetch_positions_history()
 
 
 def test_a_malformed_money_value_names_its_field(httpx_mock) -> None:
@@ -254,7 +254,7 @@ def test_a_malformed_money_value_names_its_field(httpx_mock) -> None:
     httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[{"realized_pnl": "abc"}])
     with _signed_client() as client:
         with pytest.raises(DecodeError, match="realized_pnl"):
-            client.fetch_closed_positions()
+            client.fetch_positions_history()
 
 
 # -- multi-page traversal ---------------------------------------------------
@@ -271,7 +271,7 @@ def test_iter_order_history_follows_next_cursor(httpx_mock) -> None:
         json=[_order("o3")],
     )
     with _signed_client() as client:
-        ids = [o.id for o in client.iter_order_history(limit=2)]
+        ids = [o.id for o in client.iter_orders(limit=2)]
 
     assert ids == ["o1", "o2", "o3"]
     assert len(httpx_mock.get_requests()) == 2
@@ -291,7 +291,7 @@ def test_iter_closed_positions_follows_next_cursor(httpx_mock) -> None:
         json=[_closed("ETH-USDX-PERP")],
     )
     with _signed_client() as client:
-        markets = [p.market_id for p in client.iter_closed_positions()]
+        markets = [p.market_id for p in client.iter_positions_history()]
 
     assert markets == ["BTC-USDX-PERP", "ETH-USDX-PERP"]
     assert len(httpx_mock.get_requests()) == 2
@@ -322,7 +322,7 @@ def test_cursor_is_sent_back_verbatim(httpx_mock) -> None:
     )
     httpx_mock.add_response(url=f"{CLOSED_POSITIONS_URL}?cursor=eyJvIjoxMH0%3D%2B%2F", json=[])
     with _signed_client() as client:
-        assert len(list(client.iter_closed_positions())) == 1
+        assert len(list(client.iter_positions_history())) == 1
 
     assert httpx_mock.get_requests()[1].url.params["cursor"] == opaque
 
@@ -333,8 +333,8 @@ def test_cursor_is_sent_back_verbatim(httpx_mock) -> None:
 @pytest.mark.parametrize(
     ("url", "walk"),
     [
-        (ORDER_HISTORY_URL, "iter_order_history"),
-        (CLOSED_POSITIONS_URL, "iter_closed_positions"),
+        (ORDER_HISTORY_URL, "iter_orders"),
+        (CLOSED_POSITIONS_URL, "iter_positions_history"),
         (EQUITY_HISTORY_URL, "iter_equity_history"),
     ],
 )
@@ -349,8 +349,8 @@ def test_single_page_without_header_terminates(httpx_mock, url: str, walk: str) 
 @pytest.mark.parametrize(
     ("url", "walk"),
     [
-        (ORDER_HISTORY_URL, "iter_order_history"),
-        (CLOSED_POSITIONS_URL, "iter_closed_positions"),
+        (ORDER_HISTORY_URL, "iter_orders"),
+        (CLOSED_POSITIONS_URL, "iter_positions_history"),
         (EQUITY_HISTORY_URL, "iter_equity_history"),
     ],
 )
@@ -368,7 +368,7 @@ def test_empty_page_with_cursor_keeps_paging(httpx_mock) -> None:
     httpx_mock.add_response(url=CLOSED_POSITIONS_URL, json=[], headers={"x-next-cursor": "cur-2"})
     httpx_mock.add_response(url=f"{CLOSED_POSITIONS_URL}?cursor=cur-2", json=[_closed()])
     with _signed_client() as client:
-        assert len(list(client.iter_closed_positions())) == 1
+        assert len(list(client.iter_positions_history())) == 1
     assert len(httpx_mock.get_requests()) == 2
 
 
@@ -377,15 +377,15 @@ def test_blank_cursor_header_is_treated_as_absent(httpx_mock) -> None:
         url=ORDER_HISTORY_URL, json=[_order("o1")], headers={"x-next-cursor": ""}
     )
     with _signed_client() as client:
-        assert [o.id for o in client.iter_order_history()] == ["o1"]
+        assert [o.id for o in client.iter_orders()] == ["o1"]
     assert len(httpx_mock.get_requests()) == 1
 
 
 @pytest.mark.parametrize(
     ("url", "walk"),
     [
-        (ORDER_HISTORY_URL, "iter_order_history"),
-        (CLOSED_POSITIONS_URL, "iter_closed_positions"),
+        (ORDER_HISTORY_URL, "iter_orders"),
+        (CLOSED_POSITIONS_URL, "iter_positions_history"),
         (EQUITY_HISTORY_URL, "iter_equity_history"),
     ],
 )
@@ -426,7 +426,7 @@ def test_generator_is_lazy_and_stops_when_the_caller_stops(httpx_mock) -> None:
         headers={"x-next-cursor": "cur-2"},
     )
     with _signed_client() as client:
-        for entry in client.iter_order_history():
+        for entry in client.iter_orders():
             assert entry.id == "o1"
             break
     assert len(httpx_mock.get_requests()) == 1
@@ -443,11 +443,11 @@ def test_fetch_page_exposes_the_cursor_for_manual_paging(httpx_mock) -> None:
     )
     httpx_mock.add_response(url=f"{ORDER_HISTORY_URL}?limit=1&cursor=cur-2", json=[_order("o2")])
     with _signed_client() as client:
-        first = client.fetch_order_history_page(limit=1)
+        first = client.fetch_orders_page(limit=1)
         assert first.next_cursor == "cur-2"
         assert not first.is_last
 
-        second = client.fetch_order_history_page(limit=1, cursor=first.next_cursor)
+        second = client.fetch_orders_page(limit=1, cursor=first.next_cursor)
     assert second.is_last
     assert [o.id for o in second.items] == ["o2"]
 
@@ -459,7 +459,7 @@ def test_flat_fetch_methods_return_the_first_page_only(httpx_mock) -> None:
         url=CLOSED_POSITIONS_URL, json=[_closed()], headers={"x-next-cursor": "cur-2"}
     )
     with _signed_client() as client:
-        closed = client.fetch_closed_positions()
+        closed = client.fetch_positions_history()
     assert isinstance(closed, list)
     assert len(closed) == 1
     assert len(httpx_mock.get_requests()) == 1
@@ -493,8 +493,8 @@ def test_each_endpoint_has_its_own_limit_maximum() -> None:
 @pytest.mark.parametrize(
     ("url", "method", "maximum"),
     [
-        (ORDER_HISTORY_URL, "fetch_order_history", ORDER_HISTORY_LIMIT_MAX),
-        (CLOSED_POSITIONS_URL, "fetch_closed_positions", CLOSED_POSITIONS_LIMIT_MAX),
+        (ORDER_HISTORY_URL, "fetch_orders", ORDER_HISTORY_LIMIT_MAX),
+        (CLOSED_POSITIONS_URL, "fetch_positions_history", CLOSED_POSITIONS_LIMIT_MAX),
         (EQUITY_HISTORY_URL, "fetch_equity_history", EQUITY_HISTORY_LIMIT_MAX),
     ],
 )
@@ -508,8 +508,8 @@ def test_limit_at_the_maximum_is_sent(httpx_mock, url: str, method: str, maximum
 @pytest.mark.parametrize(
     ("method", "maximum"),
     [
-        ("fetch_order_history", ORDER_HISTORY_LIMIT_MAX),
-        ("fetch_closed_positions", CLOSED_POSITIONS_LIMIT_MAX),
+        ("fetch_orders", ORDER_HISTORY_LIMIT_MAX),
+        ("fetch_positions_history", CLOSED_POSITIONS_LIMIT_MAX),
         ("fetch_equity_history", EQUITY_HISTORY_LIMIT_MAX),
     ],
 )
@@ -530,26 +530,24 @@ def test_a_limit_valid_on_one_endpoint_is_rejected_on_a_stricter_one(httpx_mock)
     # out of range on /positions/closed. A single shared cap would get one wrong.
     httpx_mock.add_response(url=f"{ORDER_HISTORY_URL}?limit=500", json=[])
     with _signed_client() as client:
-        assert client.fetch_order_history(limit=500) == []
+        assert client.fetch_orders(limit=500) == []
         with pytest.raises(ValueError, match="^positions/closed limit"):
-            client.fetch_closed_positions(limit=500)
+            client.fetch_positions_history(limit=500)
     assert len(httpx_mock.get_requests()) == 1
 
 
 def test_limit_errors_name_the_endpoint(httpx_mock) -> None:
     with _signed_client() as client:
         with pytest.raises(ValueError, match="^orders/history limit"):
-            client.fetch_order_history(limit=99999)
+            client.fetch_orders(limit=99999)
         with pytest.raises(ValueError, match="^positions/closed limit"):
-            client.fetch_closed_positions(limit=99999)
+            client.fetch_positions_history(limit=99999)
         with pytest.raises(ValueError, match="^account/equity-history limit"):
             client.fetch_equity_history(limit=99999)
     assert httpx_mock.get_requests() == []
 
 
-@pytest.mark.parametrize(
-    "walk", ["iter_order_history", "iter_closed_positions", "iter_equity_history"]
-)
+@pytest.mark.parametrize("walk", ["iter_orders", "iter_positions_history", "iter_equity_history"])
 def test_iterators_validate_limit_before_the_first_request(httpx_mock, walk: str) -> None:
     with _signed_client() as client:
         with pytest.raises(ValueError, match="limit must be between"):
