@@ -1086,6 +1086,16 @@ class TestCoverageCanonicalization(unittest.TestCase):
         self.assertEqual(cov["uncovered"], [])
         self.assertEqual(len(cov["covered"]), 2)
 
+    def test_not_targeted_leaves_the_gap_list_and_is_stale_checked(self):
+        available = {("POST", "/ws-tokens"), ("POST", "/ws/token"), ("GET", "/x")}
+        skip = {("POST", "/ws-tokens"): "why", ("GET", "/gone"): "why", ("GET", "/x"): "why"}
+        cov = csd.coverage_figures({("GET", "/x")}, available, self.PREFIX, skip)
+        self.assertEqual(cov["uncovered"], [("POST", "/ws/token")])
+        self.assertEqual(cov["excluded"], [("GET", "/x"), ("POST", "/ws-tokens")])
+        self.assertEqual(len(cov["spec"]), 1, "excluded ops leave the denominator")
+        self.assertEqual(cov["contradictions"], [("GET", "/x")])
+        self.assertEqual(cov["orphans"], [("GET", "/gone")])
+
 
 class TestCoverageReportEndToEnd(unittest.TestCase):
     """Runs the checker as a process, so `main` is what is under test.

@@ -27,7 +27,9 @@ Five invariants are enforced:
    exactly (placeholder names included, so `{market}` vs `{market_id}` is a
    failure). A miss means a removal, rename, or typo. Spec operations the SDK does
    not implement are reported as an informational coverage gap, with the coverage
-   figure the dashboard's Python panel reads.
+   figure the dashboard's Python panel reads — except the ones NOT_TARGETED
+   records as deliberately unwrapped, which are listed with their reason and left
+   out of the figure.
 
 2. client code <-> endpoints.txt, by equality
    The set of operations the package actually requests must equal the manifest,
@@ -161,10 +163,19 @@ CODE_ONLY_OPS: set[tuple[str, str]] = set()
 # non-empty for the first time.
 NON_REST_TARGETS: set[tuple[str, str]] = {("GET", "/ws")}
 
-# Spec operations this SDK deliberately does not implement are *not* enumerated —
-# they are reported as an informational coverage gap. The Python SDK trails the Rust
-# SDK by design (see endpoints.txt), so an uncovered operation is a backlog item,
-# not drift.
+# Spec operations this SDK deliberately does NOT wrap, each with its reason. The
+# same table, in the same shape, as nexus-exchange-rs's `NOT_TARGETED`. An entry
+# comes out of the coverage-gap list and its denominator and is printed in its own
+# labelled section instead. It is stale-checked both ways: an entry the manifest
+# implements is a contradiction, and an entry the spec no longer declares is an
+# orphan. Both fail, so an exemption cannot outlive its cause.
+#
+# Every other spec operation the SDK does not implement is still reported as an
+# informational coverage gap. The Python SDK trails the Rust SDK by design (see
+# endpoints.txt), so an uncovered operation is a backlog item, not drift.
+NOT_TARGETED: dict[tuple[str, str], str] = {
+    ("POST", "/ws-tokens"): "deprecated; superseded by POST /ws/token",
+}
 
 
 # -- invariant 3: the credential a call sends vs. the security it declares ------
@@ -331,24 +342,33 @@ def canonical_op(op, api_v1_prefix):
     return (method, path)
 
 
-def coverage_figures(manifest, available, api_v1_prefix):
+def coverage_figures(manifest, available, api_v1_prefix, not_targeted=None):
     """Canonical coverage sets, split out of `main` so they are testable.
 
     Worth keeping separate: a report that hides every gap and a report with no
     gaps print the same reassuring line, so the tests need something to call
     other than `main`.
+
+    `spec` is the countable denominator: spec operations minus the ones
+    NOT_TARGETED excludes, which are reported under `excluded` instead.
     """
+    if not_targeted is None:
+        not_targeted = NOT_TARGETED
 
     def canon(ops):
         return {canonical_op(op, api_v1_prefix) for op in ops}
 
-    spec_set, mine = canon(available), canon(manifest)
+    declared, mine, skipped = canon(available), canon(manifest), canon(not_targeted)
+    spec_set = declared - skipped
     return {
         "spec": spec_set,
         "manifest": mine,
         "covered": spec_set & mine,
         "uncovered": sorted(spec_set - mine),
-        "spellings": len(available) - len(spec_set),
+        "spellings": len(available) - len(declared),
+        "excluded": sorted(declared & skipped),
+        "contradictions": sorted(skipped & mine),
+        "orphans": sorted(skipped - declared),
     }
 
 
@@ -1065,13 +1085,19 @@ def main():
         f"The Python SDK implements {len(cov['covered'])} of {len(cov['spec'])} "
         f"spec operations ({pct:.1f}% coverage) — {len(available)} documented "
         f"paths, {cov['spellings']} of them a second spelling of an operation "
-        f"already counted."
+        f"already counted, {len(cov['excluded'])} deliberately not targeted."
     )
 
     # Invariant 1: manifest -> pinned spec, matched exactly. Literal paths, NOT
     # canonicalized: the manifest must name a path the spec really declares.
     missing = [op for op in manifest if op not in available]
     uncovered = cov["uncovered"]
+
+    if cov["excluded"]:
+        reasons = {canonical_op(op, api_v1_prefix): why for op, why in NOT_TARGETED.items()}
+        print(f"\nDeliberately not targeted ({len(cov['excluded'])}):")
+        for m, p in cov["excluded"]:
+            print(f"  - {m} {p} — {reasons[(m, p)]}")
 
     if uncovered:
         print(f"\nNot yet implemented by the Python SDK ({len(uncovered)}):")
@@ -1081,6 +1107,19 @@ def main():
         print("\nOK: every spec operation is implemented by the Python SDK.")
 
     failures = 0
+    # A NOT_TARGETED entry the manifest implements drops out of the denominator
+    # while being implemented, so the figure would understate coverage; an entry
+    # the spec no longer declares suppresses nothing until the path comes back.
+    for key, what in (
+        ("contradictions", "ARE implemented by the SDK (remove them from NOT_TARGETED)"),
+        ("orphans", "are not in the pinned spec at all (stale; remove them)"),
+    ):
+        if cov[key]:
+            failures += len(cov[key])
+            print(f"\nERROR: {len(cov[key])} NOT_TARGETED entr(ies) {what}:")
+            for m, p in cov[key]:
+                print(f"  - {m} {p}")
+
     if missing:
         failures += len(missing)
         print(

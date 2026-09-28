@@ -387,20 +387,14 @@ def test_a_rejected_preview_carries_its_reason(httpx_mock) -> None:
 # -- websocket token -----------------------------------------------------------
 
 
-def test_create_ws_token_and_the_legacy_mint_are_separate_routes(httpx_mock) -> None:
-    # Two published operations: `createWsToken` (/ws/token) and
-    # `createWsTokenLegacy` (/ws-tokens). Both stay wrapped, at their own paths.
+def test_create_ws_token_posts_ws_token_and_parses(httpx_mock) -> None:
+    # `createWsToken` (/ws/token). The legacy `createWsTokenLegacy`
+    # (/ws-tokens) is deliberately not wrapped (ENG-18010).
     httpx_mock.add_response(url=f"{_BASE}/ws/token", json={"token": "t-new"})
-    httpx_mock.add_response(url=f"{_BASE}/ws-tokens", json={"token": "t-legacy"})
     with _authed() as client:
-        new = client.create_ws_token()
-        legacy = client.create_ws_token_legacy()
-
-    new_req, legacy_req = httpx_mock.get_requests()
-    _assert_signed(new_req, "POST", "/ws/token")
-    _assert_signed(legacy_req, "POST", "/ws-tokens")
-    assert new.token == "t-new"
-    assert legacy.token == "t-legacy"
+        tok = client.create_ws_token()
+    _assert_signed(httpx_mock.get_request(), "POST", "/ws/token")
+    assert tok.token == "t-new"
 
 
 # -- POST /keys: the one operation that cannot be HMAC-signed ------------------
