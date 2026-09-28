@@ -73,12 +73,11 @@ from the environment — no secrets in source).
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
 Anything not listed there is not wrapped yet — contributions welcome.
 
-Against the pinned spec (`.api-version`), that is **65 of 67 operations**, not counting the
-legacy `POST /ws-tokens`, which is deliberately not wrapped. The two
-uncovered ones are `GET /ws` and `GET /stream`: both answer `101 Switching
-Protocols` rather than a JSON body, so they are WebSocket upgrades rather than
-REST operations this client can wrap. Mint a token with `create_ws_token()` and
-open the socket with a WebSocket library of your choice.
+Against the pinned spec (`.api-version`), that is **66 of 67 operations**, not
+counting the legacy `POST /ws-tokens`, which is deliberately not wrapped. The one
+uncovered operation is `GET /stream`, the public market-data WebSocket upgrade.
+`GET /ws` is covered by `WsClient` (see below), with a token from
+`create_ws_token()`.
 
 ### Method names
 
