@@ -63,7 +63,6 @@ _ALIASES = [
         {"limit": 7, "cursor": "c", "max_pages": 2},
     ),
     ("amend_order", "edit_order", ("o1", "BTC", _AMEND), {}, ("o1", "BTC", _AMEND), {}),
-    ("mint_web_socket_token", "create_ws_token_legacy", (), {}, (), {}),
     ("set_account_tier", "set_tier", ("0xabc", "mm"), {}, ("0xabc", "mm"), {}),
     ("fetch_tier_overrides", "fetch_tiers", (), {}, (), {}),
     ("reset_account_tier", "delete_tier", ("0xabc",), {}, ("0xabc",), {}),
