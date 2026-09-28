@@ -1388,7 +1388,18 @@ class Client:
     def create_bridge_deposit_address(self, chain: str) -> BridgeDepositAddress:
         """``POST /bridge/deposit-addresses`` — get-or-create the account's deposit
         address on ``chain`` (idempotent per account+chain). Requires credentials.
+
+        .. deprecated:: Nothing serves this route: it left the contract with
+           ENG-10373 and its design was cancelled with ENG-11460, so every call
+           fails. It will be removed in a later minor release.
         """
+        warnings.warn(
+            "`create_bridge_deposit_address` is deprecated: no server implements "
+            "POST /bridge/deposit-addresses (ENG-11460). "
+            "It will be removed in a later minor release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         data = self._request(
             "POST",
             "/bridge/deposit-addresses",
@@ -1399,7 +1410,19 @@ class Client:
         return BridgeDepositAddress.from_dict(data if isinstance(data, dict) else {})
 
     def list_bridge_deposit_addresses(self) -> list[BridgeDepositAddress]:
-        """``GET /bridge/deposit-addresses`` — list deposit addresses. Requires credentials."""
+        """``GET /bridge/deposit-addresses`` — list deposit addresses. Requires credentials.
+
+        .. deprecated:: Nothing serves this route: it left the contract with
+           ENG-10373 and its design was cancelled with ENG-11460, so every call
+           fails. It will be removed in a later minor release.
+        """
+        warnings.warn(
+            "`list_bridge_deposit_addresses` is deprecated: no server implements "
+            "GET /bridge/deposit-addresses (ENG-11460). "
+            "It will be removed in a later minor release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         data = self._request("GET", "/bridge/deposit-addresses", signed=True, direct=True)
         return [BridgeDepositAddress.from_dict(a) for a in (data if isinstance(data, list) else [])]
 
