@@ -15,7 +15,7 @@ literal in the source — `_request("GET", "/bridge/assets", direct=True)` targe
 `GET /api/v1/bridge/assets`. The prefix is read out of client.py rather than
 hardcoded here, so moving the constant cannot silently desynchronize the checker.
 
-Four invariants are enforced:
+Five invariants are enforced:
 
 0. .api-version <-> the spec file it was handed
    The spec's own `info.version` must equal the pinned tag. Guards against a
@@ -54,6 +54,14 @@ Four invariants are enforced:
    noticed, because agreement on the *path* was all anything checked. The
    surviving disagreements are pinned in `SECURITY_EXCEPTIONS`, which fails when
    one is resolved as loudly as when a new one appears.
+
+4. method name == snake_case(operationId) (R2.25, ENG-17744)
+   Same AST walk again: the method each call sits in must be named `snake_case`
+   of the operation's `operationId`, with the direct-indexer `V1` suffix dropped
+   (`fetchTradingFeesV1` -> `fetch_trading_fees`) and a `_page` suffix allowed,
+   since the paging helper keeps its operation's stem (`fetch_orders_page`). Where
+   the canonical operationId has not reached the pinned spec yet, it comes from
+   OPERATION_IDS_AHEAD_OF_PIN, which is stale-checked in both directions.
 
 Usage: check_spec_drift.py <openapi.json>
 """
@@ -411,11 +419,14 @@ def literal_path(node):
 
 
 class RequestCall(NamedTuple):
-    """One `_request` / `_request_page` call site: where it is, and which
-    credential it sends. `auth` is one of the three `AUTH_*` constants."""
+    """One `_request` / `_request_page` call site: where it is, which credential
+    it sends, and the function it sits in. `auth` is one of the three `AUTH_*`
+    constants; `func` is the innermost enclosing function's name, or None at
+    module level."""
 
     where: str
     auth: str
+    func: str | None
 
 
 def requested_ops(modules, api_v1_prefix):
@@ -435,7 +446,15 @@ def requested_ops(modules, api_v1_prefix):
         except OSError as e:
             fail(f"cannot read {path}: {e}")
         rel = os.path.relpath(path, REPO)
-        for node in ast.walk(ast.parse(source, path)):
+        tree = ast.parse(source, path)
+        # Innermost enclosing function per node: ast.walk is breadth-first, so an
+        # inner function's assignment overwrites its outer one's.
+        enclosing = {}
+        for func in ast.walk(tree):
+            if isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                for child in ast.walk(func):
+                    enclosing[child] = func.name
+        for node in ast.walk(tree):
             if not (
                 isinstance(node, ast.Call)
                 and isinstance(node.func, ast.Attribute)
@@ -517,7 +536,9 @@ def requested_ops(modules, api_v1_prefix):
                 )
             auth = AUTH_HMAC if signed else (AUTH_BEARER if bearer else AUTH_PUBLIC)
             resolved = f"{api_v1_prefix}{literal}" if direct else literal
-            ops.setdefault((method, normalize_path(resolved)), []).append(RequestCall(where, auth))
+            ops.setdefault((method, normalize_path(resolved)), []).append(
+                RequestCall(where, auth, enclosing.get(node))
+            )
     if not ops:
         fail(
             f"parsed zero {'/'.join(REQUEST_FUNCS)}() calls from the package; the call shape may "
@@ -845,6 +866,134 @@ def check_declared_security(spec):
     return errors
 
 
+# -- invariant 4: method name == snake_case(operationId) (R2.25) ---------------
+
+# R2.25 operationIds that lead the pinned spec.
+#
+# ENG-17740 (nexus#12766) renamed these operationIds in the monorepo spec so each
+# matches its `x-ccxt-method` and the verb grammar, but no published
+# nexus-exchange-api tag carries the rename yet, so the pinned spec still spells
+# them the old way. The methods are named for the canonical id now, and this map
+# is where the checker reads it from until the pin catches up. The MCP server
+# carries the same table for the same reason (nexus-exchange-mcp#88).
+#
+# This is a NAME table, not an operation carve-out: every key is an operation the
+# pinned spec already defines (checked below), so it does not reopen the
+# CODE_ONLY_OPS door. Stale-checked in both directions: an entry no method
+# requests, one the pinned spec does not define, or one whose pinned operationId
+# now equals the value, fails until it is deleted. So the spec-autobump PR that
+# carries ENG-17740 empties this map. Keys are (METHOD, normalized path) exactly as
+# `requested_ops` reports them.
+OPERATION_IDS_AHEAD_OF_PIN: dict[tuple[str, str], str] = {
+    ("GET", "/api/v1/account/fees"): "fetchTradingFeesV1",
+    ("POST", "/api/v1/account/credit"): "claimCreditV1",
+    ("POST", "/account/margin"): "addMargin",
+    ("GET", "/admin/tiers"): "fetchTiers",
+    ("GET", "/agents"): "fetchAgents",
+    ("GET", "/api/v1/bridge/assets"): "fetchBridgeAssets",
+    ("GET", "/api/v1/bridge/deposits"): "fetchBridgeDeposits",
+    ("GET", "/api/v1/bridge/deposits/{}"): "fetchBridgeDeposit",
+    ("GET", "/api/v1/fills"): "fetchMyTradesV1",
+    ("GET", "/api/v1/markets/{}/funding"): "fetchFundingRateHistoryV1",
+    ("POST", "/api/v1/orders/batch"): "createOrdersV1",
+    ("GET", "/api/v1/orders/history"): "fetchOrdersV1",
+    ("GET", "/api/v1/positions/closed"): "fetchPositionsHistoryV1",
+    ("GET", "/funding"): "fetchFundingHistory",
+    ("GET", "/keys"): "fetchApiKeys",
+}
+
+# The paging helper of a paginated operation keeps the operation's stem.
+PAGE_HELPER_SUFFIX = "_page"
+
+
+def method_name_for(operation_id):
+    """snake_case an operationId the way R2.25 names methods: drop the `V1` suffix
+    the spec gives the direct-indexer twin of an operation (the method is named for
+    the operation, not the surface), and keep acronyms whole (`fetchOHLCV` ->
+    `fetch_ohlcv`, `createWsToken` -> `create_ws_token`)."""
+    s = re.sub(r"V1$", "", operation_id)
+    s = re.sub(r"([A-Z]+)([A-Z][a-z])", r"\1_\2", s)
+    s = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", s)
+    return s.lower()
+
+
+def pinned_operation_ids(spec):
+    """{(METHOD, normalized_path): {operationId, ...}} over the pinned spec."""
+    ids = {}
+    for path, methods in spec.get("paths", {}).items():
+        if not isinstance(methods, dict):
+            continue
+        for method, operation in methods.items():
+            if method.upper() in HTTP_METHODS and isinstance(operation, dict):
+                op_id = operation.get("operationId")
+                if op_id:
+                    ids.setdefault((method.upper(), normalize_path(path)), set()).add(op_id)
+    return ids
+
+
+def check_method_names(spec):
+    """Invariant 4: each method that issues a request is named for its operation.
+
+    Returns the number of errors printed."""
+    with open(CLIENT_PY) as f:
+        api_v1_prefix = read_api_v1_prefix(f.read())
+    requested = requested_ops(package_modules(), api_v1_prefix)
+    ids = pinned_operation_ids(spec)
+    errors = 0
+
+    for op, canonical in sorted(OPERATION_IDS_AHEAD_OF_PIN.items()):
+        why = None
+        if op not in requested:
+            why = "no method requests this operation any more"
+        elif op not in ids:
+            why = "the pinned spec does not define this operation"
+        elif canonical in ids[op]:
+            why = "the pinned spec now carries this operationId (the pin caught up)"
+        if why:
+            errors += 1
+            print(
+                f"\nERROR: OPERATION_IDS_AHEAD_OF_PIN entry {op[0]} {op[1]} is stale: "
+                f"{why}. Delete it."
+            )
+
+    for op, calls in sorted(requested.items()):
+        method, path = op
+        operation_id = OPERATION_IDS_AHEAD_OF_PIN.get(op)
+        if operation_id is None:
+            pinned = ids.get(op, set())
+            if len(pinned) != 1:
+                # None is unreachable while invariants 1 and 2 hold; more than one
+                # means two spec paths collapse to one under normalization.
+                errors += 1
+                print(
+                    f"\nERROR: {method} {path} has "
+                    f"{'no operationId' if not pinned else 'more than one operationId'} "
+                    f"in the pinned spec ({', '.join(sorted(pinned)) or 'none'}), so no "
+                    f"method name can be derived for it."
+                )
+                continue
+            operation_id = next(iter(pinned))
+        want = method_name_for(operation_id)
+        for call in calls:
+            name = (call.func or "<module>").removesuffix(PAGE_HELPER_SUFFIX)
+            if name != want:
+                errors += 1
+                print(
+                    f"\nERROR: {call.where}: `{call.func}` requests {method} {path} "
+                    f"(operationId {operation_id}), so it must be named {want!r} (or "
+                    f"{want + PAGE_HELPER_SUFFIX!r} for a paging helper). Rename it and "
+                    f"keep the old name as a deprecated alias for one minor (R2.25)."
+                )
+
+    if not errors:
+        print(
+            f"\nOK: every method that issues a request is named snake_case(operationId) "
+            f"of its operation ({len(OPERATION_IDS_AHEAD_OF_PIN)} operationId(s) read "
+            f"from OPERATION_IDS_AHEAD_OF_PIN until the pin catches up)."
+        )
+    return errors
+
+
 def check_pin_matches_spec(spec, pinned):
     """Invariant 0: the spec file handed to us is the pinned release."""
     declared = spec.get("info", {}).get("version")
@@ -918,6 +1067,9 @@ def main():
 
     # Invariant 3: the credential each call sends <-> the spec's `security`.
     failures += check_declared_security(spec)
+
+    # Invariant 4: each requesting method's name <-> its operationId.
+    failures += check_method_names(spec)
 
     if failures:
         print(f"\nFAILED: {failures} drift error(s).")

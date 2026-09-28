@@ -80,7 +80,7 @@ The public gateway proxies signed calls to the *site* account; for per-account
 auth point `NEXUS_BASE_URL` at a direct gateway (e.g. `http://localhost:9090`).
 See the top-level README.
 
-Wallet-signed auth (`wallet_auth.py`, above) uses `Client.sign_in` /
+Wallet-signed auth (`wallet_auth.py`, above) uses `Client.login` /
 `Client.register_agent` — a different credential model from the HMAC examples,
 which authenticate with a static api key/secret pair. The WebSocket streaming
 client is not built yet, so no streaming example is included here.

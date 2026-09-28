@@ -1,7 +1,7 @@
 """Unit tests for the portfolio-parity surface (mocked httpx), ENG-6459.
 
 Covers the four new signed reads — ``fetch_account_state``,
-``fetch_account_summary``, ``fetch_account_fees``, ``fetch_portfolio_history`` —
+``fetch_account_summary``, ``fetch_trading_fees``, ``fetch_portfolio_history`` —
 and the enriched ``Position`` risk fields added in Exchange API spec v0.7.2.
 
 The load-bearing guarantees asserted here:
@@ -364,7 +364,7 @@ def test_fetch_account_summary_fails_closed_on_502(httpx_mock) -> None:
     assert excinfo.value.transient is True
 
 
-# -- fetch_account_fees ------------------------------------------------------
+# -- fetch_trading_fees ------------------------------------------------------
 
 
 def test_fetch_account_fees_signs_and_parses(httpx_mock) -> None:
@@ -383,7 +383,7 @@ def test_fetch_account_fees_signs_and_parses(httpx_mock) -> None:
         },
     )
     with _authed() as client:
-        fees = client.fetch_account_fees()
+        fees = client.fetch_trading_fees()
 
     assert isinstance(fees, AccountFees)
     # A negative maker fee is a rebate paid to the maker — sign preserved.
@@ -414,7 +414,7 @@ def test_fetch_account_fees_treats_null_estimated_as_true(httpx_mock) -> None:
         },
     )
     with _authed() as client:
-        fees = client.fetch_account_fees()
+        fees = client.fetch_trading_fees()
     assert fees.volume_30d_estimated is True
 
 
@@ -438,7 +438,7 @@ def test_fetch_account_fees_rejects_unreported_open_string(httpx_mock, field, va
         del body[field]
     httpx_mock.add_response(url=_FEES_URL, method="GET", json=body)
     with _authed() as client, pytest.raises(DecodeError, match=field):
-        client.fetch_account_fees()
+        client.fetch_trading_fees()
 
 
 def test_fetch_account_fees_defaults_estimated_to_true(httpx_mock) -> None:
@@ -456,7 +456,7 @@ def test_fetch_account_fees_defaults_estimated_to_true(httpx_mock) -> None:
         },
     )
     with _authed() as client:
-        fees = client.fetch_account_fees()
+        fees = client.fetch_trading_fees()
     assert fees.volume_30d_estimated is True
     # An explicit 0 bps maker fee is a real rate, not a missing one.
     assert fees.maker_fee_bps == 0
@@ -468,7 +468,7 @@ def test_fetch_account_fees_rejects_payload_missing_a_rate(httpx_mock) -> None:
     # decode fails loudly instead.
     httpx_mock.add_response(url=_FEES_URL, method="GET", json={"tier": "base"})
     with _authed() as client, pytest.raises(ValueError):
-        client.fetch_account_fees()
+        client.fetch_trading_fees()
 
 
 def test_fetch_account_fees_drops_non_object_discounts(httpx_mock) -> None:
@@ -486,7 +486,7 @@ def test_fetch_account_fees_drops_non_object_discounts(httpx_mock) -> None:
         },
     )
     with _authed() as client:
-        fees = client.fetch_account_fees()
+        fees = client.fetch_trading_fees()
     assert fees.discounts == [{"kind": "promo"}]
     # The untouched payload is still reachable.
     assert fees.raw["discounts"] == [{"kind": "promo"}, "bogus", None]
@@ -516,7 +516,7 @@ def test_fetch_account_fees_null_or_non_array_discounts_decode_to_empty(
         },
     )
     with _authed() as client:
-        fees = client.fetch_account_fees()
+        fees = client.fetch_trading_fees()
     assert fees.discounts == []
     # Every strictly-decoded field still landed.
     assert fees.maker_fee_bps == -2
@@ -757,7 +757,7 @@ def test_fetch_portfolio_history_surfaces_invalid_window_error(httpx_mock) -> No
     [
         lambda c: c.fetch_account_state(),
         lambda c: c.fetch_account_summary(),
-        lambda c: c.fetch_account_fees(),
+        lambda c: c.fetch_trading_fees(),
         lambda c: c.fetch_portfolio_history(),
     ],
 )

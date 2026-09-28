@@ -42,7 +42,7 @@ def test_fetch_market_summaries_handles_numbers_and_halted_null(httpx_mock) -> N
         ],
     )
     with Client(Network.LOCAL) as client:
-        summaries = client.fetch_market_summaries()
+        summaries = client.fetch_markets_summary()
     assert summaries[0].last_trade_price is not None
     assert str(summaries[0].last_trade_price) == "50011.6"
     # A halted market sends a null price — must decode to None, not fail.
@@ -263,7 +263,7 @@ def test_fetch_market_adl_events_parses_nested_closures(httpx_mock) -> None:
         ],
     )
     with Client(Network.LOCAL) as client:
-        events = client.fetch_market_adl_events("BTC-USDX-PERP")
+        events = client.fetch_adl_events("BTC-USDX-PERP")
     assert events[0].sequence == 42
     assert len(events[0].counterparty_closures) == 1
     assert str(events[0].counterparty_closures[0].settlement_amount) == "300.25"
@@ -275,4 +275,4 @@ def test_fetch_account_adl_history_sends_limit(httpx_mock) -> None:
         json=[],
     )
     with Client(Network.LOCAL) as client:
-        assert client.fetch_account_adl_history("0xabc", limit=5) == []
+        assert client.fetch_adl_history("0xabc", limit=5) == []

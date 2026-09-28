@@ -50,21 +50,21 @@ from the environment — no secrets in source).
 | Funding / mark price / status — `GET /markets/{id}/{funding,mark-price,status}` | ✅ implemented |
 | ADL events — `GET /markets/{id}/adl-events`, `/account/{addr}/adl-history` | ✅ implemented |
 | HMAC request signing (the plumbing for authed calls) | ✅ implemented |
-| Wallet-signed auth — `sign_in` (EIP-191) + `register_agent` (EIP-712) | ✅ implemented |
+| Wallet-signed auth — `login` (EIP-191) + `register_agent` (EIP-712) | ✅ implemented |
 | Agent-key request signing — `x-agent` / `x-timestamp` / `x-nonce` / `x-signature` (`Client(agent=AgentSigner…)`) | ✅ implemented — trade-only; see [Agent-key request signing](#agent-key-request-signing) |
 | CCXT-compatible adapter — public market data | ✅ implemented |
 | Error taxonomy (terminal vs transient, incl. the jurisdiction `403`) | ✅ implemented |
 | Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
 | Account reads — `GET /account`, `/positions`, `/positions/closed`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
 | Portfolio — `GET /account/state` (summary + positions, incl. `withdrawable`), `/account/summary`, `/account/fees`, `/account/portfolio-history`, `/account/equity-history` | ✅ implemented |
-| Trading — `POST /orders`, `/orders/batch`, `/orders/preview`; `GET /orders`, `/orders/{id}`, `/orders/history`; `DELETE /orders`, `/orders/{id}`; `PATCH /orders/{id}` | ✅ implemented — every by-id call takes the order's `market_id` (`fetch_order(id, market_id)`, `cancel_order(id, market_id)`, `amend_order(id, market_id, …)`); the engine rejects one without it |
+| Trading — `POST /orders`, `/orders/batch`, `/orders/preview`; `GET /orders`, `/orders/{id}`, `/orders/history`; `DELETE /orders`, `/orders/{id}`; `PATCH /orders/{id}` | ✅ implemented — every by-id call takes the order's `market_id` (`fetch_order(id, market_id)`, `cancel_order(id, market_id)`, `edit_order(id, market_id, …)`); the engine rejects one without it |
 | Order types — `Limit`, `Market`, `StopLimit`, `StopMarket`, `TakeProfitLimit`, `TakeProfitMarket`, `TrailingStop`, `TrailingLimit` (typed `OrderRequest` builders; `trigger_price` for stop / take-profit; deprecated `stop_price` never sent) | ✅ implemented. The spec does not define which way a trigger fires for each side (see the `OrderRequest` docstring) |
 | Funds — `POST /account/deposit`, `/account/credit`, `/deposits`, `/faucet`; `GET /deposits`, `/funding` | ✅ implemented |
 | Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses`, `/bridge/wallets`; `POST /bridge/wallets/challenge` | ✅ implemented |
 | Keys / agents / WS token — `GET /keys`, `DELETE /keys/{id}`, `/agents`, `POST /ws-tokens`, `/ws/token` | ✅ implemented |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
 | Cursor pagination — `cursor` + `X-Next-Cursor` on all five paginated GETs | ✅ implemented |
-| Create API key — `POST /keys` | ✅ implemented (session-token authenticated: pass `sign_in().token` to `create_api_key`) |
+| Create API key — `POST /keys` | ✅ implemented (session-token authenticated: pass `login().token` to `create_api_key`) |
 | Venue / market info — `GET /stats`, `/stats/history`, `/status`, `/markets/{id}/risk-params`, `/markets/{id}/funding-samples` | ✅ implemented |
 | WebSocket streaming — `GET /ws` (async `WsClient`, multiplexed, auto-resume) | ✅ implemented (`pip install nexus-exchange[ws]`) |
 | Retry on transient `GET` failures (5xx / 408 / `429`, honours `Retry-After`) | ✅ implemented, **off by default** — opt in with `Client(retry=RetryConfig())`; no client-side token bucket yet |
@@ -78,6 +78,32 @@ uncovered ones are `GET /ws` and `GET /stream`: both answer `101 Switching
 Protocols` rather than a JSON body, so they are WebSocket upgrades rather than
 REST operations this client can wrap. Mint a token with `create_ws_token()` and
 open the socket with a WebSocket library of your choice.
+
+### Method names
+
+Each method is `snake_case` of its operation's spec `operationId`
+(`fetchTradingFees` → `fetch_trading_fees`), and paging helpers keep that stem
+(`fetch_orders_page`, `iter_orders`). `scripts/check_spec_drift.py` enforces it.
+The methods below were renamed to follow that rule (ENG-17744). The old names
+still work for one minor release, and raise `DeprecationWarning`:
+
+| Old | New |
+|---|---|
+| `fetch_market_summaries` | `fetch_markets_summary` |
+| `fetch_market_adl_events` | `fetch_adl_events` |
+| `fetch_account_adl_history` | `fetch_adl_history` |
+| `fetch_service_health` | `fetch_status` |
+| `sign_in` | `login` |
+| `fetch_closed_positions`, `fetch_closed_positions_page`, `iter_closed_positions` | `fetch_positions_history`, `fetch_positions_history_page`, `iter_positions_history` |
+| `fetch_account_fees` | `fetch_trading_fees` |
+| `fetch_account_funding` | `fetch_funding_history` |
+| `adjust_margin` | `add_margin` |
+| `fetch_order_history`, `fetch_order_history_page`, `iter_order_history` | `fetch_orders`, `fetch_orders_page`, `iter_orders` |
+| `amend_order` | `edit_order` |
+| `mint_web_socket_token` | `create_ws_token_legacy` |
+| `set_account_tier` | `set_tier` |
+| `fetch_tier_overrides` | `fetch_tiers` |
+| `reset_account_tier` | `delete_tier` |
 
 ### Networks
 
@@ -341,7 +367,7 @@ signer = EthSigner.from_hex("0x<wallet-private-key>")  # you own the key
 
 with Client() as client:
     # EIP-191 personal_sign → POST /auth/login → session token.
-    session = client.sign_in(signer)
+    session = client.login(signer)
     print(session.address, session.token)  # token is a secret
 
     # EIP-712 → POST /agents/register. expires_at_ms / nonce / chain_id are
@@ -403,7 +429,7 @@ pinned byte-for-byte to the spec's `x-nexus-test-vectors`.
 - **Agent keys cannot withdraw.** They are trade-only. An agent client refuses
   any withdrawal route (`/withdrawals`, `/account/withdraw`,
   `/bridge/withdrawals`), agent management (`fetch_agents`, `revoke_agent`) and
-  the legacy `mint_web_socket_token` **locally**, with `AgentKeyRefusedError`,
+  the legacy `create_ws_token_legacy` **locally**, with `AgentKeyRefusedError`,
   before anything is signed or sent — the server would `403` them. Use an HMAC
   client for those; `create_ws_token` accepts agent keys.
 
@@ -445,7 +471,7 @@ for pos in state.positions:
 summary = client.fetch_account_summary()  # the aggregates alone, no positions
 print(summary.withdrawable)
 
-fees = client.fetch_account_fees()
+fees = client.fetch_trading_fees()
 print(fees.maker_fee_bps, fees.taker_fee_bps)  # maker may be negative (a rebate)
 
 history = client.fetch_portfolio_history(PortfolioWindow.WEEK, limit=100)
@@ -529,8 +555,8 @@ paginated endpoints are wrapped, each with a flat `fetch_*` (first page), an
 | --- | --- | --- |
 | `GET /markets/{id}/trades` | `fetch_trades` / `iter_trades` / `fetch_trades_page` | 1000 |
 | `GET /fills` | `fetch_my_trades` / `iter_my_trades` / `fetch_my_trades_page` | 1000 |
-| `GET /orders/history` | `fetch_order_history` / `iter_order_history` / `fetch_order_history_page` | 500 |
-| `GET /positions/closed` | `fetch_closed_positions` / `iter_closed_positions` / `fetch_closed_positions_page` | 200 |
+| `GET /orders/history` | `fetch_orders` / `iter_orders` / `fetch_orders_page` | 500 |
+| `GET /positions/closed` | `fetch_positions_history` / `iter_positions_history` / `fetch_positions_history_page` | 200 |
 | `GET /account/equity-history` | `fetch_equity_history` / `iter_equity_history` / `fetch_equity_history_page` | 720 (also the default) |
 
 `iter_*` walks every page for you, lazily — one request per page, driven by the

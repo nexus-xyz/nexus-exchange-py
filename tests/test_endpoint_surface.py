@@ -140,7 +140,7 @@ def test_revoke_agent_hits_address_path(httpx_mock) -> None:
 def test_mint_web_socket_token_posts_and_parses(httpx_mock) -> None:
     httpx_mock.add_response(url=f"{_BASE}/ws-tokens", method="POST", json={"token": "wst_abc123"})
     with _authed() as client:
-        tok = client.mint_web_socket_token()
+        tok = client.create_ws_token_legacy()
     assert tok.token == "wst_abc123"
     _assert_signed(httpx_mock.get_request(), "POST", "/ws-tokens")
 
@@ -156,7 +156,7 @@ def test_fetch_tier_overrides_parses_list(httpx_mock) -> None:
         ],
     )
     with _authed() as client:
-        overrides = client.fetch_tier_overrides()
+        overrides = client.fetch_tiers()
     assert [o.tier for o in overrides] == ["marketmaker", "pro"]
     _assert_signed(httpx_mock.get_request(), "GET", "/admin/tiers")
 
@@ -164,7 +164,7 @@ def test_fetch_tier_overrides_parses_list(httpx_mock) -> None:
 def test_reset_account_tier_deletes_address_path(httpx_mock) -> None:
     httpx_mock.add_response(url=f"{_BASE}/admin/tiers/0xabc", method="DELETE", json={"reset": True})
     with _authed() as client:
-        client.reset_account_tier("0xabc")
+        client.delete_tier("0xabc")
     _assert_signed(httpx_mock.get_request(), "DELETE", "/admin/tiers/0xabc")
 
 
@@ -224,9 +224,9 @@ def test_create_order_uses_post_verb(httpx_mock) -> None:
         lambda c: c.delete_api_key("nx_a"),
         lambda c: c.fetch_agents(),
         lambda c: c.revoke_agent("0xagent"),
-        lambda c: c.mint_web_socket_token(),
-        lambda c: c.fetch_tier_overrides(),
-        lambda c: c.reset_account_tier("0xabc"),
+        lambda c: c.create_ws_token_legacy(),
+        lambda c: c.fetch_tiers(),
+        lambda c: c.delete_tier("0xabc"),
     ],
 )
 def test_signed_methods_require_credentials(call) -> None:

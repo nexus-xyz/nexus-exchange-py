@@ -177,7 +177,7 @@ def test_fetch_service_health_hits_status_not_health(httpx_mock) -> None:
         json={"status": "degraded", "timestamp_ms": 1750000000000, "services": {"engine": "ok"}},
     )
     with _public() as client:
-        health = client.fetch_service_health()
+        health = client.fetch_status()
 
     assert httpx_mock.get_request().url.raw_path.decode() == "/status"
     assert health.status == "degraded"
@@ -189,7 +189,7 @@ def test_service_health_services_is_copied_not_aliased(httpx_mock) -> None:
     # untyped mapping — but a caller mutating it must not reach into `raw`.
     httpx_mock.add_response(url=f"{_BASE}/status", json={"status": "ok", "services": {"a": 1}})
     with _public() as client:
-        health = client.fetch_service_health()
+        health = client.fetch_status()
     health.services["a"] = 999
     assert health.raw["services"] == {"a": 1}
 
@@ -227,7 +227,7 @@ def test_fetch_account_funding_signs_and_keeps_the_amount_signed(httpx_mock) -> 
         json=[{"market_id": "BTC-USDX-PERP", "amount": "-1.25", "direction": "paid"}],
     )
     with _authed() as client:
-        funding = client.fetch_account_funding(limit=3)
+        funding = client.fetch_funding_history(limit=3)
 
     _assert_signed(httpx_mock.get_request(), "GET", "/funding")
     # The sign is the authoritative half; `direction` restates it and can drift.
@@ -254,7 +254,7 @@ def test_limits_are_validated_before_the_request(call: str, maximum: int) -> Non
                 if call == "deposits":
                     client.fetch_deposits(limit=bad)
                 elif call == "funding":
-                    client.fetch_account_funding(limit=bad)
+                    client.fetch_funding_history(limit=bad)
                 else:
                     client.fetch_funding_samples("BTC-USDX-PERP", limit=bad)
 
@@ -478,7 +478,7 @@ def test_create_ws_token_and_the_legacy_mint_are_separate_routes(httpx_mock) -> 
     httpx_mock.add_response(url=f"{_BASE}/ws-tokens", json={"token": "t-legacy"})
     with _authed() as client:
         new = client.create_ws_token()
-        legacy = client.mint_web_socket_token()
+        legacy = client.create_ws_token_legacy()
 
     new_req, legacy_req = httpx_mock.get_requests()
     _assert_signed(new_req, "POST", "/ws/token")

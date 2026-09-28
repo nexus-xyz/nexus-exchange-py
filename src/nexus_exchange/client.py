@@ -16,6 +16,7 @@ import json
 import random
 import re
 import time
+import warnings
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
@@ -308,7 +309,7 @@ def _bearer_token(token: str, param: str = "session_token") -> str:
         raise TypeError(f"{param} must be a string (got {type(token).__name__})")
     if not token.strip():
         raise ValueError(
-            f"{param} is empty: pass the `token` from `sign_in()` "
+            f"{param} is empty: pass the `token` from `login()` "
             f"(`LoginResponse.token`), which this SDK does not store for you"
         )
     if any(ch.isspace() or ord(ch) < 0x20 or ord(ch) == 0x7F for ch in token):
@@ -450,6 +451,21 @@ def _query(**params: Any) -> str:
     return urlencode(items)
 
 
+def _warn_renamed(old: str, new: str) -> None:
+    """Emit the ``DeprecationWarning`` a renamed method's old name carries.
+
+    R2.25 (ENG-17744) names each method ``snake_case(operationId)``; the old name
+    stays for one minor release as a delegating alias, then is removed.
+    ``stacklevel=3`` points the warning at the caller of the alias.
+    """
+    warnings.warn(
+        f"`{old}` is deprecated; use `{new}` instead. "
+        f"It will be removed in the next minor release.",
+        DeprecationWarning,
+        stacklevel=3,
+    )
+
+
 class Client:
     """Client for the Nexus Exchange REST API.
 
@@ -528,7 +544,7 @@ class Client:
 
     Agent keys are trade-only: an agent client refuses withdrawals, agent
     management (:meth:`fetch_agents`, :meth:`revoke_agent`) and
-    :meth:`mint_web_socket_token` locally with
+    :meth:`create_ws_token_legacy` locally with
     :class:`~nexus_exchange.AgentKeyRefusedError`, before signing. Writes from
     one agent key in flight concurrently can be refused as nonce replays
     (ENG-17010); see :class:`~nexus_exchange.AgentSigner`.
@@ -792,7 +808,7 @@ class Client:
         rows = data if isinstance(data, list) else data.get("markets", [])
         return [Market.from_dict(m) for m in rows]
 
-    def fetch_market_summaries(self) -> list[MarketSummary]:
+    def fetch_markets_summary(self) -> list[MarketSummary]:
         """``GET /markets/summary`` — per-market 24h volume and halt state."""
         data = self._request("GET", "/markets/summary", direct=True)
         rows = data if isinstance(data, list) else data.get("markets", [])
@@ -915,14 +931,14 @@ class Client:
         data = self._request("GET", f"/markets/{quote(market_id, safe='')}/status", direct=True)
         return MarketStatus.from_dict(data if isinstance(data, dict) else {})
 
-    def fetch_market_adl_events(self, market_id: str, limit: int | None = None) -> list[AdlEvent]:
+    def fetch_adl_events(self, market_id: str, limit: int | None = None) -> list[AdlEvent]:
         """``GET /markets/{market_id}/adl-events`` — ADL settlement events (newest first)."""
         query = _query(limit=limit)
         data = self._request("GET", f"/markets/{quote(market_id, safe='')}/adl-events", query=query)
         rows = data if isinstance(data, list) else []
         return [AdlEvent.from_dict(e) for e in rows]
 
-    def fetch_account_adl_history(self, address: str, limit: int | None = None) -> list[AdlEvent]:
+    def fetch_adl_history(self, address: str, limit: int | None = None) -> list[AdlEvent]:
         """``GET /account/{address}/adl-history`` — ADL events touching an account."""
         query = _query(limit=limit)
         data = self._request("GET", f"/account/{quote(address, safe='')}/adl-history", query=query)
@@ -993,7 +1009,7 @@ class Client:
         data = self._request("GET", "/stats/history", direct=True)
         return [ThroughputSample.from_dict(s) for s in (data if isinstance(data, list) else [])]
 
-    def fetch_service_health(self) -> ServiceHealth:
+    def fetch_status(self) -> ServiceHealth:
         """``GET /status`` — aggregate service health. Public.
 
         Branch on ``status`` (worst-of across components); the per-component
@@ -1009,7 +1025,7 @@ class Client:
         return ServiceHealth.from_dict(data if isinstance(data, dict) else {})
 
     # -- wallet-signed auth ----------------------------------------------
-    def sign_in(self, signer: EthSigner) -> LoginResponse:
+    def login(self, signer: EthSigner) -> LoginResponse:
         """``POST /auth/login`` — EIP-191 session login.
 
         Signs the fixed login message with ``signer`` and posts the result.
@@ -1052,7 +1068,7 @@ class Client:
         data = self._request("GET", "/positions", signed=True, direct=True)
         return [Position.from_dict(p) for p in to_dict_list(data, "positions", required=False)]
 
-    def fetch_closed_positions(self, limit: int | None = None) -> list[ClosedPosition]:
+    def fetch_positions_history(self, limit: int | None = None) -> list[ClosedPosition]:
         """``GET /positions/closed`` — closed positions, newest first.
 
         The realized counterpart of :meth:`fetch_positions`. Requires
@@ -1061,12 +1077,12 @@ class Client:
         Returns the first page only. ``limit`` bounds it and must fall in
         ``1..200`` (:data:`CLOSED_POSITIONS_LIMIT_MAX` — the smallest of the
         paginated maxima); omit it for the server's default of 100. For the whole
-        history use :meth:`iter_closed_positions`, or
-        :meth:`fetch_closed_positions_page` for one page plus its cursor.
+        history use :meth:`iter_positions_history`, or
+        :meth:`fetch_positions_history_page` for one page plus its cursor.
         """
-        return self.fetch_closed_positions_page(limit=limit).items
+        return self.fetch_positions_history_page(limit=limit).items
 
-    def fetch_closed_positions_page(
+    def fetch_positions_history_page(
         self,
         *,
         limit: int | None = None,
@@ -1087,7 +1103,7 @@ class Client:
         rows = data if isinstance(data, list) else []
         return Page([ClosedPosition.from_dict(p) for p in rows], next_cursor)
 
-    def iter_closed_positions(
+    def iter_positions_history(
         self,
         *,
         limit: int | None = None,
@@ -1105,7 +1121,7 @@ class Client:
         """
         _check_iter_args(limit, CLOSED_POSITIONS_LIMIT_MAX, "positions/closed", max_pages)
         return iter_items(
-            lambda c: self.fetch_closed_positions_page(limit=limit, cursor=c),
+            lambda c: self.fetch_positions_history_page(limit=limit, cursor=c),
             cursor=cursor,
             max_pages=max_pages,
         )
@@ -1151,7 +1167,7 @@ class Client:
         data = self._request("GET", "/account/summary", signed=True, direct=True)
         return AccountPortfolioSummary.from_dict(data if isinstance(data, dict) else {})
 
-    def fetch_account_fees(self) -> AccountFees:
+    def fetch_trading_fees(self) -> AccountFees:
         """``GET /account/fees`` — the account's effective fee schedule.
 
         Requires credentials; the account is taken from the signing credentials,
@@ -1334,7 +1350,7 @@ class Client:
         data = self._request("GET", "/deposits", query=query, signed=True)
         return [FundsEntry.from_dict(e) for e in (data if isinstance(data, list) else [])]
 
-    def fetch_account_funding(self, limit: int | None = None) -> list[AccountFunding]:
+    def fetch_funding_history(self, limit: int | None = None) -> list[AccountFunding]:
         """``GET /funding`` — funding payments for the account. Requires credentials.
 
         The account-side counterpart of :meth:`fetch_funding_rate_history`,
@@ -1594,9 +1610,7 @@ class Client:
         data = self._request("POST", "/faucet", signed=True)
         return FaucetResponse.from_dict(data if isinstance(data, dict) else {})
 
-    def adjust_margin(
-        self, market_id: str, direction: str, amount: Decimal | str
-    ) -> MarginAdjustment:
+    def add_margin(self, market_id: str, direction: str, amount: Decimal | str) -> MarginAdjustment:
         """``POST /account/margin`` — add/remove isolated margin on a position.
 
         Requires credentials. Only applies to a position in ``isolated`` margin
@@ -1697,7 +1711,7 @@ class Client:
         data = self._request("GET", "/orders", signed=True, direct=True)
         return [Order.from_dict(o) for o in (data if isinstance(data, list) else [])]
 
-    def fetch_order_history(self, limit: int | None = None) -> list[OrderHistoryEntry]:
+    def fetch_orders(self, limit: int | None = None) -> list[OrderHistoryEntry]:
         """``GET /orders/history`` — terminal-status orders, newest first.
 
         Filled / cancelled / rejected / expired orders for the account, the
@@ -1706,12 +1720,12 @@ class Client:
         Returns the first page only. ``limit`` bounds it and must fall in
         ``1..500`` (:data:`ORDER_HISTORY_LIMIT_MAX` — lower than the 1000 fills
         and trades allow); omit it for the server's default of 100. For the whole
-        history use :meth:`iter_order_history`, or
-        :meth:`fetch_order_history_page` for one page plus its cursor.
+        history use :meth:`iter_orders`, or
+        :meth:`fetch_orders_page` for one page plus its cursor.
         """
-        return self.fetch_order_history_page(limit=limit).items
+        return self.fetch_orders_page(limit=limit).items
 
-    def fetch_order_history_page(
+    def fetch_orders_page(
         self,
         *,
         limit: int | None = None,
@@ -1732,7 +1746,7 @@ class Client:
         rows = data if isinstance(data, list) else []
         return Page([OrderHistoryEntry.from_dict(o) for o in rows], next_cursor)
 
-    def iter_order_history(
+    def iter_orders(
         self,
         *,
         limit: int | None = None,
@@ -1750,7 +1764,7 @@ class Client:
         """
         _check_iter_args(limit, ORDER_HISTORY_LIMIT_MAX, "orders/history", max_pages)
         return iter_items(
-            lambda c: self.fetch_order_history_page(limit=limit, cursor=c),
+            lambda c: self.fetch_orders_page(limit=limit, cursor=c),
             cursor=cursor,
             max_pages=max_pages,
         )
@@ -1802,7 +1816,7 @@ class Client:
         """``DELETE /orders`` — cancel all open orders. Requires credentials."""
         return self._request("DELETE", "/orders", signed=True, direct=True)
 
-    def amend_order(self, order_id: str, market_id: str, amend: AmendOrder) -> OrderResponse:
+    def edit_order(self, order_id: str, market_id: str, amend: AmendOrder) -> OrderResponse:
         """``PATCH /orders/{order_id}`` — amend a resting order's price/size.
 
         Requires credentials. ``market_id`` is required (the engine routes the
@@ -1813,7 +1827,7 @@ class Client:
         if not market_id:
             raise ValueError("market_id is required")
         if not amend.has_changes():
-            raise ValueError("amend_order requires at least one field to change")
+            raise ValueError("edit_order requires at least one field to change")
         query = urlencode({"market_id": market_id})
         data = self._request(
             "PATCH",
@@ -1843,7 +1857,7 @@ class Client:
         signed (:meth:`fetch_api_keys`, :meth:`delete_api_key`); which side is
         authoritative there is ENG-13303, so do not align them onto either
         scheme by reading this method as the pattern. Get
-        ``session_token`` from :meth:`sign_in` (:attr:`LoginResponse.token`);
+        ``session_token`` from :meth:`login` (:attr:`LoginResponse.token`);
         this SDK does not store it, so pass it in explicitly. This client's own
         ``api_key``/``api_secret`` are not used and need not be set.
 
@@ -1885,7 +1899,7 @@ class Client:
         """
         return self._request("DELETE", f"/agents/{quote(address, safe='')}", signed=True)
 
-    def mint_web_socket_token(self) -> WsToken:
+    def create_ws_token_legacy(self) -> WsToken:
         """``POST /ws-tokens`` — mint a single-use WebSocket token. Requires credentials.
 
         **Legacy.** The spec names this operation ``createWsTokenLegacy`` and
@@ -1903,7 +1917,7 @@ class Client:
     def create_ws_token(self) -> WsToken:
         """``POST /ws/token`` — mint a single-use WebSocket token. Requires credentials.
 
-        The preferred route over :meth:`mint_web_socket_token`: it accepts HMAC
+        The preferred route over :meth:`create_ws_token_legacy`: it accepts HMAC
         keys, registered agent keys and session tokens, and the token it returns
         encodes the account identity, so the per-account channels (orders,
         fills, positions, balances, liquidations) scope themselves to the
@@ -1921,21 +1935,137 @@ class Client:
     # -- admin (signed) --------------------------------------------------
     # Admin/observability was intentionally excluded from the /api/v1 spec
     # (ENG-4748), so these stay on the legacy gateway.
-    def set_account_tier(self, address: str, tier: str) -> TierOverride:
+    def set_tier(self, address: str, tier: str) -> TierOverride:
         """``PUT /admin/tiers`` — set an account's rate-limit tier. Requires admin creds."""
         data = self._request(
             "PUT", "/admin/tiers", body={"address": address, "tier": tier}, signed=True
         )
         return TierOverride.from_dict(data if isinstance(data, dict) else {})
 
-    def fetch_tier_overrides(self) -> list[TierOverride]:
+    def fetch_tiers(self) -> list[TierOverride]:
         """``GET /admin/tiers`` — list tier overrides. Requires admin creds."""
         data = self._request("GET", "/admin/tiers", signed=True)
         return [TierOverride.from_dict(t) for t in (data if isinstance(data, list) else [])]
 
-    def reset_account_tier(self, address: str) -> Any:
+    def delete_tier(self, address: str) -> Any:
         """``DELETE /admin/tiers/{address}`` — reset to default tier. Requires admin creds."""
         return self._request("DELETE", f"/admin/tiers/{quote(address, safe='')}", signed=True)
+
+    # -- deprecated aliases (R2.25, ENG-17744) ----------------------------
+    # Each method was renamed to ``snake_case(operationId)`` of the operation it
+    # calls. The old names delegate and warn for one minor release, then go.
+    def fetch_market_summaries(self) -> list[MarketSummary]:
+        """Deprecated alias for :meth:`fetch_markets_summary`."""
+        _warn_renamed("fetch_market_summaries", "fetch_markets_summary")
+        return self.fetch_markets_summary()
+
+    def fetch_market_adl_events(self, market_id: str, limit: int | None = None) -> list[AdlEvent]:
+        """Deprecated alias for :meth:`fetch_adl_events`."""
+        _warn_renamed("fetch_market_adl_events", "fetch_adl_events")
+        return self.fetch_adl_events(market_id, limit)
+
+    def fetch_account_adl_history(self, address: str, limit: int | None = None) -> list[AdlEvent]:
+        """Deprecated alias for :meth:`fetch_adl_history`."""
+        _warn_renamed("fetch_account_adl_history", "fetch_adl_history")
+        return self.fetch_adl_history(address, limit)
+
+    def fetch_service_health(self) -> ServiceHealth:
+        """Deprecated alias for :meth:`fetch_status`."""
+        _warn_renamed("fetch_service_health", "fetch_status")
+        return self.fetch_status()
+
+    def sign_in(self, signer: EthSigner) -> LoginResponse:
+        """Deprecated alias for :meth:`login`."""
+        _warn_renamed("sign_in", "login")
+        return self.login(signer)
+
+    def fetch_closed_positions(self, limit: int | None = None) -> list[ClosedPosition]:
+        """Deprecated alias for :meth:`fetch_positions_history`."""
+        _warn_renamed("fetch_closed_positions", "fetch_positions_history")
+        return self.fetch_positions_history(limit)
+
+    def fetch_closed_positions_page(
+        self, *, limit: int | None = None, cursor: str | None = None
+    ) -> Page[ClosedPosition]:
+        """Deprecated alias for :meth:`fetch_positions_history_page`."""
+        _warn_renamed("fetch_closed_positions_page", "fetch_positions_history_page")
+        return self.fetch_positions_history_page(limit=limit, cursor=cursor)
+
+    def iter_closed_positions(
+        self,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        max_pages: int | None = None,
+    ) -> Iterator[ClosedPosition]:
+        """Deprecated alias for :meth:`iter_positions_history`."""
+        _warn_renamed("iter_closed_positions", "iter_positions_history")
+        return self.iter_positions_history(limit=limit, cursor=cursor, max_pages=max_pages)
+
+    def fetch_account_fees(self) -> AccountFees:
+        """Deprecated alias for :meth:`fetch_trading_fees`."""
+        _warn_renamed("fetch_account_fees", "fetch_trading_fees")
+        return self.fetch_trading_fees()
+
+    def fetch_account_funding(self, limit: int | None = None) -> list[AccountFunding]:
+        """Deprecated alias for :meth:`fetch_funding_history`."""
+        _warn_renamed("fetch_account_funding", "fetch_funding_history")
+        return self.fetch_funding_history(limit)
+
+    def adjust_margin(
+        self, market_id: str, direction: str, amount: Decimal | str
+    ) -> MarginAdjustment:
+        """Deprecated alias for :meth:`add_margin`."""
+        _warn_renamed("adjust_margin", "add_margin")
+        return self.add_margin(market_id, direction, amount)
+
+    def fetch_order_history(self, limit: int | None = None) -> list[OrderHistoryEntry]:
+        """Deprecated alias for :meth:`fetch_orders`."""
+        _warn_renamed("fetch_order_history", "fetch_orders")
+        return self.fetch_orders(limit)
+
+    def fetch_order_history_page(
+        self, *, limit: int | None = None, cursor: str | None = None
+    ) -> Page[OrderHistoryEntry]:
+        """Deprecated alias for :meth:`fetch_orders_page`."""
+        _warn_renamed("fetch_order_history_page", "fetch_orders_page")
+        return self.fetch_orders_page(limit=limit, cursor=cursor)
+
+    def iter_order_history(
+        self,
+        *,
+        limit: int | None = None,
+        cursor: str | None = None,
+        max_pages: int | None = None,
+    ) -> Iterator[OrderHistoryEntry]:
+        """Deprecated alias for :meth:`iter_orders`."""
+        _warn_renamed("iter_order_history", "iter_orders")
+        return self.iter_orders(limit=limit, cursor=cursor, max_pages=max_pages)
+
+    def amend_order(self, order_id: str, market_id: str, amend: AmendOrder) -> OrderResponse:
+        """Deprecated alias for :meth:`edit_order`."""
+        _warn_renamed("amend_order", "edit_order")
+        return self.edit_order(order_id, market_id, amend)
+
+    def mint_web_socket_token(self) -> WsToken:
+        """Deprecated alias for :meth:`create_ws_token_legacy`."""
+        _warn_renamed("mint_web_socket_token", "create_ws_token_legacy")
+        return self.create_ws_token_legacy()
+
+    def set_account_tier(self, address: str, tier: str) -> TierOverride:
+        """Deprecated alias for :meth:`set_tier`."""
+        _warn_renamed("set_account_tier", "set_tier")
+        return self.set_tier(address, tier)
+
+    def fetch_tier_overrides(self) -> list[TierOverride]:
+        """Deprecated alias for :meth:`fetch_tiers`."""
+        _warn_renamed("fetch_tier_overrides", "fetch_tiers")
+        return self.fetch_tiers()
+
+    def reset_account_tier(self, address: str) -> Any:
+        """Deprecated alias for :meth:`delete_tier`."""
+        _warn_renamed("reset_account_tier", "delete_tier")
+        return self.delete_tier(address)
 
     # -- request plumbing -------------------------------------------------
     def _sign(self, method: str, path: str, query: str, body: bytes) -> dict[str, str]:

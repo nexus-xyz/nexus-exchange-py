@@ -858,6 +858,72 @@ class TestSecurityDeclarationReading(unittest.TestCase):
         self.assertEqual(csd.security_alternatives({"paths": {}}, {}), frozenset({frozenset()}))
 
 
+def spec_with_ids(**ops):
+    """A spec declaring each `"METHOD /path"` key with the given operationId."""
+    paths = {}
+    for key, op_id in ops.items():
+        method, path = key.split(" ", 1)
+        paths.setdefault(path, {})[method.lower()] = {"operationId": op_id}
+    return {"info": {"version": "9.9.9"}, "paths": paths}
+
+
+class TestMethodNames(unittest.TestCase):
+    """Invariant 4: each requesting method is named snake_case(operationId) (R2.25)."""
+
+    def _errors(self, client_body, spec, ahead=None):
+        saved = csd.OPERATION_IDS_AHEAD_OF_PIN
+        csd.OPERATION_IDS_AHEAD_OF_PIN = dict(ahead or {})
+        try:
+            with synthetic_package(client_body=client_body, manifest="GET /x\n"):
+                return _quiet(csd.check_method_names, spec)
+        finally:
+            csd.OPERATION_IDS_AHEAD_OF_PIN = saved
+
+    def test_snake_case_rules(self):
+        for op_id, want in (
+            ("fetchOrders", "fetch_orders"),
+            ("fetchTradingFeesV1", "fetch_trading_fees"),
+            ("fetchOHLCVV1", "fetch_ohlcv"),
+            ("createWsTokenLegacy", "create_ws_token_legacy"),
+            ("login", "login"),
+        ):
+            self.assertEqual(csd.method_name_for(op_id), want)
+
+    def test_the_canonical_name_passes(self):
+        body = 'def fetch_orders(self):\n    self._request("GET", "/orders/history")\n'
+        spec = spec_with_ids(**{"GET /orders/history": "fetchOrders"})
+        self.assertEqual(self._errors(body, spec), 0)
+
+    def test_the_old_name_fails(self):
+        body = 'def fetch_order_history(self):\n    self._request("GET", "/orders/history")\n'
+        spec = spec_with_ids(**{"GET /orders/history": "fetchOrders"})
+        self.assertEqual(self._errors(body, spec), 1)
+
+    def test_a_direct_page_helper_keeps_the_stem(self):
+        body = 'def fetch_trades_page(self):\n    self._request_page("/trades", direct=True)\n'
+        spec = spec_with_ids(**{"GET /api/v1/trades": "fetchTradesV1"})
+        self.assertEqual(self._errors(body, spec), 0)
+
+    def test_the_ahead_of_pin_table_supplies_the_name(self):
+        body = 'def fetch_orders(self):\n    self._request("GET", "/orders/history")\n'
+        spec = spec_with_ids(**{"GET /orders/history": "fetchOrderHistory"})
+        self.assertEqual(self._errors(body, spec), 1)
+        ahead = {("GET", "/orders/history"): "fetchOrders"}
+        self.assertEqual(self._errors(body, spec, ahead), 0)
+
+    def test_an_entry_the_pin_caught_up_with_is_stale(self):
+        body = 'def fetch_orders(self):\n    self._request("GET", "/orders/history")\n'
+        spec = spec_with_ids(**{"GET /orders/history": "fetchOrders"})
+        ahead = {("GET", "/orders/history"): "fetchOrders"}
+        self.assertEqual(self._errors(body, spec, ahead), 1)
+
+    def test_an_entry_no_method_requests_is_stale(self):
+        body = 'def fetch_orders(self):\n    self._request("GET", "/orders/history")\n'
+        spec = spec_with_ids(**{"GET /orders/history": "fetchOrders", "GET /keys": "listApiKeys"})
+        ahead = {("GET", "/keys"): "fetchApiKeys"}
+        self.assertEqual(self._errors(body, spec, ahead), 1)
+
+
 class TestPinMatchesSpec(unittest.TestCase):
     """Invariant 0: the spec handed to the checker must be the pinned release."""
 

@@ -75,7 +75,7 @@ class LoginRequest:
     """Signed body for ``POST /auth/login`` (EIP-191 session login).
 
     Produced by :meth:`EthSigner.sign_in`; hand it to
-    :meth:`~nexus_exchange.Client.sign_in`.
+    :meth:`~nexus_exchange.Client.login`.
     """
 
     #: The signed message — always :data:`SIGN_IN_MESSAGE`.

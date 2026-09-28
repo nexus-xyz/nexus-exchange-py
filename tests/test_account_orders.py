@@ -412,7 +412,7 @@ def test_set_account_tier_sends_body(httpx_mock) -> None:
         json={"address": "0xabc", "tier": "marketmaker"},
     )
     with _authed() as client:
-        override = client.set_account_tier("0xabc", "marketmaker")
+        override = client.set_tier("0xabc", "marketmaker")
     assert override.tier == "marketmaker"
     assert json.loads(httpx_mock.get_request().content) == {
         "address": "0xabc",
