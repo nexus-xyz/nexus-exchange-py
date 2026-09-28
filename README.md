@@ -436,7 +436,8 @@ pinned byte-for-byte to the spec's `x-nexus-test-vectors`.
 ## Bridge
 
 Track cross-chain deposits via the `/bridge` surface (USDC/USDX in Phase A).
-List the supported chains, then poll a deposit until `status` is `credited`:
+These reads track a deposit; they do not start one. List the supported chains,
+then poll a deposit until `status` is `credited`:
 
 `fetch_bridge_assets` is public — the chain and asset catalogue is the same for
 everyone, so it needs no key. Everything after it is signed.
@@ -448,9 +449,11 @@ deposits = client.fetch_bridge_deposits(limit=1, chain=assets.chains[0].chain)
 # deposits[0].status: "detected" | "confirming" | "credited" | "failed"
 ```
 
+The SDK has no way to get a deposit address today.
 `create_bridge_deposit_address` and `list_bridge_deposit_addresses` are
 deprecated: no server implements `/bridge/deposit-addresses` (its design was
-cancelled), so the SDK cannot issue a per-account deposit address today.
+cancelled), and no replacement has shipped yet. To fund a testnet account, use
+`claim_faucet()` or `claim_credit()`.
 
 See [`examples/bridge_deposit.py`](./examples/bridge_deposit.py).
 
