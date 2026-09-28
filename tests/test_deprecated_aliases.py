@@ -97,3 +97,16 @@ def test_the_warning_points_at_the_caller() -> None:
     with pytest.warns(DeprecationWarning) as caught:
         client.fetch_service_health()
     assert caught[0].filename == __file__
+
+
+@pytest.mark.parametrize(
+    ("name", "args"),
+    [("create_bridge_deposit_address", ("base",)), ("list_bridge_deposit_addresses", ())],
+)
+def test_unserved_deposit_address_methods_warn(name: str, args: tuple[Any, ...]) -> None:
+    # ENG-18023: nothing serves /bridge/deposit-addresses, so these warn rather
+    # than alias; the request itself is stubbed out.
+    client = Client(Network.LOCAL)
+    client._request = Mock(return_value={})  # type: ignore[method-assign]
+    with pytest.warns(DeprecationWarning, match=f"`{name}` is deprecated: no server implements"):
+        getattr(client, name)(*args)

@@ -64,7 +64,7 @@ looking for a flow that is already here.
 | `place_and_cancel_order.py` | HMAC | `POST /orders`, `GET /orders/{id}?market_id=`, `GET /orders`, `DELETE /orders/{id}?market_id=` |
 | `fills_and_withdrawals.py` | HMAC | `fills`, `withdrawals` |
 | `paginate_fills.py` | HMAC | `fills` (cursor pagination via `iter_my_trades` / `fetch_my_trades_page`) |
-| `bridge_deposit.py` | HMAC | `bridge/assets`, `bridge/deposit-addresses`, `bridge/deposits` |
+| `bridge_deposit.py` | HMAC | `bridge/assets`, `bridge/deposits` |
 | `signed_request.py` | HMAC | low-level signed-request escape hatch (no typed method) |
 | `wallet_auth.py` | wallet signature | `POST /auth/login` (EIP-191), `POST /agents/register` (EIP-712) |
 

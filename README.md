@@ -60,7 +60,7 @@ from the environment — no secrets in source).
 | Trading — `POST /orders`, `/orders/batch`, `/orders/preview`; `GET /orders`, `/orders/{id}`, `/orders/history`; `DELETE /orders`, `/orders/{id}`; `PATCH /orders/{id}` | ✅ implemented — every by-id call takes the order's `market_id` (`fetch_order(id, market_id)`, `cancel_order(id, market_id)`, `edit_order(id, market_id, …)`); the engine rejects one without it |
 | Order types — `Limit`, `Market`, `StopLimit`, `StopMarket`, `TakeProfitLimit`, `TakeProfitMarket`, `TrailingStop`, `TrailingLimit` (typed `OrderRequest` builders; `trigger_price` for stop / take-profit; deprecated `stop_price` never sent) | ✅ implemented. The spec does not define which way a trigger fires for each side (see the `OrderRequest` docstring) |
 | Funds — `POST /account/deposit`, `/account/credit`, `/deposits`, `/faucet`; `GET /deposits`, `/funding` | ✅ implemented |
-| Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`); `POST`/`GET /bridge/deposit-addresses`, `/bridge/wallets`; `POST /bridge/wallets/challenge` | ✅ implemented |
+| Bridge — `GET /bridge/assets`, `/bridge/deposits`(`/{id}`), `/bridge/wallets`; `POST /bridge/wallets/challenge` | ✅ implemented. `POST`/`GET /bridge/deposit-addresses` are deprecated: nothing serves them |
 | Keys / agents / WS token — `GET /keys`, `DELETE /keys/{id}`, `/agents`, `POST /ws/token` | ✅ implemented. The legacy `POST /ws-tokens` is deliberately not wrapped: use `create_ws_token()` |
 | Admin tiers — `GET`/`PUT`/`DELETE /admin/tiers` | ✅ implemented |
 | Cursor pagination — `cursor` + `X-Next-Cursor` on all five paginated GETs | ✅ implemented |
@@ -437,21 +437,25 @@ pinned byte-for-byte to the spec's `x-nexus-test-vectors`.
 
 ## Bridge
 
-Deposit funds across chains via the `/bridge` surface (USDC/USDX in Phase A).
-Get a deposit address (idempotent per account + chain), send funds, then poll a
-deposit until `status` is `credited`:
+Track cross-chain deposits via the `/bridge` surface (USDC/USDX in Phase A).
+These reads track a deposit; they do not start one. List the supported chains,
+then poll a deposit until `status` is `credited`:
 
 `fetch_bridge_assets` is public — the chain and asset catalogue is the same for
 everyone, so it needs no key. Everything after it is signed.
 
 ```python
 assets = client.fetch_bridge_assets()
-addr = client.create_bridge_deposit_address(assets.chains[0].chain)
-print(f"send USDC/USDX to {addr.address} on {addr.chain}")
 
-deposits = client.fetch_bridge_deposits(limit=1, chain=addr.chain)
+deposits = client.fetch_bridge_deposits(limit=1, chain=assets.chains[0].chain)
 # deposits[0].status: "detected" | "confirming" | "credited" | "failed"
 ```
+
+The SDK has no way to get a deposit address today.
+`create_bridge_deposit_address` and `list_bridge_deposit_addresses` are
+deprecated: no server implements `/bridge/deposit-addresses` (its design was
+cancelled), and no replacement has shipped yet. To fund a testnet account, use
+`claim_faucet()` or `claim_credit()`.
 
 See [`examples/bridge_deposit.py`](./examples/bridge_deposit.py).
 
