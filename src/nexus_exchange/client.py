@@ -1383,7 +1383,18 @@ class Client:
     def create_bridge_deposit_address(self, chain: str) -> BridgeDepositAddress:
         """``POST /bridge/deposit-addresses`` — get-or-create the account's deposit
         address on ``chain`` (idempotent per account+chain). Requires credentials.
+
+        .. deprecated:: Nothing serves this route: it left the contract with
+           ENG-10373 and its design was cancelled with ENG-11460, so every call
+           fails. It will be removed in a later minor release.
         """
+        warnings.warn(
+            "`create_bridge_deposit_address` is deprecated: no server implements "
+            "POST /bridge/deposit-addresses (ENG-11460). "
+            "It will be removed in a later minor release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         data = self._request(
             "POST",
             "/bridge/deposit-addresses",
@@ -1394,7 +1405,21 @@ class Client:
         return BridgeDepositAddress.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_bridge_deposit_addresses(self) -> list[BridgeDepositAddress]:
-        """``GET /bridge/deposit-addresses`` — list deposit addresses. Requires credentials."""
+        """``GET /bridge/deposit-addresses`` — list deposit addresses. Requires credentials.
+
+        .. deprecated:: Nothing serves this route: it left the contract with
+           ENG-10373 and its design was cancelled with ENG-11460, so every call
+           fails. It will be removed in a later minor release. The old name
+           ``list_bridge_deposit_addresses`` is the same method and warns the same
+           way.
+        """
+        warnings.warn(
+            "`fetch_bridge_deposit_addresses` (old name `list_bridge_deposit_addresses`) "
+            "is deprecated: no server implements GET /bridge/deposit-addresses (ENG-11460). "
+            "It will be removed in a later minor release.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         data = self._request("GET", "/bridge/deposit-addresses", signed=True, direct=True)
         return [BridgeDepositAddress.from_dict(a) for a in (data if isinstance(data, list) else [])]
 
@@ -1970,10 +1995,10 @@ class Client:
         _warn_renamed("reset_account_tier", "delete_tier")
         return self.delete_tier(address)
 
-    def list_bridge_deposit_addresses(self) -> list[BridgeDepositAddress]:
-        """Deprecated alias for :meth:`fetch_bridge_deposit_addresses`."""
-        _warn_renamed("list_bridge_deposit_addresses", "fetch_bridge_deposit_addresses")
-        return self.fetch_bridge_deposit_addresses()
+    # The old name is the same function, not a delegating wrapper: the route is
+    # unserved (ENG-18023), so the one warning fetch_bridge_deposit_addresses
+    # emits covers both names, and a wrapper would warn twice.
+    list_bridge_deposit_addresses = fetch_bridge_deposit_addresses
 
     # -- request plumbing -------------------------------------------------
     def _sign(self, method: str, path: str, query: str, body: bytes) -> dict[str, str]:

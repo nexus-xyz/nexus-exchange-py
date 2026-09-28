@@ -66,7 +66,6 @@ _ALIASES = [
     ("set_account_tier", "set_tier", ("0xabc", "mm"), {}, ("0xabc", "mm"), {}),
     ("fetch_tier_overrides", "fetch_tiers", (), {}, (), {}),
     ("reset_account_tier", "delete_tier", ("0xabc",), {}, ("0xabc",), {}),
-    ("list_bridge_deposit_addresses", "fetch_bridge_deposit_addresses", (), {}, (), {}),
 ]
 
 
@@ -98,3 +97,30 @@ def test_the_warning_points_at_the_caller() -> None:
     with pytest.warns(DeprecationWarning) as caught:
         client.fetch_service_health()
     assert caught[0].filename == __file__
+
+
+def test_create_bridge_deposit_address_warns() -> None:
+    # ENG-18023: nothing serves /bridge/deposit-addresses, so this warns; the
+    # request itself is stubbed out.
+    client = Client(Network.LOCAL)
+    client._request = Mock(return_value={})  # type: ignore[method-assign]
+    with pytest.warns(DeprecationWarning, match="`create_bridge_deposit_address` is deprecated"):
+        client.create_bridge_deposit_address("base")
+
+
+@pytest.mark.parametrize(
+    "name", ["fetch_bridge_deposit_addresses", "list_bridge_deposit_addresses"]
+)
+def test_fetch_bridge_deposit_addresses_warns_once_under_either_name(name: str) -> None:
+    # ENG-18009 renamed it, ENG-18023 deprecated it: the old name is the same
+    # method, so a call under either name warns exactly once, at the caller.
+    client = Client(Network.LOCAL)
+    client._request = Mock(return_value=[])  # type: ignore[method-assign]
+    with pytest.warns(DeprecationWarning) as caught:
+        assert getattr(client, name)() == []
+    assert len(caught) == 1
+    assert "no server implements GET /bridge/deposit-addresses" in str(caught[0].message)
+    assert caught[0].filename == __file__
+    client._request.assert_called_once_with(
+        "GET", "/bridge/deposit-addresses", signed=True, direct=True
+    )
