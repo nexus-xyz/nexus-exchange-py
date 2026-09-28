@@ -181,9 +181,8 @@ class AgentKeyRefusedError(MissingCredentialsError):
     * **Withdrawals** — any non-read method on ``/withdrawals``,
       ``/account/withdraw`` or ``/bridge/withdrawals`` (the server's
       ``is_withdrawal_path``). ``code`` is ``AGENT_CANNOT_WITHDRAW``.
-    * **Agent management and the legacy WS token** — ``GET /agents``,
-      ``DELETE /agents/{address}`` and ``POST /ws-tokens``. ``code`` is
-      ``AGENT_KEY_FORBIDDEN``.
+    * **Agent management** — ``GET /agents`` and ``DELETE /agents/{address}``.
+      ``code`` is ``AGENT_KEY_FORBIDDEN``.
 
     Use a client with the wallet's own HMAC key for these. Subclasses
     :class:`MissingCredentialsError` because that is the fix: the operation

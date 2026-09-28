@@ -137,14 +137,6 @@ def test_revoke_agent_hits_address_path(httpx_mock) -> None:
     _assert_signed(httpx_mock.get_request(), "DELETE", "/agents/0xagent")
 
 
-def test_mint_web_socket_token_posts_and_parses(httpx_mock) -> None:
-    httpx_mock.add_response(url=f"{_BASE}/ws-tokens", method="POST", json={"token": "wst_abc123"})
-    with _authed() as client:
-        tok = client.create_ws_token_legacy()
-    assert tok.token == "wst_abc123"
-    _assert_signed(httpx_mock.get_request(), "POST", "/ws-tokens")
-
-
 # -- admin tier reads / reset --------------------------------------------------
 def test_fetch_tier_overrides_parses_list(httpx_mock) -> None:
     httpx_mock.add_response(
@@ -224,7 +216,7 @@ def test_create_order_uses_post_verb(httpx_mock) -> None:
         lambda c: c.delete_api_key("nx_a"),
         lambda c: c.fetch_agents(),
         lambda c: c.revoke_agent("0xagent"),
-        lambda c: c.create_ws_token_legacy(),
+        lambda c: c.create_ws_token(),
         lambda c: c.fetch_tiers(),
         lambda c: c.delete_tier("0xabc"),
     ],
