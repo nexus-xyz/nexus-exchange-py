@@ -52,7 +52,7 @@ from the environment — no secrets in source).
 | HMAC request signing (the plumbing for authed calls) | ✅ implemented |
 | Wallet-signed auth — `login` (EIP-191) + `register_agent` (EIP-712) | ✅ implemented |
 | Agent-key request signing — `x-agent` / `x-timestamp` / `x-nonce` / `x-signature` (`Client(agent=AgentSigner…)`) | ✅ implemented — trade-only; see [Agent-key request signing](#agent-key-request-signing) |
-| CCXT-compatible adapter — public market data | ✅ implemented |
+| CCXT-compatible adapter — public market data | ✅ implemented, frozen: no private methods; superseded by upstream `ccxt.nexus`, see [CCXT compatibility](#ccxt-compatibility) |
 | Error taxonomy (terminal vs transient, incl. the jurisdiction `403`) | ✅ implemented |
 | Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
 | Account reads — `GET /account`, `/positions`, `/positions/closed`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
@@ -630,10 +630,20 @@ stack (freqtrade, hummingbot, bots) speaks. `nexus_exchange.ccxt_adapter`
 exposes the exchange under CCXT's unified method names and return shapes, so
 CCXT-shaped code can talk to Nexus with minimal changes.
 
-This first increment covers `describe()` and public market data —
-`fetch_markets`, `fetch_ticker`, `fetch_tickers`, `fetch_order_book`,
-`fetch_ohlcv`, `fetch_trades`, plus `load_markets`. Private / trading methods
-are a follow-up.
+**The adapter is frozen at public market data.** It will be superseded by the
+upstream `nexus` exchange class in [ccxt/ccxt](https://github.com/ccxt/ccxt)
+(`ccxt.nexus()`), and removed from this package after that class lands. No
+private endpoints will be added here.
+
+- **Works:** `describe()`, `load_markets`, `fetch_markets`, `fetch_ticker`,
+  `fetch_tickers`, `fetch_order_book`, `fetch_ohlcv`, `fetch_trades`.
+- **Absent:** every private / trading method. There is no `fetch_balance`,
+  `fetch_positions`, `create_order`, `cancel_order`, `fetch_orders`,
+  `fetch_open_orders` or `fetch_my_trades`; `describe()["has"]` reports them
+  `False`.
+
+For balances, positions and trading, use the native `nexus_exchange.Client` in
+this package (see [What's supported](#whats-supported)).
 
 ```python
 from nexus_exchange.ccxt_adapter import NexusExchange

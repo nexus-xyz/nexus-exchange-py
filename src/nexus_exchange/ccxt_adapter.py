@@ -6,19 +6,21 @@ bots) speaks it. This adapter exposes the Nexus Exchange under CCXT's unified
 method names and return shapes so that code already written against CCXT can
 talk to Nexus with minimal changes.
 
-**First increment (this module):** ``describe()`` plus the public market-data
-surface — :meth:`NexusExchange.fetch_markets`, :meth:`fetch_ticker`,
+**Scope: frozen at public market data.** ``describe()``, ``load_markets`` and
+:meth:`NexusExchange.fetch_markets`, :meth:`fetch_ticker`, :meth:`fetch_tickers`,
 :meth:`fetch_order_book`, :meth:`fetch_ohlcv`, :meth:`fetch_trades`. Private /
-trading methods (balances, orders, positions) are a deliberate follow-up.
+trading methods (balances, orders, positions) will not be added: the upstream
+``nexus`` class in ccxt/ccxt (``ccxt.nexus()``) supersedes this adapter, which is
+removed once that class lands. Use :class:`~nexus_exchange.Client` for private
+endpoints.
 
 **Why no ``ccxt`` dependency.** This adapter *follows CCXT's conventions* — the
 unified field names, the ``[price, amount]`` order-book levels, the
 ``[ts, o, h, l, c, v]`` candles, the ``load_markets`` cache — but it does not
 subclass ``ccxt.Exchange`` or import ``ccxt``. That keeps the SDK dependency
 light and the adapter usable on its own. Returns are plain ``dict`` / ``list``
-matching CCXT's structures, so they drop into CCXT-shaped code. Whether to
-additionally ship a true ``ccxt.Exchange`` subclass (and take the ``ccxt``
-dependency) is a product decision left open.
+matching CCXT's structures, so they drop into CCXT-shaped code. A true
+``ccxt.Exchange`` class is the upstream ``ccxt.nexus``, not this module.
 
 The exchange's REST API already emits CCXT-shaped market data (the ticker is
 documented "CCXT-style", order books are bids-desc/asks-asc ``[price, amount]``
@@ -124,8 +126,8 @@ class NexusExchange:
 
         Mirrors the dict a ``ccxt.Exchange`` subclass returns from
         ``describe()``: ``has`` flags advertise which unified methods work
-        today (private/trading methods are ``False`` until the follow-up
-        increment), and ``timeframes`` lists the OHLCV intervals the API serves.
+        today (private/trading methods are ``False``; the adapter is frozen),
+        and ``timeframes`` lists the OHLCV intervals the API serves.
         """
         return {
             "id": "nexus",
@@ -150,7 +152,7 @@ class NexusExchange:
                 "fetchOrderBook": True,
                 "fetchOHLCV": True,
                 "fetchTrades": True,
-                # Private / trading — follow-up increment.
+                # Private / trading: not implemented; frozen, superseded by ccxt.nexus.
                 "fetchBalance": False,
                 "fetchPositions": False,
                 "createOrder": False,
