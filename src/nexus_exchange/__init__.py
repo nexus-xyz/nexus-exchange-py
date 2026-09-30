@@ -119,6 +119,7 @@ from .ws import (
     WsClient,
     WsError,
     WsEvent,
+    WsHealth,
     WsSubscription,
 )
 
@@ -194,6 +195,7 @@ __all__ = [
     "WsClient",
     "WsEvent",
     "WsSubscription",
+    "WsHealth",
     "WsError",
     "PUBLIC_CHANNELS",
     "ACCOUNT_CHANNELS",
