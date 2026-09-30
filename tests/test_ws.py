@@ -243,9 +243,15 @@ async def test_a_join_at_seq_zero_is_resumed_with_since_zero() -> None:
     _instant(ws)
     async with ws:
         ws.subscribe("fills")
-        for _ in range(20):
-            await asyncio.sleep(0)
-    resume = [m for m in conn2.sent if m["op"] == "subscribe"][0]
+
+        # Wait for the reconnect's subscribe rather than a fixed number of loop
+        # turns: how many it takes differs across Python versions.
+        async def _resumed() -> dict:
+            while not (subs := [m for m in conn2.sent if m["op"] == "subscribe"]):
+                await asyncio.sleep(0)
+            return subs[0]
+
+        resume = await asyncio.wait_for(_resumed(), 1.0)
     assert resume["since"] == 0
 
 
