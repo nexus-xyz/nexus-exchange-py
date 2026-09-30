@@ -48,7 +48,7 @@ from nexus_exchange import (
 )
 
 _SECRET = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
-_BASE = "http://localhost:9090/api/v1"
+_BASE = "http://localhost:9090"
 _STATE_URL = f"{_BASE}/account/state"
 _SUMMARY_URL = f"{_BASE}/account/summary"
 _FEES_URL = f"{_BASE}/account/fees"

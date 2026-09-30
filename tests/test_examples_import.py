@@ -270,7 +270,7 @@ def test_a_blank_base_url_env_var_means_unset_not_an_empty_override(
     "url",
     [
         "https://beta.exchange.nexus.xyz/api/exchange",
-        "https://api.testnet.nexus.xyz/indexer",
+        "https://api.testnet.nexus.xyz/v1",
     ],
 )
 def test_play_funds_urls_pass_the_guard(url: str, monkeypatch: pytest.MonkeyPatch) -> None:

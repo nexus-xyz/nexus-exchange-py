@@ -121,6 +121,4 @@ def test_fetch_bridge_deposit_addresses_warns_once_under_either_name(name: str) 
     assert len(caught) == 1
     assert "no server implements GET /bridge/deposit-addresses" in str(caught[0].message)
     assert caught[0].filename == __file__
-    client._request.assert_called_once_with(
-        "GET", "/bridge/deposit-addresses", signed=True, direct=True
-    )
+    client._request.assert_called_once_with("GET", "/api/v1/bridge/deposit-addresses", signed=True)

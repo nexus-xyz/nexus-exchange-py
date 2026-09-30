@@ -37,7 +37,7 @@ def _authed() -> Client:
 def test_amend_order_signs_sends_query_and_body(httpx_mock) -> None:
     # market_id rides as a signed query param (direct /api/v1 route).
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/orders/o1?market_id=BTC-USDX-PERP",
+        url="http://localhost:9090/orders/o1?market_id=BTC-USDX-PERP",
         method="PATCH",
         json={"order": {"id": "o1", "status": "open"}, "fills": []},
     )
@@ -54,7 +54,7 @@ def test_amend_order_signs_sends_query_and_body(httpx_mock) -> None:
 
 def test_amend_order_omits_unset_fields(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/orders/o1?market_id=BTC-USDX-PERP",
+        url="http://localhost:9090/orders/o1?market_id=BTC-USDX-PERP",
         method="PATCH",
         json={"order": {"id": "o1"}, "fills": []},
     )

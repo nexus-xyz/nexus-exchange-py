@@ -30,7 +30,7 @@ def _authed() -> Client:
 
 def test_fetch_balance_parses_and_signs(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/account",
+        url="http://localhost:9090/account",
         json={
             "balance": "1000.00",
             "collateral": "1000.00",
@@ -59,7 +59,7 @@ def test_fetch_balance_parses_and_signs(httpx_mock) -> None:
 
 def test_fetch_balance_tolerates_missing_liquidation_price(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/account",
+        url="http://localhost:9090/account",
         json={
             "balance": "1000.00",
             "collateral": "1000.00",
@@ -84,7 +84,7 @@ def test_fetch_balance_tolerates_missing_liquidation_price(httpx_mock) -> None:
 
 def test_fetch_my_trades_parses_fills(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/fills",
+        url="http://localhost:9090/fills",
         json=[
             {
                 "id": "f1",
@@ -108,7 +108,7 @@ def test_fetch_my_trades_parses_fills(httpx_mock) -> None:
 
 def test_fetch_rate_limit_status_handles_nulls(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/account/rate-limit",
+        url="http://localhost:9090/account/rate-limit",
         json={"tier": "unlimited", "limit": None, "remaining": None, "reset_at_ms": None},
     )
     with _authed() as client:
@@ -130,7 +130,7 @@ def test_deposit_sends_amount_and_parses(httpx_mock) -> None:
 
 def test_claim_credit_omits_amount_when_none(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/account/credit",
+        url="http://localhost:9090/account/credit",
         json={"amount": "100", "credited_today": "100", "daily_limit": "1000"},
     )
     with _authed() as client:
@@ -141,7 +141,7 @@ def test_claim_credit_omits_amount_when_none(httpx_mock) -> None:
 
 def test_create_order_serializes_limit_body(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/orders",
+        url="http://localhost:9090/orders",
         json={
             "order": {
                 "id": "o1",
@@ -179,7 +179,7 @@ def test_create_order_post_only_sends_exact_wire_value(httpx_mock) -> None:
     # PostOnly is PascalCase on the wire (unlike uppercase GTC/IOC/FOK) — the
     # engine rejects "POSTONLY", so the value must pass through verbatim.
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/orders",
+        url="http://localhost:9090/orders",
         json={
             "order": {
                 "id": "o2",
@@ -215,9 +215,7 @@ def test_market_order_omits_price() -> None:
 
 
 def test_create_orders_batch_sends_array(httpx_mock) -> None:
-    httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/orders/batch", json=[{"outcome": "ok"}]
-    )
+    httpx_mock.add_response(url="http://localhost:9090/orders/batch", json=[{"outcome": "ok"}])
     orders = [
         OrderRequest.limit("BTC-USDX-PERP", "Buy", Decimal("50000"), Decimal("0.1")),
         OrderRequest.market("ETH-USDX-PERP", "Sell", Decimal("1")),
@@ -233,7 +231,7 @@ def test_create_orders_batch_parses_typed_results(httpx_mock) -> None:
     # Per-order results, in request order: one placed order (ok) and one rejection
     # (err). The batch is non-atomic, so both outcomes coexist in a 201 response.
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/orders/batch",
+        url="http://localhost:9090/orders/batch",
         json=[
             {
                 "outcome": "ok",
@@ -304,7 +302,7 @@ def test_create_orders_batch_keeps_alignment_for_malformed_elements(httpx_mock) 
     # A non-dict element must not be dropped: it decodes to an err-shaped
     # placeholder so results stay positionally aligned with the request.
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/orders/batch",
+        url="http://localhost:9090/orders/batch",
         json=[{"outcome": "ok"}, "garbage", {"outcome": "err", "error": "bad_qty"}],
     )
     orders = [
@@ -328,7 +326,7 @@ def test_create_orders_batch_non_list_payload_yields_one_err_per_order(httpx_moc
     # A payload that is not a list carries no per-order results; the SDK
     # returns one err-shaped placeholder per submitted order instead of [].
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/orders/batch",
+        url="http://localhost:9090/orders/batch",
         json={"error": "internal", "message": "boom"},
     )
     orders = [
@@ -345,7 +343,7 @@ def test_create_orders_batch_non_list_payload_yields_one_err_per_order(httpx_moc
 
 def test_fetch_open_orders_parses(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/orders",
+        url="http://localhost:9090/orders",
         json=[
             {
                 "id": "o1",
@@ -370,7 +368,7 @@ def test_fetch_open_orders_parses(httpx_mock) -> None:
 
 def test_cancel_order_signs_delete(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/orders/o1?market_id=BTC-USDX-PERP",
+        url="http://localhost:9090/orders/o1?market_id=BTC-USDX-PERP",
         method="DELETE",
         json={"cancelled": True},
     )

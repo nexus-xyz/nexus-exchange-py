@@ -8,12 +8,11 @@ SDK is itself Python, so the code side is read with `ast` — every REST call go
 through `Client._request(METHOD, path, ..., direct=…)`, and an AST walk sees those
 calls exactly, including multi-line ones, without pattern-matching on formatting.
 
-`direct=True` routes the call at the direct backend service, which prefixes the
-path with `API_V1_PREFIX` (`/api/v1`) for both signing and the wire (see
-`Client._request`). So the operation a call targets is the *resolved* path, not the
-literal in the source — `_request("GET", "/bridge/assets", direct=True)` targets
-`GET /api/v1/bridge/assets`. The prefix is read out of client.py rather than
-hardcoded here, so moving the constant cannot silently desynchronize the checker.
+Since ENG-18322 the client sends the spec's bare path to one base, so the literal
+in the source is the operation (the bridge reads spell `/api/v1/...` out). The
+checker still resolves a `direct=True` keyword by prefixing `API_V1_PREFIX`, read
+out of client.py rather than hardcoded, so a call that reintroduced it would be
+checked against the operation it actually targets.
 
 Five invariants are enforced:
 
@@ -908,19 +907,19 @@ def check_declared_security(spec):
 # carries ENG-17740 empties this map. Keys are (METHOD, normalized path) exactly as
 # `requested_ops` reports them.
 OPERATION_IDS_AHEAD_OF_PIN: dict[tuple[str, str], str] = {
-    ("GET", "/api/v1/account/fees"): "fetchTradingFeesV1",
-    ("POST", "/api/v1/account/credit"): "claimCreditV1",
+    ("GET", "/account/fees"): "fetchTradingFees",
+    ("POST", "/account/credit"): "claimCredit",
     ("POST", "/account/margin"): "addMargin",
     ("GET", "/admin/tiers"): "fetchTiers",
     ("GET", "/agents"): "fetchAgents",
     ("GET", "/api/v1/bridge/assets"): "fetchBridgeAssets",
     ("GET", "/api/v1/bridge/deposits"): "fetchBridgeDeposits",
     ("GET", "/api/v1/bridge/deposits/{}"): "fetchBridgeDeposit",
-    ("GET", "/api/v1/fills"): "fetchMyTradesV1",
-    ("GET", "/api/v1/markets/{}/funding"): "fetchFundingRateHistoryV1",
-    ("POST", "/api/v1/orders/batch"): "createOrdersV1",
-    ("GET", "/api/v1/orders/history"): "fetchOrdersV1",
-    ("GET", "/api/v1/positions/closed"): "fetchPositionsHistoryV1",
+    ("GET", "/fills"): "fetchMyTrades",
+    ("GET", "/markets/{}/funding"): "fetchFundingRateHistory",
+    ("POST", "/orders/batch"): "createOrders",
+    ("GET", "/orders/history"): "fetchOrders",
+    ("GET", "/positions/closed"): "fetchPositionsHistory",
     ("GET", "/funding"): "fetchFundingHistory",
     ("GET", "/keys"): "fetchApiKeys",
 }

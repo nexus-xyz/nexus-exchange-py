@@ -57,7 +57,7 @@ def test_headers_on_public_get(httpx_mock) -> None:
 def test_headers_on_signed_write_coexist_with_signing_headers(httpx_mock) -> None:
     httpx_mock.add_response(json={})
     with Client(Network.LOCAL, api_key="nx_test", api_secret=_SECRET) as client:
-        client._request("POST", "/orders", body={"x": 1}, signed=True, direct=True)
+        client._request("POST", "/orders", body={"x": 1}, signed=True)
 
     req = httpx_mock.get_request()
     assert req.headers["user-agent"] == DEFAULT_USER_AGENT

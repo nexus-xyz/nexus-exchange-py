@@ -33,7 +33,7 @@ def _authed(delays: list[float], **retry_kw) -> Client:
     return client
 
 
-_SUMMARY_URL = "http://localhost:9090/api/v1/markets/summary"
+_SUMMARY_URL = "http://localhost:9090/markets/summary"
 
 
 def test_retries_transient_5xx_on_get_then_succeeds(httpx_mock) -> None:
@@ -57,7 +57,7 @@ def test_retries_transport_error_on_get(httpx_mock) -> None:
 
 
 def test_does_not_retry_non_idempotent_post(httpx_mock) -> None:
-    httpx_mock.add_response(url="http://localhost:9090/api/v1/orders", status_code=503)
+    httpx_mock.add_response(url="http://localhost:9090/orders", status_code=503)
     delays: list[float] = []
     order = OrderRequest.limit("BTC-USDX-PERP", "Buy", "100", "1")
     with _authed(delays) as client:
@@ -138,7 +138,7 @@ def test_429_apierror_carries_retry_after_ms(httpx_mock) -> None:
 
 
 def test_each_retry_resigns_with_fresh_timestamp(httpx_mock) -> None:
-    orders_url = "http://localhost:9090/api/v1/orders"
+    orders_url = "http://localhost:9090/orders"
     httpx_mock.add_response(url=orders_url, status_code=503)
     httpx_mock.add_response(url=orders_url, json=[])
     delays: list[float] = []

@@ -29,8 +29,8 @@ from nexus_exchange import (
 )
 
 BASE = "http://localhost:9090"
-TRADES_URL = f"{BASE}/api/v1/markets/BTC-USDX-PERP/trades"
-FILLS_URL = f"{BASE}/api/v1/fills"
+TRADES_URL = f"{BASE}/markets/BTC-USDX-PERP/trades"
+FILLS_URL = f"{BASE}/fills"
 
 # A well-formed 32-byte hex secret, matching the other signed-request tests.
 _SECRET = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"

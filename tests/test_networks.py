@@ -89,9 +89,8 @@ class TestHostMap:
     @pytest.mark.parametrize(
         ("network", "rest_base"),
         [
-            # Testnet's spec REST base, not its `/indexer` `base_url`: REST has not
-            # moved to `/v1` in this SDK yet. Same host, which is what `/ws/token`
-            # binds a token to.
+            # Testnet's spec REST base, which is also its `base_url`. Same host,
+            # which is what `/ws/token` binds a token to.
             (Network.TESTNET, "https://api.testnet.nexus.xyz/v1"),
             (Network.MAINNET, Network.MAINNET.config.published_rest_base),
             (Network.LOCAL, Network.LOCAL.config.published_rest_base),
@@ -149,8 +148,7 @@ class TestClientTargeting:
         # on every route (ENG-14039).
         with Client() as client:
             assert client.network is Network.TESTNET.config
-            assert client._base_url == "https://api.testnet.nexus.xyz/indexer"
-            assert client._direct_base_url == "https://api.testnet.nexus.xyz/indexer"
+            assert client._base_url == "https://api.testnet.nexus.xyz/v1"
 
     def test_mainnet_without_an_explicit_base_refuses_at_construction(self) -> None:
         # Its host is published but not resolvable. Guessing one would mean
@@ -177,20 +175,9 @@ class TestClientTargeting:
             assert client.network.funds is Funds.REAL
             assert client.network.funds is not Funds.UNKNOWN
 
-    def test_retired_beta_channel_is_reachable_via_the_two_overrides(self) -> None:
-        # Beta is demoted to an explicit override. It keeps the gateway/direct
-        # split, which a single base_url would have collapsed.
-        with Client(
-            base_url="https://beta.exchange.nexus.xyz/api/exchange",
-            direct_base_url="https://beta.exchange.nexus.xyz",
-        ) as client:
-            assert client._base_url == "https://beta.exchange.nexus.xyz/api/exchange"
-            assert client._direct_base_url == "https://beta.exchange.nexus.xyz"
-
-    def test_single_base_url_override_still_covers_both_surfaces(self) -> None:
+    def test_a_base_url_override_is_normalised(self) -> None:
         with Client(Network.LOCAL, base_url="http://127.0.0.1:8080/") as client:
             assert client._base_url == "http://127.0.0.1:8080"
-            assert client._direct_base_url == "http://127.0.0.1:8080"
 
     def test_a_lone_gateway_base_url_is_accepted(self) -> None:
         # Was refused, on the premise that /api/v1 is served only at the host
@@ -200,39 +187,18 @@ class TestClientTargeting:
         # on the deploy this SDK targets by default (ENG-10095).
         with Client(base_url="https://beta.exchange.nexus.xyz/api/exchange") as client:
             assert client._base_url == "https://beta.exchange.nexus.xyz/api/exchange"
-            assert client._direct_base_url == "https://beta.exchange.nexus.xyz/api/exchange"
-
-    def test_an_explicit_gateway_direct_base_is_accepted_too(self) -> None:
-        # Both topologies are real, so which one applies is a property of the URL
-        # rather than an invariant this client can assert.
-        with Client(
-            base_url="https://beta.exchange.nexus.xyz/api/exchange",
-            direct_base_url="https://beta.exchange.nexus.xyz/api/exchange/",
-        ) as client:
-            assert client._direct_base_url == "https://beta.exchange.nexus.xyz/api/exchange"
-
-    def test_both_surfaces_share_the_base_on_testnet(self) -> None:
-        # There is no split to preserve on this deploy: the /api/v1 surface is
-        # mounted under the same route prefix as everything else, so both bases
-        # are the same value. The two fields stay separate for a deploy that does
-        # split them.
-        with Client(Network.TESTNET) as client:
-            assert client._base_url == "https://api.testnet.nexus.xyz/indexer"
-            assert client._direct_base_url == "https://api.testnet.nexus.xyz/indexer"
 
     def test_the_default_base_url_is_not_caught_by_the_guard(self) -> None:
-        # The guard rejects a direct base that already carries `/api/exchange`.
-        # Testnet's default must not trip it — it did not when the default was a
-        # gateway URL and must not now that it is a `/indexer`-prefixed one.
+        # Testnet's default carries a path (`/v1`); a base with a path must pass
+        # validation unchanged.
         with Client() as client:
-            assert client._base_url == "https://api.testnet.nexus.xyz/indexer"
-            assert client._direct_base_url == "https://api.testnet.nexus.xyz/indexer"
+            assert client._base_url == "https://api.testnet.nexus.xyz/v1"
 
     def test_a_host_containing_the_word_exchange_is_not_a_gateway(self) -> None:
         # The check is on path segments, so `exchange.nexus.xyz` and a path like
         # /exchange are both fine — only the `api/exchange` pair is refused.
         with Client(base_url="https://exchange.nexus.xyz/exchange") as client:
-            assert client._direct_base_url == "https://exchange.nexus.xyz/exchange"
+            assert client._base_url == "https://exchange.nexus.xyz/exchange"
 
     def test_blank_override_falls_back_to_the_network_default(self) -> None:
         # Matches the old `base_url or network.base_url` behaviour, and how a
@@ -263,7 +229,7 @@ class TestClientTargeting:
 
 
 class TestPublicBaseUrls:
-    """`base_url` / `direct_base_url` as public, read-only properties (#73).
+    """`base_url` as a public, read-only property (#73).
 
     The effective target used to be reachable only as `client._base_url`, so
     every caller — and every test — that wanted to know where traffic actually
@@ -276,7 +242,6 @@ class TestPublicBaseUrls:
     def test_they_report_the_config_default_when_nothing_is_overridden(self) -> None:
         with Client(Network.TESTNET) as client:
             assert client.base_url == Network.TESTNET.config.base_url
-            assert client.direct_base_url == Network.TESTNET.config.direct_base_url
 
     def test_they_report_the_override_not_the_configs_default(self) -> None:
         # The distinction the properties exist to make, and the one ENG-10095
@@ -290,33 +255,17 @@ class TestPublicBaseUrls:
             assert client.base_url != client.network.base_url
             assert client.network.funds is Network.LOCAL.config.funds
 
-    def test_they_stay_distinct_when_the_deploy_splits_the_two_surfaces(self) -> None:
-        # The pair is only worth exposing as two properties if it can hold two
-        # values: on a split deploy the gateway and the /api/v1 service are
-        # different hosts. Aliasing one to the other passes every same-host case
-        # above, so this is the assertion that catches it.
-        with Client(
-            Network.LOCAL,
-            base_url="https://beta.exchange.nexus.xyz/api/exchange",
-            direct_base_url="https://beta.exchange.nexus.xyz",
-        ) as client:
-            assert client.base_url == "https://beta.exchange.nexus.xyz/api/exchange"
-            assert client.direct_base_url == "https://beta.exchange.nexus.xyz"
-            assert client.base_url != client.direct_base_url
-
     def test_they_mirror_the_private_attributes_they_replace(self) -> None:
         # Pins them as accessors rather than a second resolution path, so the
         # ~20 assertions still reading `_base_url` cannot drift from these.
         with Client(Network.LOCAL, base_url="http://127.0.0.1:8080/") as client:
             assert client.base_url == client._base_url
-            assert client.direct_base_url == client._direct_base_url
 
     def test_they_are_normalised_like_the_private_attributes(self) -> None:
         # The trailing slash is gone: these are the exact prefixes a path is
         # concatenated onto, not the strings that were passed in.
         with Client(Network.LOCAL, base_url="http://127.0.0.1:8080/") as client:
             assert client.base_url == "http://127.0.0.1:8080"
-            assert client.direct_base_url == "http://127.0.0.1:8080"
 
     def test_they_are_readonly(self) -> None:
         # Same reason `network` is: credentials are per-network, so retargeting
@@ -325,8 +274,6 @@ class TestPublicBaseUrls:
         with Client(Network.LOCAL) as client:
             with pytest.raises(AttributeError):
                 client.base_url = "http://evil.example"  # type: ignore[misc]
-            with pytest.raises(AttributeError):
-                client.direct_base_url = "http://evil.example"  # type: ignore[misc]
 
 
 class TestNetworkRestrictedOperations:
@@ -338,9 +285,7 @@ class TestNetworkRestrictedOperations:
                 client.claim_credit()
 
     def test_claim_credit_is_allowed_on_local(self, httpx_mock) -> None:
-        httpx_mock.add_response(
-            url="http://localhost:9090/api/v1/account/credit", json={"amount": "100"}
-        )
+        httpx_mock.add_response(url="http://localhost:9090/account/credit", json={"amount": "100"})
         secret = "00" * 32
         with Client(Network.LOCAL, api_key="nx_test", api_secret=secret) as client:
             client.claim_credit()

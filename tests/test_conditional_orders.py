@@ -19,7 +19,7 @@ import pytest
 from nexus_exchange import Client, Network, OrderRequest
 
 _SECRET = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
-_URL = "http://localhost:9090/api/v1/orders"
+_URL = "http://localhost:9090/orders"
 _M = "BTC-USDX-PERP"
 
 
