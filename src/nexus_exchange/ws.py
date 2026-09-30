@@ -323,6 +323,7 @@ class WsClient:
 
     async def _run(self) -> None:
         attempts = 0
+        conn: WsConnection | None = None
         try:
             while not self._closing and self._subs:
                 token = await self._mint_token()
@@ -347,6 +348,7 @@ class WsClient:
 
                 received = await self._recv_loop(conn)
                 await _safe_close(conn)
+                conn = None
                 self._conn = None
 
                 if self._closing or not self._subs:
@@ -357,7 +359,16 @@ class WsClient:
                 attempts = 1 if received else attempts + 1
                 await self._backoff(attempts)
         finally:
-            self._state = "closed"
+            # Cancelled mid-connection (close(), or the last unsubscribe): close
+            # this run's own socket so it isn't left open and unread.
+            if conn is not None:
+                await _safe_close(conn)
+                if self._conn is conn:
+                    self._conn = None
+            # A detached run (see _teardown_sub) must not clobber the state of
+            # the run that replaced it.
+            if self._task is None or self._task is asyncio.current_task():
+                self._state = "closed"
 
     async def _recv_loop(self, conn: WsConnection) -> bool:
         """Read until the connection drops. True when at least one frame arrived."""
@@ -560,8 +571,12 @@ class WsClient:
         sub.waiters.clear()
         sub.queue.clear()
         if not self._subs and not self._closing and self._task is not None:
-            # Nothing left to keep the socket open for.
+            # Nothing left to keep the socket open for. Detach the cancelled run:
+            # cancel() is only a request and `done()` stays False until it lands,
+            # so a subscribe in this same tick must start a fresh run, not count
+            # on the dying one.
             self._task.cancel()
+            self._task = None
             self._state = "closed"
 
 
