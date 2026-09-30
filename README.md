@@ -623,6 +623,31 @@ In particular the `366` bound belongs only to `/account/portfolio-history`
 a paginated endpoint would reject valid requests, and on `/account/equity-history`
 it sits *below* the server's own default of 720.
 
+## WebSocket streaming
+
+`WsClient` (`pip install nexus-exchange[ws]`) multiplexes subscriptions on one
+socket and reconnects on its own, resuming each subscription from the last
+`seq` it saw so the server replays what was missed.
+
+```python
+async with WsClient("wss://api.testnet.nexus.xyz/v1") as ws:
+    sub = ws.subscribe("trades", market="BTC-USDX-PERP")
+    async for event in sub:
+        if event.out_of_sync:
+            while sub.health != "live":
+                await asyncio.sleep(0.1)
+            ...  # now refetch the state you track over REST
+            continue
+        handle(event.data)
+```
+
+When the server can no longer replay the gap, it ends the subscription and
+the stream yields an `out_of_sync` event. The client subscribes again by
+itself; `sub.health` reads `resyncing` until the server acknowledges, then
+`live`. Refetch over REST only once `health` is `live` again: a refetch that
+lands before the new subscription attaches can miss events published in
+between. Never resubscribe yourself. See `examples/ws_trades.py`.
+
 ## CCXT compatibility
 
 [CCXT](https://github.com/ccxt/ccxt) is the unified API the Python quant/retail

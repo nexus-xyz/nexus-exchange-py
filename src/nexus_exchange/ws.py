@@ -14,8 +14,10 @@ Mirrors the Rust and TypeScript SDKs' streaming clients (ENG-4045):
   server ends a subscription it answers ``out_of_sync`` for, so the client drops
   that cursor and at once subscribes again from the live edge on the same
   socket; :attr:`WsSubscription.health` reads ``resyncing`` until the server's
-  ``subscribed`` ack. The missed range is the REST refetch's job, never a
-  replay, and the consumer never needs to resubscribe itself.
+  ``subscribed`` ack. The consumer never resubscribes itself. It waits until
+  ``health`` is ``live`` again and only then REST-refetches: a refetch that
+  lands before the resubscribe takes effect can miss events published in
+  between. The missed range is that refetch's job, never a replay.
 
 Public market-data channels (``book`` / ``trades`` / ``candles``) need no auth.
 Account-scoped channels (``orders`` / ``fills`` / ``positions`` / ``balances``)
@@ -169,7 +171,13 @@ class WsSubscription:
 
     @property
     def health(self) -> WsHealth:
-        """Delivery health of this subscription. See :data:`WsHealth`."""
+        """Delivery health of this subscription. See :data:`WsHealth`.
+
+        After an ``out_of_sync`` event this reads ``resyncing`` while the client
+        subscribes again on its own. Wait until it reads ``live`` (the server's
+        next ``subscribed`` ack) before refetching over REST: a refetch taken
+        earlier can miss events published before the new subscription attached.
+        """
         return self._sub.health
 
     def unsubscribe(self) -> None:
