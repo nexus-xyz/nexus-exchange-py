@@ -79,11 +79,11 @@ def _play_funds_hosts() -> frozenset[str]:
     for network in Network:
         if network.funds is not Funds.PLAY:
             continue
-        for url in (network.config.base_url, network.config.direct_base_url):
-            if url:
-                host = urlparse(url).hostname
-                if host:
-                    hosts.add(host)
+        url = network.config.base_url
+        if url:
+            host = urlparse(url).hostname
+            if host:
+                hosts.add(host)
     # `beta` is not a Network any more (ENG-6454), but this module documents it as
     # a NEXUS_BASE_URL override and networks.py's own deprecation note records that
     # it serves testnet. Allowed explicitly so the documented invocation keeps

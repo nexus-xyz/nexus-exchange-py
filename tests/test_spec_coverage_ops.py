@@ -117,16 +117,14 @@ def test_market_risk_params_absent_fields_stay_none(httpx_mock) -> None:
 
 def test_fetch_funding_samples_is_a_direct_route_with_a_limit(httpx_mock) -> None:
     httpx_mock.add_response(
-        url=f"{_BASE}/api/v1/markets/BTC-USDX-PERP/funding-samples?limit=10",
+        url=f"{_BASE}/markets/BTC-USDX-PERP/funding-samples?limit=10",
         json=[{"timestamp": 1750000000000, "premium_index": "0.0001"}],
     )
     with _public() as client:
         samples = client.fetch_funding_samples("BTC-USDX-PERP", limit=10)
 
     req = httpx_mock.get_request()
-    assert (
-        req.url.raw_path.decode().split("?")[0] == "/api/v1/markets/BTC-USDX-PERP/funding-samples"
-    )
+    assert req.url.raw_path.decode().split("?")[0] == "/markets/BTC-USDX-PERP/funding-samples"
     assert samples[0].premium_index == Decimal("0.0001")
     assert samples[0].timestamp == 1750000000000
 
@@ -136,7 +134,7 @@ def test_funding_samples_requires_both_spec_required_fields(httpx_mock) -> None:
     # premium is not a zero premium — a run of fabricated zeros would read as
     # "the market is at parity with spot", which is a real trading signal.
     httpx_mock.add_response(
-        url=f"{_BASE}/api/v1/markets/BTC-USDX-PERP/funding-samples",
+        url=f"{_BASE}/markets/BTC-USDX-PERP/funding-samples",
         json=[{"timestamp": 1750000000000}],
     )
     with _public() as client, pytest.raises(DecodeError, match="premium_index"):
@@ -145,11 +143,11 @@ def test_funding_samples_requires_both_spec_required_fields(httpx_mock) -> None:
 
 def test_fetch_stats_and_history_are_direct_routes(httpx_mock) -> None:
     httpx_mock.add_response(
-        url=f"{_BASE}/api/v1/stats",
+        url=f"{_BASE}/stats",
         json={"fills_total": 42, "connected": True, "events_per_sec": 12.5, "health": "Healthy"},
     )
     httpx_mock.add_response(
-        url=f"{_BASE}/api/v1/stats/history",
+        url=f"{_BASE}/stats/history",
         json=[{"timestamp": 1750000000, "fills": 7}],
     )
     with _public() as client:
@@ -354,16 +352,16 @@ def test_preview_order_sends_the_same_body_as_create_order(httpx_mock) -> None:
     # projecting something the caller never intends to send.
     order = OrderRequest.limit("BTC-USDX-PERP", "buy", Decimal("50000"), Decimal("1"))
     httpx_mock.add_response(
-        url=f"{_BASE}/api/v1/orders/preview",
+        url=f"{_BASE}/orders/preview",
         json={"accepted": True, "projected_fees": "2.5", "expected_fill_vwap": None},
     )
-    httpx_mock.add_response(url=f"{_BASE}/api/v1/orders", json={"order": {}, "fills": []})
+    httpx_mock.add_response(url=f"{_BASE}/orders", json={"order": {}, "fills": []})
     with _authed() as client:
         preview = client.preview_order(order)
         client.create_order(order)
 
     preview_req, order_req = httpx_mock.get_requests()
-    _assert_signed(preview_req, "POST", "/api/v1/orders/preview")
+    _assert_signed(preview_req, "POST", "/orders/preview")
     assert preview_req.content == order_req.content
     assert preview.accepted is True
     assert preview.projected_fees == Decimal("2.5")
@@ -374,7 +372,7 @@ def test_preview_order_sends_the_same_body_as_create_order(httpx_mock) -> None:
 
 def test_a_rejected_preview_carries_its_reason(httpx_mock) -> None:
     httpx_mock.add_response(
-        url=f"{_BASE}/api/v1/orders/preview",
+        url=f"{_BASE}/orders/preview",
         json={"accepted": False, "reject_reason": "insufficient_margin"},
     )
     order = OrderRequest.market("BTC-USDX-PERP", "buy", Decimal("1"))

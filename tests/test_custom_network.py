@@ -54,22 +54,15 @@ class TestCustomConfigDrivesTheClient:
             label="dev",
             funds=Funds.PLAY,
             base_url=f"{_BASE}/api/exchange",
-            direct_base_url=_BASE,
             has_faucet=True,
             chain_id=42,
         )
         with Client(config) as client:
             assert client.network is config
             assert client._base_url == f"{_BASE}/api/exchange"
-            assert client._direct_base_url == _BASE
             assert client.network.funds is Funds.PLAY
             assert client.network.has_faucet is True
             assert client.network.signing_domain.chain_id == 42
-
-    def test_direct_base_defaults_to_the_gateway_base(self) -> None:
-        with Client(_custom()) as client:
-            assert client._base_url == _BASE
-            assert client._direct_base_url == _BASE
 
     def test_a_custom_target_is_accepted_positionally(self) -> None:
         # `network` is the first positional parameter, so a config must work
@@ -121,7 +114,6 @@ class TestFundsAreDeclaredNotGuessed:
                 ws_authenticated_url="",
                 signing_domain=Network.LOCAL.signing_domain,
                 base_url=_BASE,
-                direct_base_url=_BASE,
             )
 
     def test_unknown_funds_is_not_play_funds(self) -> None:
@@ -144,7 +136,7 @@ class TestFaucetIsSeparateFromFunds:
 
     def test_a_declared_faucet_is_honoured(self, httpx_mock) -> None:
         httpx_mock.add_response(
-            url=f"{_BASE}/api/v1/account/credit",
+            url=f"{_BASE}/account/credit",
             method="POST",
             json={"amount": "100"},
         )
@@ -282,7 +274,7 @@ class TestBaseUrlValidation:
             "https://x.invalid#f",
             # Empty but present: these parse as *no* query/fragment, so a check on
             # the parsed components would accept them and then build
-            # "https://x.invalid/p?/api/v1/orders".
+            # "https://x.invalid/p?/orders".
             "https://x.invalid/p?",
             "https://x.invalid/p#",
         ],
@@ -312,16 +304,6 @@ class TestBaseUrlValidation:
         with pytest.raises(ValueError, match="userinfo"):
             _custom(base_url=url)
 
-    def test_the_direct_base_is_validated_on_its_own_terms(self) -> None:
-        with pytest.raises(ValueError, match="direct_base_url"):
-            _custom(direct_base_url="not-a-url")
-
-    @pytest.mark.parametrize("blank", [None, "", "   "])
-    def test_a_blank_direct_base_falls_back_to_the_gateway_base(self, blank: object) -> None:
-        # A blank string is "unset" everywhere else in this SDK, so it must not
-        # be the one input that raises instead of deferring.
-        assert _custom(direct_base_url=blank).direct_base_url == _BASE
-
 
 class TestARawOverrideIsValidatedTheSameWay:
     """Naming a network keeps its config, so ``custom()`` never sees the URL.
@@ -340,17 +322,13 @@ class TestARawOverrideIsValidatedTheSameWay:
 
     def test_a_query_is_refused_on_an_override(self) -> None:
         # Previously accepted, then concatenated into
-        # "https://x.invalid?a=1/api/v1/markets/summary" and signed.
+        # "https://x.invalid?a=1/markets/summary" and signed.
         with pytest.raises(ValueError, match="query or fragment"):
             Client(Network.LOCAL, base_url="https://x.invalid?a=1")
 
     def test_a_schemeless_override_is_refused(self) -> None:
         with pytest.raises(ValueError, match="must start with http"):
             Client(Network.LOCAL, base_url="x.invalid")
-
-    def test_the_direct_override_is_validated_too(self) -> None:
-        with pytest.raises(ValueError, match="direct_base_url"):
-            Client(Network.LOCAL, direct_base_url="https://x.invalid@evil.invalid")
 
     def test_a_blank_override_still_defers_to_the_default(self) -> None:
         # The ordering that makes the above safe to add: validation runs on what
@@ -372,7 +350,6 @@ class TestARawOverrideIsValidatedTheSameWay:
             ws_authenticated_url="",
             signing_domain=Network.LOCAL.signing_domain,
             base_url="https://exchange.example.invalid@evil.invalid",
-            direct_base_url=_BASE,
         )
         with pytest.raises(ValueError, match="userinfo"):
             Client(bad)
@@ -390,12 +367,6 @@ class TestBareBaseUrlIsSugarForACustomTarget:
         with Client(base_url=_BASE) as client, pytest.raises(ValueError, match="has no faucet"):
             client.claim_credit()
 
-    def test_a_lone_direct_base_url_is_sugar_too(self) -> None:
-        with Client(direct_base_url=_BASE) as client:
-            assert client.network.funds is Funds.UNKNOWN
-            assert client._base_url == _BASE
-            assert client._direct_base_url == _BASE
-
     def test_naming_a_network_alongside_a_url_keeps_its_semantics(self) -> None:
         # The caller declared the network, so the flags are theirs, not a guess.
         with Client(Network.LOCAL, base_url="http://127.0.0.1:8080") as client:
@@ -411,14 +382,6 @@ class TestBareBaseUrlIsSugarForACustomTarget:
         # into an undeclared-funds config with no URL to show for it.
         with Client(base_url="   ") as client:
             assert client.network is Network.TESTNET.config
-
-    def test_a_blank_gateway_base_defers_to_a_real_direct_base(self) -> None:
-        # The two must not be combined before stripping, or the blank one wins
-        # the fallback and the config is built with an empty base.
-        with Client(base_url="   ", direct_base_url=_BASE) as client:
-            assert client.network.funds is Funds.UNKNOWN
-            assert client._base_url == _BASE
-            assert client._direct_base_url == _BASE
 
     def test_the_deprecated_selector_stays_silent_at_runtime(self) -> None:
         # The bare selector is deprecated in the docs only (ENG-10955), so this
@@ -562,10 +525,7 @@ class TestReservedLabels:
         # `"custom"` is reserved BECAUSE this path stores credentials under it,
         # so the fix must not break the thing it is protecting. The label is a
         # constant on this path, not caller input.
-        config = NetworkConfig._legacy_bare_url(
-            base_url="https://gateway.example.invalid",
-            direct_base_url="https://direct.example.invalid",
-        )
+        config = NetworkConfig._legacy_bare_url(base_url="https://gateway.example.invalid")
         assert config.label == LEGACY_BASE_URL_LABEL == "custom"
         # And it stays UNKNOWN-funds: a bare URL says nothing about what is
         # behind it, which is the pre-existing behaviour this must preserve.

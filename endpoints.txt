@@ -10,47 +10,45 @@
 # CODE_ONLY_OPS allowlist is empty and any entry in it fails the run. Every line
 # here is a real contract operation, and the coverage figure counts nothing else.
 #
-# Paths under /api/v1 are served by the direct backend service (host root, no
-# /api/exchange gateway prefix) as the gateway is retired (ENG-4740); the rest
-# stay on the legacy gateway until they gain an /api/v1 route upstream. The
-# prefix is part of the operation: the client sends it (`direct=True`) and the
-# spec lists both surfaces separately, so a line must carry the prefix whenever
-# the call does.
+# Every request goes to the one REST base (the spec's `/v1`) plus the bare
+# spec path, and is signed over that path (EDR-006, ENG-18322). The bridge reads
+# alone keep the `/api/v1` spelling: the pinned spec has no bare twins for them
+# yet. The prefix is part of the operation, so a line carries it whenever the
+# call does.
 
-# -- direct /api/v1 service --
-GET /api/v1/markets/summary
-GET /api/v1/tickers
-GET /api/v1/markets/{market_id}/ticker
-GET /api/v1/markets/{market_id}/orderbook
-GET /api/v1/markets/{market_id}/trades
-GET /api/v1/markets/{market_id}/candles
-GET /api/v1/markets/{market_id}/funding
-GET /api/v1/markets/{market_id}/funding-samples
-GET /api/v1/markets/{market_id}/mark-price
-GET /api/v1/markets/{market_id}/status
-GET /api/v1/stats
-GET /api/v1/stats/history
-GET /api/v1/account
-GET /api/v1/account/state
-GET /api/v1/account/summary
-GET /api/v1/account/fees
-GET /api/v1/account/portfolio-history
-GET /api/v1/account/equity-history
-GET /api/v1/positions
-GET /api/v1/positions/closed
-GET /api/v1/fills
-GET /api/v1/account/rate-limit
-GET /api/v1/account/cancel-on-disconnect
-PUT /api/v1/account/cancel-on-disconnect
-POST /api/v1/account/credit
-POST /api/v1/orders
-POST /api/v1/orders/preview
-POST /api/v1/orders/batch
-GET /api/v1/orders
-GET /api/v1/orders/history
-PATCH /api/v1/orders/{order_id}
-DELETE /api/v1/orders/{order_id}
-DELETE /api/v1/orders
+GET /markets/summary
+GET /tickers
+GET /markets/{market_id}/ticker
+GET /markets/{market_id}/orderbook
+GET /markets/{market_id}/trades
+GET /markets/{market_id}/candles
+GET /markets/{market_id}/funding
+GET /markets/{market_id}/funding-samples
+GET /markets/{market_id}/mark-price
+GET /markets/{market_id}/status
+GET /stats
+GET /stats/history
+GET /account
+GET /account/state
+GET /account/summary
+GET /account/fees
+GET /account/portfolio-history
+GET /account/equity-history
+GET /positions
+GET /positions/closed
+GET /fills
+GET /account/rate-limit
+GET /account/cancel-on-disconnect
+PUT /account/cancel-on-disconnect
+POST /account/credit
+POST /orders
+POST /orders/preview
+POST /orders/batch
+GET /orders
+GET /orders/history
+PATCH /orders/{order_id}
+DELETE /orders/{order_id}
+DELETE /orders
 POST /api/v1/bridge/deposit-addresses
 GET /api/v1/bridge/deposit-addresses
 GET /api/v1/bridge/assets
@@ -61,7 +59,6 @@ GET /api/v1/bridge/deposits/{id}
 #   POST /api/v1/bridge/wallets           EX-Bridge, wrapped under ENG-5639 not here
 #   POST /api/v1/bridge/wallets/challenge EX-Bridge, wrapped under ENG-5639 not here
 
-# -- legacy gateway (no /api/v1 route yet) --
 GET /markets
 GET /markets/{market_id}/risk-params
 GET /markets/{market_id}/adl-events

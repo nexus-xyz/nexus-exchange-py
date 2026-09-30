@@ -16,43 +16,44 @@ from nexus_exchange import (
 
 
 def test_network_base_urls() -> None:
-    # Testnet now targets its durable host (ENG-8868). The value carries the
-    # `/indexer` route prefix the service is mounted under, not the bare host:
-    # `api.testnet.nexus.xyz/markets/summary` 404s where
-    # `api.testnet.nexus.xyz/indexer/markets/summary` answers 200.
-    assert Network.TESTNET.base_url == "https://api.testnet.nexus.xyz/indexer"
-    # The /api/v1 surface sits under that same prefix, so the direct base is the
-    # same value — the topology the retired gateway had (ENG-10063).
-    assert Network.TESTNET.direct_base_url == "https://api.testnet.nexus.xyz/indexer"
+    # Testnet targets the spec's published REST base (EDR-006, ENG-18322). The
+    # bare host routes nothing, and `/v1` is stripped at the edge.
+    assert Network.TESTNET.base_url == "https://api.testnet.nexus.xyz/v1"
     assert Client(Network.LOCAL)._base_url == "http://localhost:9090"
-    assert Client(Network.LOCAL)._direct_base_url == "http://localhost:9090"
 
 
-def test_direct_route_signs_full_api_v1_path(httpx_mock) -> None:
-    # A /api/v1 route must be signed over the FULL path including the prefix
-    # (the server verifies "/api/v1/account", not "/account") and sent to the
-    # direct-service base, not the gateway.
+def test_prefixed_base_sends_under_prefix_and_signs_the_bare_path(httpx_mock) -> None:
+    # One base for every request: the path is appended to the `/v1` base and
+    # signed without it, because the edge strips `/v1` before the indexer
+    # verifies `/account`.
     secret = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
-    httpx_mock.add_response(url="http://localhost:9090/api/v1/account", json={})
-    with Client(Network.LOCAL, api_key="nx_test", api_secret=secret) as client:
-        client._request("GET", "/account", signed=True, direct=True)
+    httpx_mock.add_response(url="https://api.testnet.nexus.xyz/v1/account", json={})
+    with Client(Network.TESTNET, api_key="nx_test", api_secret=secret) as client:
+        client.fetch_balance()
 
     req = httpx_mock.get_request()
+    assert str(req.url) == "https://api.testnet.nexus.xyz/v1/account"
     ts = req.headers["x-timestamp"]
     body_hash = hashlib.sha256(b"").hexdigest()
-    canonical = "\n".join([ts, "GET", "/api/v1/account", "", body_hash])
+    canonical = "\n".join([ts, "GET", "/account", "", body_hash])
     expected = hmac.new(bytes.fromhex(secret), canonical.encode(), hashlib.sha256).hexdigest()
-    assert str(req.url) == "http://localhost:9090/api/v1/account"
     assert req.headers["x-signature"] == expected
 
 
-def test_custom_base_url_overrides_both_bases() -> None:
-    # A caller-supplied base_url is the service root for legacy and direct
-    # routes alike (the local / direct-gateway case), so /api/v1 stacks on it
-    # without duplicating a gateway prefix.
+def test_bridge_reads_keep_the_api_v1_spelling(httpx_mock) -> None:
+    # The pinned spec has no bare twins for the bridge reads, so they go out as
+    # `/v1/api/v1/bridge/...` and are signed as `/api/v1/bridge/...`.
+    httpx_mock.add_response(url="https://api.testnet.nexus.xyz/v1/api/v1/bridge/assets", json={})
+    with Client(Network.TESTNET) as client:
+        client.fetch_bridge_assets()
+    assert (
+        str(httpx_mock.get_request().url) == "https://api.testnet.nexus.xyz/v1/api/v1/bridge/assets"
+    )
+
+
+def test_custom_base_url_is_the_one_base() -> None:
     client = Client(base_url="http://127.0.0.1:8080")
     assert client._base_url == "http://127.0.0.1:8080"
-    assert client._direct_base_url == "http://127.0.0.1:8080"
 
 
 def test_signed_request_uses_canonical_hmac(httpx_mock) -> None:
@@ -112,41 +113,14 @@ def test_api_error_on_4xx_is_terminal(httpx_mock) -> None:
     assert excinfo.value.transient is False
 
 
-def test_testnet_direct_route_composes_the_prefix_mounted_url(httpx_mock) -> None:
-    # The regression this pins: `direct_base_url` must not be the bare host root,
-    # or every one of the ~36 `direct=True` routes composes a URL the deploy does
-    # not serve. That was true of the legacy gateway and is true of the durable
-    # host for the same reason — the service is mounted under a route prefix.
-    # Measured on api.testnet.nexus.xyz, 2026-09-09:
-    #
-    #     /indexer/api/v1/markets/summary  -> 200 application/json
-    #     /api/v1/markets/summary          -> 404
-    #
-    # Assert on the URL, not on the config field, so this fails if either the
-    # default or the composition regresses.
-    httpx_mock.add_response(
-        url="https://api.testnet.nexus.xyz/indexer/api/v1/markets/summary",
-        json=[],
-    )
-    with Client(Network.TESTNET) as client:
-        client._request("GET", "/markets/summary", direct=True)
-
-    assert (
-        str(httpx_mock.get_request().url)
-        == "https://api.testnet.nexus.xyz/indexer/api/v1/markets/summary"
-    )
-
-
 def test_testnet_non_v1_route_stays_on_the_base(httpx_mock) -> None:
     # The other half of the split: a route with no /api/v1 variant must not pick
     # up the prefix, and must still land under the route prefix the base carries.
-    httpx_mock.add_response(
-        url="https://api.testnet.nexus.xyz/indexer/ws/token", json={"token": "t"}
-    )
+    httpx_mock.add_response(url="https://api.testnet.nexus.xyz/v1/ws/token", json={"token": "t"})
     with Client(Network.TESTNET) as client:
         client._request("POST", "/ws/token")
 
-    assert str(httpx_mock.get_request().url) == "https://api.testnet.nexus.xyz/indexer/ws/token"
+    assert str(httpx_mock.get_request().url) == "https://api.testnet.nexus.xyz/v1/ws/token"
 
 
 def test_has_credentials_reflects_keys() -> None:
@@ -159,7 +133,7 @@ def test_tickers_non_dict_response_is_empty_map(httpx_mock) -> None:
     # A malformed /tickers envelope (array instead of the spec's keyed object)
     # degrades to an empty map rather than raising. Tickers are served by the
     # direct /api/v1 service (ENG-4946).
-    httpx_mock.add_response(url="http://localhost:9090/api/v1/tickers", json=[])
+    httpx_mock.add_response(url="http://localhost:9090/tickers", json=[])
     with Client(Network.LOCAL) as client:
         assert client.fetch_tickers() == {}
 
@@ -183,9 +157,7 @@ def test_transport_error_wraps_httpx_error(httpx_mock) -> None:
 def test_no_content_response_decodes_to_none(httpx_mock) -> None:
     # An empty 200 body (e.g. some DELETEs) decodes to None, not a parse error.
     # DELETE /orders is served by the direct /api/v1 service (ENG-4946).
-    httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/orders", method="DELETE", status_code=200
-    )
+    httpx_mock.add_response(url="http://localhost:9090/orders", method="DELETE", status_code=200)
     secret = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
     with Client(Network.LOCAL, api_key="nx_test", api_secret=secret) as client:
         assert client.cancel_all_orders() is None

@@ -154,14 +154,13 @@ DEFAULT_API_VERSION = "v0.8.1"
 
 DEFAULT_TIMEOUT = 30.0
 
-#: Path prefix for the direct-service ("/api/v1") surface. Under the gateway
-#: elimination (ENG-4740) each backend service exposes its own REST API under
-#: this prefix. It is a *path*, appended to :attr:`NetworkConfig.direct_base_url`
-#: — not a claim about which host or prefix serves it: on the hosted deploy the
-#: surface is mounted under the ``/api/exchange`` gateway base, on a direct
-#: indexer host at the bare origin (ENG-10063). The HMAC signature is computed
-#: over the full request path *including* this prefix (e.g. ``/api/v1/orders``)
-#: but excluding the base's own path, matching the server.
+#: The per-path ``/api/v1`` spelling. Every method now sends the spec's bare path
+#: (``/orders``) to the one REST base, whose ``/v1`` the edge strips before the
+#: indexer verifies (EDR-006, ENG-18322), so the signature covers the bare path.
+#: Only the bridge reads keep this prefix: the pinned spec (``.api-version``) has
+#: no bare twins for them yet, and ``/v1/api/v1/bridge/...`` still routes and
+#: verifies as ``/api/v1/bridge/...``. They move once a published tag declares
+#: the bare spellings.
 API_V1_PREFIX = "/api/v1"
 
 #: Upper bound (seconds) on how long a server ``Retry-After`` can make the client
@@ -487,22 +486,11 @@ class Client:
             base_url="https://exchange.example.com",
         ))
 
-    Routing targets two bases. The migrated market-data and account/trading
-    surface is served under ``/api/v1`` (:attr:`NetworkConfig.direct_base_url`);
-    routes not yet migrated stay on the legacy ``/api/exchange`` gateway
-    (:attr:`NetworkConfig.base_url`). A custom ``base_url`` overrides *both*
-    unless ``direct_base_url`` is also given. Note this makes ``base_url`` a
-    different field from the TypeScript SDK's similarly-named ``baseUrl``, which
-    is the *direct* base with the prefix already in it; ``direct_base_url`` is its
-    counterpart here. Pass both to target a deploy that keeps the split — this is
-    how the retired ``beta`` channel is reached now::
-
-        Client(NetworkConfig.custom(
-            label="beta",
-            funds=Funds.UNKNOWN,  # that deploy's funds are not ours to assert
-            base_url="https://beta.exchange.nexus.xyz/api/exchange",
-            direct_base_url="https://beta.exchange.nexus.xyz",
-        ))
+    Every request goes to one base (:attr:`NetworkConfig.base_url`) plus the
+    spec's bare path, and is signed over that bare path. On the public hosts the
+    base is the spec's ``/v1`` REST base, which the edge strips before the
+    indexer verifies (EDR-006); a custom base's own path prefix must likewise be
+    one its deployment strips.
 
     **A bare** ``base_url`` **with no network named is deprecated** (ENG-10955).
     Use :meth:`NetworkConfig.custom` instead: it reaches the same target, but it
@@ -522,10 +510,10 @@ class Client:
     nothing is removed before that runway has shipped.
 
     Deprecated is the *selector* — a URL that picks the target on its own —
-    not the modifiers. ``direct_base_url`` refines a target already chosen, and a
-    URL passed alongside a named network (``Client(Network.LOCAL, base_url=...)``,
-    which is also mainnet's required override) keeps that network's funds
-    semantics because the caller has declared them. Both stay.
+    not the modifier: a URL passed alongside a named network
+    (``Client(Network.LOCAL, base_url=...)``, which is also mainnet's required
+    override) keeps that network's funds semantics because the caller has
+    declared them. It stays.
 
     **Agent keys** (``agent=``). Every ``signed`` request is then sent with the
     ``agentAuth`` headers (``x-agent`` / ``x-timestamp`` / ``x-nonce`` /
@@ -555,7 +543,6 @@ class Client:
         network: Network | NetworkConfig | str | None = None,
         *,
         base_url: str | None = None,
-        direct_base_url: str | None = None,
         api_key: str | None = None,
         api_secret: str | None = None,
         api_version: str | None = None,
@@ -576,18 +563,10 @@ class Client:
                     "carries one credential, and the two schemes share the x-timestamp "
                     "and x-signature headers. Use a separate Client for each."
                 )
-        config = self._resolve_config(network, base_url, direct_base_url)
+        config = self._resolve_config(network, base_url)
         self._network = config
-        # A caller-supplied base_url overrides the config default; direct_base_url
-        # falls back to base_url so a single override still covers both surfaces
-        # while a deploy that keeps the gateway split can set them apart.
+        # A caller-supplied base_url overrides the config default.
         self._base_url = self._resolve_base(config, base_url, config.base_url, "base_url")
-        self._direct_base_url = self._resolve_base(
-            config,
-            direct_base_url or base_url,
-            config.direct_base_url,
-            "direct_base_url",
-        )
         self._api_key = api_key
         self._api_secret = api_secret
         self._agent = agent
@@ -618,7 +597,6 @@ class Client:
     def _resolve_config(
         network: Network | NetworkConfig | str | None,
         base_url: str | None,
-        direct_base_url: str | None,
     ) -> NetworkConfig:
         """Resolve the ``network`` argument to the config that drives this client.
 
@@ -650,22 +628,17 @@ class Client:
             return network
         if network is not None:
             return Network(network).config
-        # Strip before falling back between the two, not after: a blank string is
-        # "unset" everywhere else here, so `base_url="  "` must defer to a real
-        # `direct_base_url` rather than being carried through as an empty base.
-        gateway = (base_url or "").strip()
-        direct = (direct_base_url or "").strip()
-        if not gateway and not direct:
+        # A blank string is "unset" everywhere else here, so `base_url="  "`
+        # means testnet rather than an empty base.
+        base = (base_url or "").strip()
+        if not base:
             return Network.TESTNET.config
         # ENG-11134: through `_legacy_bare_url`, not `custom(label="custom")`.
         # `custom()` now refuses the reserved built-in labels, and `"custom"` is
         # one of them precisely BECAUSE this path has always stored credentials
         # under it — so this is the one caller entitled to hold it, and the label
         # is a constant here rather than caller input.
-        return NetworkConfig._legacy_bare_url(
-            base_url=gateway or direct,
-            direct_base_url=direct or gateway,
-        )
+        return NetworkConfig._legacy_bare_url(base_url=base)
 
     @staticmethod
     def _resolve_base(
@@ -695,24 +668,10 @@ class Client:
         but is empty once trailing slashes go (``"/"``) is still rejected: a
         client with an empty base silently issues relative requests.
 
-        **A base under** ``/api/exchange`` **is accepted for either surface.**
-        This used to be refused outright for ``direct_base_url``, on the stated
-        premise that the direct ``/api/v1`` surface is served only at the host
-        root. Production says otherwise — see the probe table on
-        ``nexus-exchange-rs`` PR #131 (ENG-10063)::
-
-            .../api/exchange/api/v1/markets/summary  -> 200 application/json
-            .../api/v1/markets/summary               -> 404 text/html   (frontend)
-            .../api/exchange/api/v2/markets/summary  -> 404 application/json
-            .../api/exchange/zzz/markets/summary     -> 404 application/json
-
-        The last two are the controls: junk segments answer a JSON ``NOT_FOUND``
-        where ``/api/v1`` answers 200, so the gateway mounts ``/api/v1``
-        specifically rather than routing permissively. A direct indexer host
-        plausibly serves it at the root too, so **both topologies are real** and
-        the rejection made the working one unreachable on the deploy this SDK
-        targets by default (ENG-10095). Which one is right is a property of the
-        URL, not an invariant this client can assert, so it is left to the URL.
+        Any path the base carries (``/v1``, a gateway prefix) is kept and is not
+        part of the signed path, so a base is valid exactly when its deployment
+        strips that prefix before verifying. Which prefix that is is a property of
+        the URL, not an invariant this client can assert, so it is left to the URL.
         """
         base = (override or "").strip() or default
         if base is None:
@@ -759,7 +718,7 @@ class Client:
 
     @property
     def base_url(self) -> str:
-        """The gateway base every non-``direct`` request is actually sent to.
+        """The base every request is actually sent to.
 
         **Not necessarily** ``network.base_url``. That is the config's default;
         this is what survived a ``base_url=`` override, so the two differ exactly
@@ -776,36 +735,16 @@ class Client:
         """
         return self._base_url
 
-    @property
-    def direct_base_url(self) -> str:
-        """The base the ``/api/v1`` direct-service requests are sent to.
-
-        Separate from :attr:`base_url` because the two surfaces can live on
-        different hosts, and equal to it whenever a lone ``base_url`` override
-        covered both (see :meth:`__init__`). The ``/api/v1`` prefix is *not*
-        included here — :meth:`_send` appends it — so this is the origin the
-        prefix hangs off, whichever topology the deploy uses (ENG-10063).
-        """
-        return self._direct_base_url
-
     # -- public market data ----------------------------------------------
-    # Most market-data reads are served by the direct /api/v1 service
-    # (``direct=True``). A handful have no /api/v1 equivalent yet and stay on
-    # the legacy gateway: ``GET /markets`` (the list route), ``/adl-events``
-    # and ``/account/{addr}/adl-history``.
     def fetch_markets(self) -> list[Market]:
-        """``GET /markets`` — all tradable markets and their trading rules.
-
-        Not migrated to ``/api/v1`` (no direct-service route yet); stays on the
-        legacy gateway.
-        """
+        """``GET /markets`` — all tradable markets and their trading rules."""
         data = self._request("GET", "/markets")
         rows = data if isinstance(data, list) else data.get("markets", [])
         return [Market.from_dict(m) for m in rows]
 
     def fetch_markets_summary(self) -> list[MarketSummary]:
         """``GET /markets/summary`` — per-market 24h volume and halt state."""
-        data = self._request("GET", "/markets/summary", direct=True)
+        data = self._request("GET", "/markets/summary")
         rows = data if isinstance(data, list) else data.get("markets", [])
         return [MarketSummary.from_dict(m) for m in rows]
 
@@ -815,19 +754,19 @@ class Client:
         The envelope is a bare object keyed by market id (spec:
         ``additionalProperties: Ticker``); an empty result is ``{}``.
         """
-        data = self._request("GET", "/tickers", direct=True)
+        data = self._request("GET", "/tickers")
         if not isinstance(data, dict):
             return {}
         return {mid: Ticker.from_dict(t) for mid, t in data.items()}
 
     def fetch_ticker(self, market_id: str) -> Ticker:
         """``GET /markets/{market_id}/ticker`` — latest ticker for one market."""
-        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/ticker", direct=True)
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/ticker")
         return Ticker.from_dict(data if isinstance(data, dict) else {"symbol": market_id})
 
     def fetch_order_book(self, market_id: str) -> OrderBook:
         """``GET /markets/{market_id}/orderbook`` — order book snapshot."""
-        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/orderbook", direct=True)
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/orderbook")
         return OrderBook.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_trades(self, market_id: str, limit: int | None = None) -> list[Trade]:
@@ -859,7 +798,7 @@ class Client:
             cursor=cursor,
         )
         data, next_cursor = self._request_page(
-            f"/markets/{quote(market_id, safe='')}/trades", query=query, direct=True
+            f"/markets/{quote(market_id, safe='')}/trades", query=query
         )
         rows = data if isinstance(data, list) else []
         return Page([Trade.from_dict(t) for t in rows], next_cursor)
@@ -899,9 +838,7 @@ class Client:
     ) -> list[Ohlcv]:
         """``GET /markets/{market_id}/candles`` — OHLCV candles."""
         query = _query(timeframe=timeframe, limit=limit)
-        data = self._request(
-            "GET", f"/markets/{quote(market_id, safe='')}/candles", query=query, direct=True
-        )
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/candles", query=query)
         rows = data if isinstance(data, list) else []
         return [Ohlcv.from_row(r) for r in rows]
 
@@ -910,20 +847,18 @@ class Client:
     ) -> list[FundingSample]:
         """``GET /markets/{market_id}/funding`` — intra-hour funding-rate history."""
         query = _query(limit=limit)
-        data = self._request(
-            "GET", f"/markets/{quote(market_id, safe='')}/funding", query=query, direct=True
-        )
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/funding", query=query)
         rows = data if isinstance(data, list) else []
         return [FundingSample.from_dict(s) for s in rows]
 
     def fetch_mark_price(self, market_id: str) -> MarkPrice:
         """``GET /markets/{market_id}/mark-price`` — current mark price."""
-        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/mark-price", direct=True)
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/mark-price")
         return MarkPrice.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_market_status(self, market_id: str) -> MarketStatus:
         """``GET /markets/{market_id}/status`` — lifecycle / halt status."""
-        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/status", direct=True)
+        data = self._request("GET", f"/markets/{quote(market_id, safe='')}/status")
         return MarketStatus.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_adl_events(self, market_id: str, limit: int | None = None) -> list[AdlEvent]:
@@ -981,7 +916,6 @@ class Client:
             "GET",
             f"/markets/{quote(market_id, safe='')}/funding-samples",
             query=query,
-            direct=True,
         )
         return [FundingPremiumSample.from_dict(s) for s in (data if isinstance(data, list) else [])]
 
@@ -991,7 +925,7 @@ class Client:
         Includes the rolling unique-trader counts (DAU/WAU/MAU) that the bare
         snapshot schema marks as present on this route.
         """
-        data = self._request("GET", "/stats", direct=True)
+        data = self._request("GET", "/stats")
         return StatsSnapshot.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_stats_history(self) -> list[ThroughputSample]:
@@ -1001,7 +935,7 @@ class Client:
         Unix **seconds**, unlike every other timestamp on this surface — see
         :class:`~nexus_exchange.ThroughputSample`.
         """
-        data = self._request("GET", "/stats/history", direct=True)
+        data = self._request("GET", "/stats/history")
         return [ThroughputSample.from_dict(s) for s in (data if isinstance(data, list) else [])]
 
     def fetch_status(self) -> ServiceHealth:
@@ -1044,7 +978,7 @@ class Client:
     # -- account (signed reads) ------------------------------------------
     def fetch_balance(self) -> AccountSummary:
         """``GET /account`` — balance and collateral summary. Requires credentials."""
-        data = self._request("GET", "/account", signed=True, direct=True)
+        data = self._request("GET", "/account", signed=True)
         return AccountSummary.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_positions(self) -> list[Position]:
@@ -1060,7 +994,7 @@ class Client:
         and ``fetch_account_state().positions`` all fail the same way instead of
         one of them silently understating exposure.
         """
-        data = self._request("GET", "/positions", signed=True, direct=True)
+        data = self._request("GET", "/positions", signed=True)
         return [Position.from_dict(p) for p in to_dict_list(data, "positions", required=False)]
 
     def fetch_positions_history(self, limit: int | None = None) -> list[ClosedPosition]:
@@ -1092,9 +1026,7 @@ class Client:
             limit=_page_limit(limit, CLOSED_POSITIONS_LIMIT_MAX, "positions/closed"),
             cursor=cursor,
         )
-        data, next_cursor = self._request_page(
-            "/positions/closed", query=query, signed=True, direct=True
-        )
+        data, next_cursor = self._request_page("/positions/closed", query=query, signed=True)
         rows = data if isinstance(data, list) else []
         return Page([ClosedPosition.from_dict(p) for p in rows], next_cursor)
 
@@ -1139,7 +1071,7 @@ class Client:
         Use :meth:`fetch_account_summary` when only the aggregates are needed —
         it returns the same ``summary`` without the position list.
         """
-        data = self._request("GET", "/account/state", signed=True, direct=True)
+        data = self._request("GET", "/account/state", signed=True)
         return AccountState.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_account_summary(self) -> AccountPortfolioSummary:
@@ -1159,7 +1091,7 @@ class Client:
         raised as :class:`ApiError`) as :meth:`fetch_account_state`, for the same
         reason: no locally-estimated ``withdrawable`` is ever substituted.
         """
-        data = self._request("GET", "/account/summary", signed=True, direct=True)
+        data = self._request("GET", "/account/summary", signed=True)
         return AccountPortfolioSummary.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_trading_fees(self) -> AccountFees:
@@ -1172,7 +1104,7 @@ class Client:
         paid to the maker. See :class:`AccountFees` for the ``schedule``
         scoping caveat and the ``volume_30d_estimated`` flag.
         """
-        data = self._request("GET", "/account/fees", signed=True, direct=True)
+        data = self._request("GET", "/account/fees", signed=True)
         return AccountFees.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_portfolio_history(
@@ -1204,9 +1136,7 @@ class Client:
             window=_portfolio_window(window),
             limit=_portfolio_limit(limit),
         )
-        data = self._request(
-            "GET", "/account/portfolio-history", query=query, signed=True, direct=True
-        )
+        data = self._request("GET", "/account/portfolio-history", query=query, signed=True)
         return PortfolioHistory.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_equity_history(self, limit: int | None = None) -> list[EquityPoint]:
@@ -1240,9 +1170,7 @@ class Client:
             limit=_page_limit(limit, EQUITY_HISTORY_LIMIT_MAX, "account/equity-history"),
             cursor=cursor,
         )
-        data, next_cursor = self._request_page(
-            "/account/equity-history", query=query, signed=True, direct=True
-        )
+        data, next_cursor = self._request_page("/account/equity-history", query=query, signed=True)
         rows = data if isinstance(data, list) else []
         return Page([EquityPoint.from_dict(p) for p in rows], next_cursor)
 
@@ -1293,7 +1221,7 @@ class Client:
             limit=_page_limit(limit, FILLS_LIMIT_MAX, "fills"),
             cursor=cursor,
         )
-        data, next_cursor = self._request_page("/fills", query=query, signed=True, direct=True)
+        data, next_cursor = self._request_page("/fills", query=query, signed=True)
         rows = data if isinstance(data, list) else []
         return Page([Fill.from_dict(f) for f in rows], next_cursor)
 
@@ -1377,7 +1305,7 @@ class Client:
         reach of anyone who had not yet minted a key. Sending a signature the
         contract does not ask for bought nothing and cost that.
         """
-        data = self._request("GET", "/bridge/assets", direct=True)
+        data = self._request("GET", "/api/v1/bridge/assets")
         return BridgeAssetsResponse.from_dict(data if isinstance(data, dict) else {})
 
     def create_bridge_deposit_address(self, chain: str) -> BridgeDepositAddress:
@@ -1397,10 +1325,9 @@ class Client:
         )
         data = self._request(
             "POST",
-            "/bridge/deposit-addresses",
+            "/api/v1/bridge/deposit-addresses",
             body={"chain": chain},
             signed=True,
-            direct=True,
         )
         return BridgeDepositAddress.from_dict(data if isinstance(data, dict) else {})
 
@@ -1420,7 +1347,7 @@ class Client:
             DeprecationWarning,
             stacklevel=2,
         )
-        data = self._request("GET", "/bridge/deposit-addresses", signed=True, direct=True)
+        data = self._request("GET", "/api/v1/bridge/deposit-addresses", signed=True)
         return [BridgeDepositAddress.from_dict(a) for a in (data if isinstance(data, list) else [])]
 
     def fetch_bridge_deposits(
@@ -1435,16 +1362,15 @@ class Client:
         Requires credentials.
         """
         query = _query(limit=limit, chain=chain, asset=asset, status=status)
-        data = self._request("GET", "/bridge/deposits", query=query, signed=True, direct=True)
+        data = self._request("GET", "/api/v1/bridge/deposits", query=query, signed=True)
         return [BridgeDeposit.from_dict(x) for x in (data if isinstance(data, list) else [])]
 
     def fetch_bridge_deposit(self, deposit_id: str) -> BridgeDeposit:
         """``GET /bridge/deposits/{id}`` — a single bridge deposit. Requires credentials."""
         data = self._request(
             "GET",
-            f"/bridge/deposits/{quote(deposit_id, safe='')}",
+            f"/api/v1/bridge/deposits/{quote(deposit_id, safe='')}",
             signed=True,
-            direct=True,
         )
         return BridgeDeposit.from_dict(data if isinstance(data, dict) else {})
 
@@ -1453,7 +1379,7 @@ class Client:
 
         Requires credentials. Does not consume a rate-limit token.
         """
-        data = self._request("GET", "/account/rate-limit", signed=True, direct=True)
+        data = self._request("GET", "/account/rate-limit", signed=True)
         return RateLimitStatus.from_dict(data if isinstance(data, dict) else {})
 
     def fetch_cancel_on_disconnect(self) -> CancelOnDisconnectStatus:
@@ -1464,7 +1390,7 @@ class Client:
         exchange-side feature switch): ``enabled`` true with ``active`` false
         means the exchange has the feature switched off.
         """
-        data = self._request("GET", "/account/cancel-on-disconnect", signed=True, direct=True)
+        data = self._request("GET", "/account/cancel-on-disconnect", signed=True)
         return CancelOnDisconnectStatus.from_dict(data if isinstance(data, dict) else {})
 
     # -- account (signed writes) -----------------------------------------
@@ -1495,7 +1421,7 @@ class Client:
                 f"`deposit`."
             )
         body = {} if amount is None else {"amount": str(amount)}
-        data = self._request("POST", "/account/credit", body=body, signed=True, direct=True)
+        data = self._request("POST", "/account/credit", body=body, signed=True)
         return CreditResult.from_dict(data if isinstance(data, dict) else {})
 
     def create_deposit(self, amount: Decimal | str, asset: str | None = None) -> DepositResponse:
@@ -1596,14 +1522,13 @@ class Client:
             "/account/cancel-on-disconnect",
             body={"enabled": enabled},
             signed=True,
-            direct=True,
         )
         return CancelOnDisconnectStatus.from_dict(data if isinstance(data, dict) else {})
 
     # -- orders (signed) -------------------------------------------------
     def create_order(self, order: OrderRequest) -> OrderResponse:
         """``POST /orders`` — place a single order. Requires credentials."""
-        data = self._request("POST", "/orders", body=order.to_payload(), signed=True, direct=True)
+        data = self._request("POST", "/orders", body=order.to_payload(), signed=True)
         return OrderResponse.from_dict(data if isinstance(data, dict) else {})
 
     def preview_order(self, order: OrderRequest) -> PreviewResponse:
@@ -1623,9 +1548,7 @@ class Client:
         ``x-nexus-rate-limit-class: trading``), so previewing every candidate
         order spends the same budget placing them would.
         """
-        data = self._request(
-            "POST", "/orders/preview", body=order.to_payload(), signed=True, direct=True
-        )
+        data = self._request("POST", "/orders/preview", body=order.to_payload(), signed=True)
         return PreviewResponse.from_dict(data if isinstance(data, dict) else {})
 
     def create_orders(self, orders: list[OrderRequest]) -> list[BatchOrderResult]:
@@ -1645,7 +1568,7 @@ class Client:
         always safe.
         """
         body = [o.to_payload() for o in orders]
-        data = self._request("POST", "/orders/batch", body=body, signed=True, direct=True)
+        data = self._request("POST", "/orders/batch", body=body, signed=True)
         if not isinstance(data, list):
             # A non-list payload carries no per-order results to align; surface
             # one error-shaped entry per submitted order instead of returning [].
@@ -1657,7 +1580,7 @@ class Client:
 
     def fetch_open_orders(self) -> list[Order]:
         """``GET /orders`` — open orders for the account. Requires credentials."""
-        data = self._request("GET", "/orders", signed=True, direct=True)
+        data = self._request("GET", "/orders", signed=True)
         return [Order.from_dict(o) for o in (data if isinstance(data, list) else [])]
 
     def fetch_orders(self, limit: int | None = None) -> list[OrderHistoryEntry]:
@@ -1689,9 +1612,7 @@ class Client:
             limit=_page_limit(limit, ORDER_HISTORY_LIMIT_MAX, "orders/history"),
             cursor=cursor,
         )
-        data, next_cursor = self._request_page(
-            "/orders/history", query=query, signed=True, direct=True
-        )
+        data, next_cursor = self._request_page("/orders/history", query=query, signed=True)
         rows = data if isinstance(data, list) else []
         return Page([OrderHistoryEntry.from_dict(o) for o in rows], next_cursor)
 
@@ -1758,12 +1679,11 @@ class Client:
             f"/orders/{quote(order_id, safe='')}",
             query=query,
             signed=True,
-            direct=True,
         )
 
     def cancel_all_orders(self) -> Any:
         """``DELETE /orders`` — cancel all open orders. Requires credentials."""
-        return self._request("DELETE", "/orders", signed=True, direct=True)
+        return self._request("DELETE", "/orders", signed=True)
 
     def edit_order(self, order_id: str, market_id: str, amend: AmendOrder) -> OrderResponse:
         """``PATCH /orders/{order_id}`` — amend a resting order's price/size.
@@ -1784,13 +1704,10 @@ class Client:
             query=query,
             body=amend.to_payload(),
             signed=True,
-            direct=True,
         )
         return OrderResponse.from_dict(data if isinstance(data, dict) else {})
 
     # -- keys / agents (signed) ------------------------------------------
-    # None of the keys / agents / ws-token routes are in the /api/v1 spec yet,
-    # so they stay on the legacy gateway (no ``direct=True``).
     def fetch_api_keys(self) -> list[ApiKeyInfo]:
         """``GET /keys`` — API keys for the session. Requires credentials."""
         data = self._request("GET", "/keys", signed=True)
@@ -2056,7 +1973,6 @@ class Client:
         query: str = "",
         body: Any | None = None,
         signed: bool = False,
-        direct: bool = False,
         bearer: str | None = None,
     ) -> httpx.Response:
         """Issue one request and return the raw 2xx response.
@@ -2065,15 +1981,11 @@ class Client:
         ``X-Next-Cursor`` *header* as well as the body — signing, routing, and
         error mapping stay in one place for every caller.
         """
-        # `direct` routes target the /api/v1 backend service, wherever that
-        # surface is mounted — under the gateway prefix on the hosted deploy,
-        # at the bare origin on a direct indexer host, so the base decides and
-        # this composition does not assume either (ENG-10063).
-        # Everything else stays on the legacy gateway base. The /api/v1 prefix
-        # is part of the signed canonical path, so resolve the full path *once*
-        # and use the same value for both signing and the sent URL.
-        base = self._direct_base_url if direct else self._base_url
-        full_path = f"{API_V1_PREFIX}{path}" if direct else path
+        # One base for every request (EDR-006): the path is the spec path the
+        # server verifies, and the base's own prefix (`/v1`) is stripped at the
+        # edge, so the same value is both signed and appended to the base.
+        base = self._base_url
+        full_path = path
 
         body_bytes = b"" if body is None else json.dumps(body).encode()
         # HMAC and session-bearer are alternative credentials for the same
@@ -2200,12 +2112,9 @@ class Client:
         query: str = "",
         body: Any | None = None,
         signed: bool = False,
-        direct: bool = False,
         bearer: str | None = None,
     ) -> Any:
-        resp = self._send(
-            method, path, query=query, body=body, signed=signed, direct=direct, bearer=bearer
-        )
+        resp = self._send(method, path, query=query, body=body, signed=signed, bearer=bearer)
         return _decode_body(resp)
 
     def _request_page(
@@ -2214,7 +2123,6 @@ class Client:
         *,
         query: str = "",
         signed: bool = False,
-        direct: bool = False,
     ) -> tuple[Any, str | None]:
         """``GET`` one page of a cursor-paginated list endpoint.
 
@@ -2224,6 +2132,6 @@ class Client:
         is treated as absent: an empty cursor cannot be sent back, so passing it
         on would re-request the first page forever.
         """
-        resp = self._send("GET", path, query=query, signed=signed, direct=direct)
+        resp = self._send("GET", path, query=query, signed=signed)
         cursor = (resp.headers.get(NEXT_CURSOR_HEADER) or "").strip() or None
         return _decode_body(resp), cursor
