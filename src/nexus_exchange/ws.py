@@ -12,7 +12,8 @@ Mirrors the Rust and TypeScript SDKs' streaming clients (ENG-4045):
   sentinel under backpressure) so the consumer knows to REST-refetch.
 
 Public market-data channels (``book`` / ``trades`` / ``candles``) need no auth.
-Account-scoped channels (``orders`` / ``fills`` / ``positions`` / ``balances``)
+Account-scoped channels (``orders`` / ``fills`` / ``positions`` / ``balances`` /
+``liquidations``)
 require a short-lived, account-bound token minted via ``POST /ws/token``.
 Supply a ``token_provider`` that wraps :meth:`Client.create_ws_token`, e.g.
 ``lambda: rest.create_ws_token().token``. That token encodes the account, so
@@ -54,7 +55,7 @@ __all__ = [
 #: Public market-data channels — no authentication required.
 PUBLIC_CHANNELS = frozenset({"book", "trades", "candles"})
 #: Account-scoped channels — require a ``token_provider``.
-ACCOUNT_CHANNELS = frozenset({"orders", "fills", "positions", "balances"})
+ACCOUNT_CHANNELS = frozenset({"orders", "fills", "positions", "balances", "liquidations"})
 #: Every recognized channel.
 CHANNELS = PUBLIC_CHANNELS | ACCOUNT_CHANNELS
 

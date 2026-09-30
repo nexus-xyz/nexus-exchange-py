@@ -1166,5 +1166,111 @@ class TestCoverageReportEndToEnd(unittest.TestCase):
             self.assertLessEqual(pct, 100.0, f"a coverage percentage above 100%: {out}")
 
 
+class TestEnumMembers(unittest.TestCase):
+    """Invariant 5 (ENG-18803): closed SDK sets <-> spec enums, both ways."""
+
+    SOURCES = {
+        "kinds": (("types.py", "set", "KINDS"), ("schema", "Order", "kind")),
+        "Window": (("types.py", "enum", "Window"), ("schema", "History", "window")),
+        "frames": (("adapter.py", "dict_values", "FRAMES"), ("param", "GET /candles", "tf")),
+    }
+
+    def setUp(self):
+        self.pkg = tempfile.mkdtemp()
+        files = {
+            "types.py": textwrap.dedent(
+                """\
+                from enum import Enum
+                KINDS = frozenset({"Limit", "Market"})
+                class Window(str, Enum):
+                    DAY = "day"
+                    WEEK = "week"
+                """
+            ),
+            "adapter.py": 'FRAMES: dict[str, str] = {"1m": "1m", "1h": "1h"}\n',
+            "ws.py": (
+                'PUBLIC_CHANNELS = frozenset({"book"})\nACCOUNT_CHANNELS = frozenset({"orders"})\n'
+            ),
+        }
+        for name, body in files.items():
+            with open(os.path.join(self.pkg, name), "w") as f:
+                f.write(body)
+        self.spec = {
+            "components": {
+                "schemas": {
+                    "Order": {"properties": {"kind": {"enum": ["Limit", "Market"]}}},
+                    # The compose-with-a-default idiom: one-branch allOf over a $ref.
+                    "History": {
+                        "properties": {"window": {"allOf": [{"$ref": "#/components/schemas/Win"}]}}
+                    },
+                    "Win": {"type": "string", "enum": ["day", "week", None]},
+                }
+            },
+            "paths": {
+                "/candles": {
+                    "get": {"parameters": [{"name": "tf", "schema": {"enum": ["1m", "1h"]}}]}
+                },
+                "/ws": {
+                    "get": {
+                        "description": "**Public channels** (open): `book` — needs a `market`.\n"
+                        "**Per-account channels** (token): `orders`."
+                    }
+                },
+            },
+        }
+
+    def _errors(self, ahead=frozenset(), ws_ahead=frozenset()):
+        return _quiet(csd.check_enums, self.spec, self.pkg, self.SOURCES, set(ahead), set(ws_ahead))
+
+    def test_matching_sets_pass(self):
+        self.assertEqual(self._errors(), 0)
+
+    def test_a_spec_member_the_sdk_rejects_goes_red(self):
+        self.spec["components"]["schemas"]["Order"]["properties"]["kind"]["enum"].append(
+            "TrailingStop"
+        )
+        self.assertEqual(self._errors(), 1)
+
+    def test_a_member_behind_a_ref_is_checked(self):
+        self.spec["components"]["schemas"]["Win"]["enum"].append("month")
+        self.assertEqual(self._errors(), 1)
+
+    def test_a_parameter_enum_is_checked(self):
+        self.spec["paths"]["/candles"]["get"]["parameters"][0]["schema"]["enum"].append("5m")
+        self.assertEqual(self._errors(), 1)
+
+    def test_a_member_the_spec_dropped_goes_red_unless_allowlisted(self):
+        self.spec["components"]["schemas"]["Order"]["properties"]["kind"]["enum"].remove("Market")
+        self.assertEqual(self._errors(), 1)
+        self.assertEqual(self._errors(ahead={("kinds", "Market")}), 0)
+
+    def test_stale_allowlist_entries_go_red(self):
+        # Now defined by the spec, and not modelled by the SDK at all.
+        self.assertEqual(self._errors(ahead={("kinds", "Limit"), ("kinds", "Iceberg")}), 2)
+
+    def test_an_enum_that_disappears_goes_red(self):
+        del self.spec["components"]["schemas"]["Order"]["properties"]["kind"]["enum"]
+        self.assertEqual(self._errors(), 1)
+
+    def test_a_new_ws_channel_goes_red_and_trailing_prose_is_ignored(self):
+        self.assertEqual(csd.spec_ws_channels(self.spec), {"book", "orders"})
+        ws = self.spec["paths"]["/ws"]["get"]
+        ws["description"] = ws["description"].replace("`orders`.", "`orders`, `liquidations`.")
+        self.assertEqual(self._errors(), 1)
+
+    def test_a_ws_channel_ahead_of_the_spec_needs_the_allowlist(self):
+        ws = self.spec["paths"]["/ws"]["get"]
+        ws["description"] = ws["description"].replace("`book` —", "`trades` —")
+        self.assertEqual(self._errors(), 2)  # book not in spec, trades not in SDK
+        self.assertEqual(self._errors(ws_ahead={"book"}), 1)
+
+    def test_every_real_source_still_parses(self):
+        # A rename in the real package must fail here, not silently cover nothing.
+        for label, (source, _) in csd.ENUM_SOURCES.items():
+            self.assertTrue(_quiet(csd.sdk_members, csd.PACKAGE, source), label)
+        account = csd.sdk_members(csd.PACKAGE, ("ws.py", "set", "ACCOUNT_CHANNELS"))
+        self.assertIn("liquidations", account)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
