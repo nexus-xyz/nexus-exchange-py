@@ -4,12 +4,20 @@ Mirrors the Rust and TypeScript SDKs' streaming clients (ENG-4045):
 
 - Opens a single WebSocket and multiplexes any number of ``subscribe()`` calls
   onto it, each surfaced as an ``async for`` iterator of :class:`WsEvent`.
-- Tracks the highest ``seq`` per ``(channel, market)``. On disconnect it
-  reconnects with jittered exponential backoff, re-mints a fresh single-use
-  token (account-scoped streams), and re-subscribes from the last ``seq`` so the
-  server replays anything missed from its ring buffer.
+- Tracks the highest ``seq`` per ``(channel, market)``, seeded from the
+  ``subscribed`` ack's ``seq_at_join``. On disconnect it reconnects with jittered
+  exponential backoff, re-mints a fresh single-use token (account-scoped
+  streams), and re-subscribes with ``since`` set to that cursor (``0``
+  included) so the server replays anything missed from its ring buffer.
 - Surfaces the server's ``out_of_sync`` gap signal (and a local drop-oldest
-  sentinel under backpressure) so the consumer knows to REST-refetch.
+  sentinel under backpressure) so the consumer knows to REST-refetch. The
+  server ends a subscription it answers ``out_of_sync`` for, so the client drops
+  that cursor and at once subscribes again from the live edge on the same
+  socket; :attr:`WsSubscription.health` reads ``resyncing`` until the server's
+  ``subscribed`` ack. The consumer never resubscribes itself. It waits until
+  ``health`` is ``live`` again and only then REST-refetches: a refetch that
+  lands before the resubscribe takes effect can miss events published in
+  between. The missed range is that refetch's job, never a replay.
 
 Public market-data channels (``book`` / ``trades`` / ``candles``) need no auth.
 Account-scoped channels (``orders`` / ``fills`` / ``positions`` / ``balances`` /
@@ -37,7 +45,7 @@ import random
 from collections import deque
 from collections.abc import AsyncIterator, Awaitable, Callable
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Literal, Protocol
 from urllib.parse import quote, urlsplit
 
 from .errors import NexusExchangeError
@@ -47,6 +55,7 @@ __all__ = [
     "WsEvent",
     "WsSubscription",
     "WsError",
+    "WsHealth",
     "PUBLIC_CHANNELS",
     "ACCOUNT_CHANNELS",
     "CHANNELS",
@@ -77,6 +86,14 @@ class WsConnection(Protocol):
     async def recv(self) -> str | bytes: ...
     async def close(self) -> None: ...
 
+
+#: Delivery health of one subscription, independent of the socket's ``status()``:
+#: ``live`` (attached and delivering) or ``resyncing`` (the server ended it with
+#: ``out_of_sync``; the re-subscribe is already in flight, and the next
+#: ``subscribed`` ack makes it ``live`` again) or ``closed`` (torn down by
+#: ``unsubscribe()``, ``close()`` or leaving the iterator; terminal, it never
+#: returns to ``live``, so a wait-for-live loop must stop on it).
+WsHealth = Literal["live", "resyncing", "closed"]
 
 #: Opens a connection to ``url`` (an authenticated ``wss://…?token=…`` URL).
 Connect = Callable[[str], Awaitable[WsConnection]]
@@ -109,8 +126,10 @@ class _Sub:
     channel: str
     market: str | None
     interval: str | None
-    last_seq: int = 0
+    #: Highest seq seen (events and ``seq_at_join``); ``None`` means no cursor.
+    last_seq: int | None = None
     initial_since: int | None = None
+    health: WsHealth = "live"
     queue: deque[WsEvent] = field(default_factory=deque)
     waiters: list[asyncio.Future[WsEvent | None]] = field(default_factory=list)
     closed: bool = False
@@ -152,6 +171,19 @@ class WsSubscription:
     def events(self) -> AsyncIterator[WsEvent]:
         """The event stream as an async iterator (alias for iterating ``self``)."""
         return self._client._iterate(self._sub)
+
+    @property
+    def health(self) -> WsHealth:
+        """Delivery health of this subscription. See :data:`WsHealth`.
+
+        After an ``out_of_sync`` event this reads ``resyncing`` while the client
+        subscribes again on its own. Wait until it reads ``live`` (the server's
+        next ``subscribed`` ack) before refetching over REST: a refetch taken
+        earlier can miss events published before the new subscription attached.
+        Once the subscription is torn down it reads ``closed`` for good, so wait
+        with ``while sub.health == "resyncing"``, not ``!= "live"``.
+        """
+        return self._sub.health
 
     def unsubscribe(self) -> None:
         """Tear down this subscription. Idempotent."""
@@ -315,33 +347,38 @@ class WsClient:
                 self._conn = conn
                 self._sent_on_socket.clear()
                 self._state = "open"
-                attempts = 0
                 for sub in list(self._subs.values()):
                     await self._send_subscribe(conn, sub)
 
-                await self._recv_loop(conn)
+                received = await self._recv_loop(conn)
                 await _safe_close(conn)
                 self._conn = None
 
                 if self._closing or not self._subs:
                     break
                 self._state = "reconnecting"
-                attempts += 1
+                # Reset only once a frame arrived: a socket that upgrades and
+                # then drops keeps backing off instead of retrying at the base.
+                attempts = 1 if received else attempts + 1
                 await self._backoff(attempts)
         finally:
             self._state = "closed"
 
-    async def _recv_loop(self, conn: WsConnection) -> None:
+    async def _recv_loop(self, conn: WsConnection) -> bool:
+        """Read until the connection drops. True when at least one frame arrived."""
+        received = False
         while not self._closing and self._subs:
             try:
                 raw = await conn.recv()
             except Exception:
-                return  # connection dropped → reconnect
+                return received  # connection dropped → reconnect
+            received = True
             try:
                 self._handle(raw)
             except Exception:
                 # A malformed-but-parseable frame must never crash the client.
                 pass
+        return received
 
     async def _mint_token(self) -> str | None:
         if self._token_provider is None:
@@ -376,9 +413,10 @@ class WsClient:
     async def _send_subscribe(self, conn: WsConnection, sub: _Sub) -> None:
         if sub.key in self._sent_on_socket or sub.closed:
             return
-        # On reconnect, resume from last_seq; on a first subscribe use the
-        # consumer's `since` if given, else live-from-now.
-        since = sub.last_seq if sub.last_seq > 0 else sub.initial_since
+        # Resume from the cursor whenever there is one (0 is a real cursor: a
+        # fresh key or a restarted indexer joins at 0); before the first ack use
+        # the consumer's `since` if given, else live-from-now.
+        since = sub.last_seq if sub.last_seq is not None else sub.initial_since
         msg: dict[str, Any] = {"op": "subscribe", "channel": sub.channel}
         if sub.market is not None:
             msg["market"] = sub.market
@@ -420,7 +458,7 @@ class WsClient:
             if seq is None:
                 return
             sub = self._subs.get(_sub_key(channel, market))
-            if sub is None or sub.closed or seq <= sub.last_seq:
+            if sub is None or sub.closed or (sub.last_seq is not None and seq <= sub.last_seq):
                 return  # drop duplicates / out-of-order (replay overlap)
             sub.last_seq = seq
             self._deliver(
@@ -431,26 +469,50 @@ class WsClient:
             if channel not in CHANNELS:
                 return
             market = msg.get("market") or None
-            sub = self._subs.get(_sub_key(channel, market))
-            if sub is None or sub.closed:
-                return
-            oldest = _coerce_seq(msg.get("oldest_seq"))
-            sub.last_seq = oldest if oldest is not None else 0
-            self._deliver(
-                sub,
-                WsEvent(channel, market, sub.last_seq, None, sub.interval, out_of_sync=True),
-            )
+            oldest = _coerce_seq(msg.get("oldest_seq")) or 0
+            # A frame with no market (a connection that fell behind the whole
+            # broadcast) names every market of the channel.
+            for sub in list(self._subs.values()):
+                if sub.closed or sub.channel != channel:
+                    continue
+                if market is not None and sub.market != market:
+                    continue
+                self._resync(sub, oldest)
         elif op == "subscribed":
             if channel not in CHANNELS:
                 return
             market = msg.get("market") or None
             sub = self._subs.get(_sub_key(channel, market))
             seq_at_join = _coerce_seq(msg.get("seq_at_join"))
-            if sub is not None and seq_at_join is not None:
-                # Seed the resume baseline so a reconnect before any event still
-                # resumes from the join point.
-                sub.last_seq = max(sub.last_seq, seq_at_join)
+            if sub is not None and not sub.closed:
+                sub.health = "live"
+                if seq_at_join is not None:
+                    # Seed the resume baseline so a reconnect before any event
+                    # still resumes from the join point (0 included).
+                    sub.last_seq = (
+                        seq_at_join if sub.last_seq is None else max(sub.last_seq, seq_at_join)
+                    )
         # unsubscribed / error / unknown: nothing to route.
+
+    def _resync(self, sub: _Sub, oldest: int) -> None:
+        """Handle an ``out_of_sync`` for ``sub``: the server has ended it.
+
+        Drop the cursor (a replay from ``oldest_seq`` would re-deliver what the
+        consumer's REST refetch covers) and subscribe again from the live edge on
+        the same socket. The server treats it as a replace; its ``subscribed`` ack
+        re-seeds the cursor. No backoff: a subscribe without ``since`` cannot be
+        refused as out of sync, and lag, the only repeat trigger, is paced by the
+        server. If the send fails, the run loop reconnects and re-sends.
+        """
+        sub.last_seq = None
+        sub.initial_since = None
+        sub.health = "resyncing"
+        self._sent_on_socket.discard(sub.key)
+        if self._conn is not None and self._state == "open":
+            asyncio.ensure_future(self._send_subscribe(self._conn, sub))
+        self._deliver(
+            sub, WsEvent(sub.channel, sub.market, oldest, None, sub.interval, out_of_sync=True)
+        )
 
     def _deliver(self, sub: _Sub, evt: WsEvent) -> None:
         if sub.closed:
@@ -467,7 +529,7 @@ class WsClient:
             while len(sub.queue) > self._max_queue - 1:
                 sub.queue.popleft()
             sub.queue.append(
-                WsEvent(sub.channel, sub.market, sub.last_seq, None, sub.interval, True)
+                WsEvent(sub.channel, sub.market, sub.last_seq or 0, None, sub.interval, True)
             )
 
     async def _iterate(self, sub: _Sub) -> AsyncIterator[WsEvent]:
@@ -492,6 +554,7 @@ class WsClient:
         if sub.closed:
             return
         sub.closed = True
+        sub.health = "closed"
         self._sent_on_socket.discard(sub.key)
         if self._subs.get(sub.key) is sub:
             del self._subs[sub.key]

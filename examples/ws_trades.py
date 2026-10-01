@@ -63,7 +63,14 @@ async def main() -> None:
         print(f"streaming trades for {market} from {url}/ws (ctrl-c to stop)…")
         async for event in sub:
             if event.out_of_sync:
-                print("  [out of sync — refetch via REST]")
+                # The client is already subscribing again. Refetch only once it
+                # is live: a refetch before that can miss trades published in
+                # between.
+                while sub.health == "resyncing":
+                    await asyncio.sleep(0.1)
+                if sub.health == "closed":
+                    break
+                print("  [out of sync, resubscribed: refetch recent trades via REST now]")
                 continue
             print(f"  seq={event.seq} {event.data}")
 
