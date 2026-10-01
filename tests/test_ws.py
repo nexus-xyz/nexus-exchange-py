@@ -373,6 +373,18 @@ async def test_last_unsubscribe_closes_the_socket() -> None:
         assert ws.status() == "closed"
 
 
+async def test_aclose_awaits_a_run_the_last_unsubscribe_detached() -> None:
+    conn = FakeConn([])
+    connect, _ = _factory([conn])
+    ws = WsClient("wss://x.test", connect=connect)
+    sub = ws.subscribe("trades", market="BTC-USDX-PERP")
+    await _settle()
+    run = ws._task
+    sub.unsubscribe()  # detaches the cancelled run: ws._task is now None
+    await ws.aclose()
+    assert run is not None and run.done()
+
+
 async def test_sync_close_closes_the_socket() -> None:
     conn = FakeConn([])
     connect, _ = _factory([conn])

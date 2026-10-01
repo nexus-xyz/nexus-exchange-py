@@ -235,6 +235,9 @@ class WsClient:
         self._state = "closed"
         self._closing = False
         self._task: asyncio.Task[None] | None = None
+        # Runs _teardown_sub detached: cancelled but not yet finished. aclose()
+        # awaits them too, or a caller closing the loop by hand finds one pending.
+        self._detached: set[asyncio.Task[None]] = set()
         # Injectable so tests control timing/jitter without real waiting.
         self._sleep: Callable[[float], Awaitable[None]] = asyncio.sleep
         self._rand: Callable[[], float] = random.random
@@ -304,9 +307,11 @@ class WsClient:
     async def aclose(self) -> None:
         """Async close that also awaits the background task's teardown."""
         self.close()
-        if self._task is not None:
+        for task in [self._task, *self._detached]:
+            if task is None:
+                continue
             try:
-                await self._task
+                await task
             except (asyncio.CancelledError, Exception):
                 pass
         if self._conn is not None:
@@ -575,7 +580,10 @@ class WsClient:
             # cancel() is only a request and `done()` stays False until it lands,
             # so a subscribe in this same tick must start a fresh run, not count
             # on the dying one.
-            self._task.cancel()
+            task = self._task
+            task.cancel()
+            self._detached.add(task)
+            task.add_done_callback(self._detached.discard)
             self._task = None
             self._state = "closed"
 
