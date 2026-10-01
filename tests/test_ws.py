@@ -343,6 +343,80 @@ async def test_reconnect_resumes_from_last_seq_and_remints_token() -> None:
     assert resume["since"] == 7
 
 
+# -- subscription lifecycle (ENG-18684) --------------------------------------
+
+
+async def _settle() -> None:
+    for _ in range(5):
+        await asyncio.sleep(0)
+
+
+async def test_replacing_the_only_subscription_keeps_a_reader() -> None:
+    conn1 = FakeConn([])
+    conn2 = FakeConn([_event("trades", "BTC-USDX-PERP", 1, {})])
+    connect, urls = _factory([conn1, conn2])
+    async with WsClient("wss://x.test", connect=connect) as ws:
+        _instant(ws)
+        ws.subscribe("trades", market="BTC-USDX-PERP")
+        await _settle()
+        # Same (channel, market): tears down the only sub, then re-adds it in one tick.
+        sub = ws.subscribe("trades", market="BTC-USDX-PERP")
+        events = await _take(sub, 1)
+    assert [e.seq for e in events] == [1]
+    assert len(urls) == 2
+    assert conn1.closed  # the cancelled run closed its own socket
+
+
+async def test_unsubscribe_last_then_subscribe_in_the_same_tick_keeps_a_reader() -> None:
+    conn1 = FakeConn([])
+    conn2 = FakeConn([_event("fills", "ETH-USDX-PERP", 3, {})])
+    connect, _ = _factory([conn1, conn2])
+    async with WsClient("wss://x.test", connect=connect, token_provider=lambda: "t") as ws:
+        _instant(ws)
+        old = ws.subscribe("trades", market="BTC-USDX-PERP")
+        await _settle()
+        old.unsubscribe()
+        sub = ws.subscribe("fills", market="ETH-USDX-PERP")
+        events = await _take(sub, 1)
+    assert [e.seq for e in events] == [3]
+    assert conn1.closed
+
+
+async def test_last_unsubscribe_closes_the_socket() -> None:
+    conn = FakeConn([])
+    connect, _ = _factory([conn])
+    async with WsClient("wss://x.test", connect=connect) as ws:
+        sub = ws.subscribe("trades", market="BTC-USDX-PERP")
+        await _settle()
+        sub.unsubscribe()
+        await _settle()
+        assert conn.closed
+        assert ws.status() == "closed"
+
+
+async def test_aclose_awaits_a_run_the_last_unsubscribe_detached() -> None:
+    conn = FakeConn([])
+    connect, _ = _factory([conn])
+    ws = WsClient("wss://x.test", connect=connect)
+    sub = ws.subscribe("trades", market="BTC-USDX-PERP")
+    await _settle()
+    run = ws._task
+    sub.unsubscribe()  # detaches the cancelled run: ws._task is now None
+    await ws.aclose()
+    assert run is not None and run.done()
+
+
+async def test_sync_close_closes_the_socket() -> None:
+    conn = FakeConn([])
+    connect, _ = _factory([conn])
+    ws = WsClient("wss://x.test", connect=connect)
+    ws.subscribe("trades", market="BTC-USDX-PERP")
+    await _settle()
+    ws.close()
+    await _settle()
+    assert conn.closed
+
+
 # -- validation --------------------------------------------------------------
 
 
