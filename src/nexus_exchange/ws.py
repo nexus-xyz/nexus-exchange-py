@@ -89,8 +89,10 @@ class WsConnection(Protocol):
 #: Delivery health of one subscription, independent of the socket's ``status()``:
 #: ``live`` (attached and delivering) or ``resyncing`` (the server ended it with
 #: ``out_of_sync``; the re-subscribe is already in flight, and the next
-#: ``subscribed`` ack makes it ``live`` again).
-WsHealth = Literal["live", "resyncing"]
+#: ``subscribed`` ack makes it ``live`` again) or ``closed`` (torn down by
+#: ``unsubscribe()``, ``close()`` or leaving the iterator; terminal, it never
+#: returns to ``live``, so a wait-for-live loop must stop on it).
+WsHealth = Literal["live", "resyncing", "closed"]
 
 #: Opens a connection to ``url`` (an authenticated ``wss://…?token=…`` URL).
 Connect = Callable[[str], Awaitable[WsConnection]]
@@ -177,6 +179,8 @@ class WsSubscription:
         subscribes again on its own. Wait until it reads ``live`` (the server's
         next ``subscribed`` ack) before refetching over REST: a refetch taken
         earlier can miss events published before the new subscription attached.
+        Once the subscription is torn down it reads ``closed`` for good, so wait
+        with ``while sub.health == "resyncing"``, not ``!= "live"``.
         """
         return self._sub.health
 
@@ -549,6 +553,7 @@ class WsClient:
         if sub.closed:
             return
         sub.closed = True
+        sub.health = "closed"
         self._sent_on_socket.discard(sub.key)
         if self._subs.get(sub.key) is sub:
             del self._subs[sub.key]

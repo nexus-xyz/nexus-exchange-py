@@ -634,8 +634,10 @@ async with WsClient("wss://api.testnet.nexus.xyz/v1") as ws:
     sub = ws.subscribe("trades", market="BTC-USDX-PERP")
     async for event in sub:
         if event.out_of_sync:
-            while sub.health != "live":
+            while sub.health == "resyncing":
                 await asyncio.sleep(0.1)
+            if sub.health == "closed":
+                break
             ...  # now refetch the state you track over REST
             continue
         handle(event.data)
@@ -644,7 +646,8 @@ async with WsClient("wss://api.testnet.nexus.xyz/v1") as ws:
 When the server can no longer replay the gap, it ends the subscription and
 the stream yields an `out_of_sync` event. The client subscribes again by
 itself; `sub.health` reads `resyncing` until the server acknowledges, then
-`live`. Refetch over REST only once `health` is `live` again: a refetch that
+`live`, or `closed` for good if the subscription is torn down meanwhile, which
+is why the loop waits on `resyncing` rather than for `live`. Refetch over REST only once `health` is `live` again: a refetch that
 lands before the new subscription attaches can miss events published in
 between. Never resubscribe yourself. See `examples/ws_trades.py`.
 

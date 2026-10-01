@@ -194,6 +194,27 @@ async def test_out_of_sync_resubscribes_from_the_live_edge_on_an_open_socket() -
         assert (await _next()).seq == 41
 
 
+async def test_teardown_mid_resync_reads_closed_so_a_wait_loop_ends() -> None:
+    # A wait-for-live loop must not spin forever when the subscription is torn
+    # down while resyncing: `closed` is terminal and is never `resyncing`.
+    conn = FakeConn(
+        [_frame(op="out_of_sync", channel="trades", market="BTC-USDX-PERP", oldest_seq=3)]
+    )
+    connect, _ = _factory([conn])
+    ws = WsClient("wss://x.test", connect=connect)
+    _instant(ws)
+    async with ws:
+        sub = ws.subscribe("trades", market="BTC-USDX-PERP")
+        events = sub.events
+        assert (await asyncio.wait_for(events.__anext__(), 1.0)).out_of_sync
+        assert sub.health == "resyncing"
+        sub.unsubscribe()
+        assert sub.health == "closed"
+        # A late ack for the torn-down stream must not revive it.
+        ws._handle(_frame(op="subscribed", channel="trades", market="BTC-USDX-PERP", seq_at_join=9))
+        assert sub.health == "closed"
+
+
 async def test_out_of_sync_without_a_market_resyncs_every_market_of_the_channel() -> None:
     conn = FakeConn([])
     connect, _ = _factory([conn])
