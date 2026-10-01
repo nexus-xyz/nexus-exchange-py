@@ -15,6 +15,39 @@ future release below it. To improve the wording of a release, edit
 below `0.4.0` predate this and follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.7.0](https://github.com/nexus-xyz/nexus-exchange-py/compare/v0.6.0...v0.7.0) (2026-10-01)
+
+
+### ⚠ BREAKING CHANGES
+
+* **client:** `direct_base_url` is removed from `Client`, `NetworkConfig`, `NetworkConfig.custom`, `Network` and the CCXT adapter. One `base_url` now carries every request. `Network.TESTNET.base_url` is now https://api.testnet.nexus.xyz/v1.
+* **client:** Client.list_bridge_wallets, create_bridge_wallet_challenge and register_bridge_wallet are removed, with BridgeWallet, BridgeWalletsResponse and BridgeWalletChallenge. Migration: there is no replacement. The /bridge/wallets routes are not in the spec on the monorepo's main, the server deleted them (ENG-13801), and they are EX-Bridge scope (ENG-5639), which nexus-exchange-rs does not wrap either. Delete the calls.
+* **client:** Client.create_ws_token_legacy() and Client.mint_web_socket_token() are removed. Use Client.create_ws_token() (POST /ws/token), which also accepts agent keys and session tokens.
+* **auth:** EthSigner.register_agent requires `network=`.
+
+### Features
+
+* **client:** deprecate the bridge deposit-address methods, whose route was cancelled (ENG-18023) ([#99](https://github.com/nexus-xyz/nexus-exchange-py/issues/99)) ([1157ccc](https://github.com/nexus-xyz/nexus-exchange-py/commit/1157ccc8e5b5d63005625898e52f6a87ae35bd60))
+* **client:** handle the bridge methods main removed the way nexus-exchange-rs does (ENG-18009) ([#98](https://github.com/nexus-xyz/nexus-exchange-py/issues/98)) ([ce8fd0f](https://github.com/nexus-xyz/nexus-exchange-py/commit/ce8fd0fc915693bceb21e0e5c597376dbc075d1d))
+* **client:** name methods snake_case(operationId), keep old names as deprecated aliases (ENG-17744) ([#96](https://github.com/nexus-xyz/nexus-exchange-py/issues/96)) ([8e77aa2](https://github.com/nexus-xyz/nexus-exchange-py/commit/8e77aa28f21ee4d5061b0037420aa549ed244414))
+* **client:** remove the legacy POST /ws-tokens wrapper (ENG-18010) ([#97](https://github.com/nexus-xyz/nexus-exchange-py/issues/97)) ([faf36dd](https://github.com/nexus-xyz/nexus-exchange-py/commit/faf36dd537c2c96154314931dc1e6baa1b349578))
+* **client:** send REST to the /v1 base with the spec's bare paths (ENG-18322) ([#103](https://github.com/nexus-xyz/nexus-exchange-py/issues/103)) ([ef427a5](https://github.com/nexus-xyz/nexus-exchange-py/commit/ef427a51f76aa826f737a7ecae3a618faae00aa5))
+* **spec-drift:** check closed enum sets against the pinned spec, accept the liquidations channel (ENG-18803) ([#104](https://github.com/nexus-xyz/nexus-exchange-py/issues/104)) ([8541bbc](https://github.com/nexus-xyz/nexus-exchange-py/commit/8541bbcdd7826e782bb54351227e9ccff79c5d37))
+* **spec-drift:** check the SDK's closed enum sets against the pinned spec, and accept the liquidations channel (ENG-18803) ([8541bbc](https://github.com/nexus-xyz/nexus-exchange-py/commit/8541bbcdd7826e782bb54351227e9ccff79c5d37))
+
+
+### Bug Fixes
+
+* **auth:** salt the RegisterAgent domain with the network (ENG-17753) ([#95](https://github.com/nexus-xyz/nexus-exchange-py/issues/95)) ([127ad56](https://github.com/nexus-xyz/nexus-exchange-py/commit/127ad56c12f78ae76555fdc6252d5222c2db730c))
+* **ws:** keep a reader when the only subscription is replaced, and close the socket on teardown (ENG-18684) ([#102](https://github.com/nexus-xyz/nexus-exchange-py/issues/102)) ([0cc0fb9](https://github.com/nexus-xyz/nexus-exchange-py/commit/0cc0fb9aace582930e48491c4d551eba1a92e344))
+* **ws:** re-subscribe after out_of_sync, drop the cursor, and resume a join at seq 0 (ENG-18683) ([#101](https://github.com/nexus-xyz/nexus-exchange-py/issues/101)) ([debc015](https://github.com/nexus-xyz/nexus-exchange-py/commit/debc015bf6fbbb0dd2ddb9327ff9a60d962e953b))
+
+
+### Documentation
+
+* **ccxt:** freeze the adapter at public market data, superseded by ccxt.nexus (ENG-12913) ([#100](https://github.com/nexus-xyz/nexus-exchange-py/issues/100)) ([322e365](https://github.com/nexus-xyz/nexus-exchange-py/commit/322e365373a98a1ffcdeb77b1fd39af48445c3b3))
+* **ws:** point the streaming client's token guidance at create_ws_token (ENG-17335) ([#93](https://github.com/nexus-xyz/nexus-exchange-py/issues/93)) ([aee0dd1](https://github.com/nexus-xyz/nexus-exchange-py/commit/aee0dd16eb33cf1efee842db5e3b5ee1cfd0a3f5))
+
 ## [0.6.0](https://github.com/nexus-xyz/nexus-exchange-py/compare/v0.5.0...v0.6.0) (2026-09-23)
 
 
