@@ -185,7 +185,7 @@ def test_exact_headers_on_the_wire_match_spec_vector_one(httpx_mock) -> None:
 
 def test_typed_write_signs_the_full_direct_path_and_exact_body(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/orders",
+        url="http://localhost:9090/orders",
         json={"order_id": "o1", "status": "open"},
     )
     with _agent_client() as client:
@@ -199,13 +199,11 @@ def test_typed_write_signs_the_full_direct_path_and_exact_body(httpx_mock) -> No
     assert headers["x-timestamp"] == "1776033900123"
     assert headers["x-nonce"] == "1776033900123"
     # Recovered from what was actually sent: the /api/v1 path and the body bytes.
-    assert _recover("POST", "/api/v1/orders", "", req.content, headers) == (
-        Account.from_key(_KEY).address
-    )
+    assert _recover("POST", "/orders", "", req.content, headers) == (Account.from_key(_KEY).address)
 
 
 def test_each_retry_attempt_gets_a_fresh_timestamp_and_nonce(httpx_mock) -> None:
-    url = "http://localhost:9090/api/v1/orders"
+    url = "http://localhost:9090/orders"
     httpx_mock.add_response(url=url, status_code=503)
     httpx_mock.add_response(url=url, status_code=502)
     httpx_mock.add_response(url=url, json=[])
@@ -220,7 +218,7 @@ def test_each_retry_attempt_gets_a_fresh_timestamp_and_nonce(httpx_mock) -> None
     assert nonces == [2_000_000, 2_000_001, 2_001_000], "fresh, strictly increasing per attempt"
     assert len({r.headers["x-signature"] for r in reqs}) == 3
     for r in reqs:
-        assert _recover("GET", "/api/v1/orders", "", b"", dict(r.headers)) == (
+        assert _recover("GET", "/orders", "", b"", dict(r.headers)) == (
             Account.from_key(_KEY).address
         )
 
@@ -272,7 +270,7 @@ def test_bearer_call_on_an_agent_client_sends_only_the_bearer(httpx_mock) -> Non
 
 
 def test_public_call_on_an_agent_client_sends_no_credential(httpx_mock) -> None:
-    httpx_mock.add_response(url="http://localhost:9090/api/v1/markets/summary", json=[])
+    httpx_mock.add_response(url="http://localhost:9090/markets/summary", json=[])
     with _agent_client() as client:
         client.fetch_markets_summary()
     (req,) = httpx_mock.get_requests()
@@ -305,28 +303,27 @@ def test_agent_forbidden_operations_are_refused_before_any_request(
 
 
 @pytest.mark.parametrize(
-    ("method", "path", "direct"),
+    ("method", "path"),
     [
-        ("POST", "/withdrawals", False),
-        ("POST", "/withdrawals/", False),
-        ("POST", "/account/withdraw", False),
-        ("POST", "/bridge/withdrawals", True),
-        ("PUT", "/bridge/withdrawals", True),
+        ("POST", "/withdrawals"),
+        ("POST", "/withdrawals/"),
+        ("POST", "/account/withdraw"),
+        ("POST", "/bridge/withdrawals"),
+        ("PUT", "/bridge/withdrawals"),
+        ("POST", "/api/v1/bridge/withdrawals"),
     ],
 )
-def test_withdrawals_are_refused_for_agent_keys(
-    httpx_mock, method: str, path: str, direct: bool
-) -> None:
+def test_withdrawals_are_refused_for_agent_keys(httpx_mock, method: str, path: str) -> None:
     with _agent_client() as client:
         with pytest.raises(AgentKeyRefusedError, match="cannot withdraw") as exc:
-            client._request(method, path, body={}, signed=True, direct=direct)
+            client._request(method, path, body={}, signed=True)
     assert exc.value.code == "AGENT_CANNOT_WITHDRAW"
     assert httpx_mock.get_requests() == []
 
 
 def test_withdrawal_history_and_other_writes_stay_allowed(httpx_mock) -> None:
     httpx_mock.add_response(url="http://localhost:9090/withdrawals", json=[])
-    httpx_mock.add_response(url="http://localhost:9090/api/v1/orders", method="DELETE", json={})
+    httpx_mock.add_response(url="http://localhost:9090/orders", method="DELETE", json={})
     httpx_mock.add_response(url="http://localhost:9090/ws/token", json={"token": "t"})
     with _agent_client() as client:
         client.fetch_withdrawals()

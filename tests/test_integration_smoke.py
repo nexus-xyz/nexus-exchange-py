@@ -127,11 +127,11 @@ class _Handler(BaseHTTPRequestHandler):
         # the /api/v1 prefix.
         if self.path == "/markets":
             self._send(200, _MARKETS)
-        elif self.path == "/api/v1/markets/BTC-USDX-PERP/ticker":
+        elif self.path == "/markets/BTC-USDX-PERP/ticker":
             self._send(200, _TICKER)
-        elif self.path == "/api/v1/markets/BTC-USDX-PERP/orderbook":
+        elif self.path == "/markets/BTC-USDX-PERP/orderbook":
             self._send(200, _ORDERBOOK)
-        elif self.path == "/api/v1/account":
+        elif self.path == "/account":
             if self._require_signed():
                 self._send(200, _ACCOUNT)
         else:
@@ -140,14 +140,14 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:  # noqa: N802 (http.server dispatch name)
         length = int(self.headers.get("content-length", 0))
         self.rfile.read(length)  # drain the signed body off the socket
-        if self.path == "/api/v1/orders":
+        if self.path == "/orders":
             if self._require_signed():
                 self._send(200, {"order": _ORDER, "fills": []})
         else:
             self._send(404, {"code": "not_found", "message": f"no route {self.path}"})
 
     def do_DELETE(self) -> None:  # noqa: N802 (http.server dispatch name)
-        if self.path == "/api/v1/orders/o-live-1?market_id=BTC-USDX-PERP":
+        if self.path == "/orders/o-live-1?market_id=BTC-USDX-PERP":
             if self._require_signed():
                 self._send(200, {"cancelled": True})
         else:

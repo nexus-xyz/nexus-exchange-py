@@ -18,7 +18,7 @@ from nexus_exchange import (
 )
 
 _SECRET = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
-_URL = "http://localhost:9090/api/v1/account/cancel-on-disconnect"
+_URL = "http://localhost:9090/account/cancel-on-disconnect"
 
 
 def _authed() -> Client:

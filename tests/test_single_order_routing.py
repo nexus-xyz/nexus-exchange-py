@@ -41,13 +41,13 @@ def _assert_signed_with_query(req, method: str, path: str, query: str) -> None:
 
 
 def test_cancel_order_sends_market_id(httpx_mock) -> None:
-    url = f"{_BASE}/api/v1/orders/o1?market_id={_MARKET}"
+    url = f"{_BASE}/orders/o1?market_id={_MARKET}"
     httpx_mock.add_response(url=url, method="DELETE", json={"cancelled": True})
     with _authed() as client:
         assert client.cancel_order("o1", _MARKET) == {"cancelled": True}
     req = httpx_mock.get_request()
     assert str(req.url) == url
-    _assert_signed_with_query(req, "DELETE", "/api/v1/orders/o1", f"market_id={_MARKET}")
+    _assert_signed_with_query(req, "DELETE", "/orders/o1", f"market_id={_MARKET}")
 
 
 def test_fetch_order_sends_market_id(httpx_mock) -> None:
@@ -63,7 +63,7 @@ def test_fetch_order_sends_market_id(httpx_mock) -> None:
 def test_market_id_and_order_id_are_encoded(httpx_mock) -> None:
     # Neither value may break out of its slot: a reserved character in the order
     # id stays in the path segment, one in the market id stays in the query value.
-    url = f"{_BASE}/api/v1/orders/a%2Fb?market_id=X%26Y"
+    url = f"{_BASE}/orders/a%2Fb?market_id=X%26Y"
     httpx_mock.add_response(url=url, method="DELETE", json={})
     with _authed() as client:
         client.cancel_order("a/b", "X&Y")

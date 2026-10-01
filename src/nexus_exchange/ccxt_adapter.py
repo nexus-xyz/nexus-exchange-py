@@ -79,7 +79,7 @@ class NexusExchange:
     a unified id, so there is no separate CCXT-symbol vs market-id translation
     in this increment.
 
-    ``network``, ``base_url`` and ``direct_base_url`` are forwarded verbatim to
+    ``network`` and ``base_url`` are forwarded verbatim to
     :class:`~nexus_exchange.Client`, so they carry its rules — including that a
     bare ``base_url`` with no network named is the deprecated selector
     (ENG-10955). Pass ``network=NetworkConfig.custom(...)`` instead; it declares
@@ -96,13 +96,10 @@ class NexusExchange:
         *,
         network: Network | NetworkConfig | str | None = None,
         base_url: str | None = None,
-        direct_base_url: str | None = None,
         client: Client | None = None,
     ) -> None:
         self._owns_client = client is None
-        self._client = client or Client(
-            network=network, base_url=base_url, direct_base_url=direct_base_url
-        )
+        self._client = client or Client(network=network, base_url=base_url)
         #: CCXT ``markets`` cache, keyed by symbol; populated by
         #: :meth:`load_markets` / :meth:`fetch_markets`.
         self.markets: dict[str, dict[str, Any]] = {}
@@ -195,9 +192,7 @@ class NexusExchange:
         /markets/{symbol}/ticker``); this normalizes numerics and guarantees the
         unified keys are present.
         """
-        data = self._client._request(
-            "GET", f"/markets/{quote(symbol, safe='')}/ticker", direct=True
-        )
+        data = self._client._request("GET", f"/markets/{quote(symbol, safe='')}/ticker")
         return self._parse_ticker(symbol, data if isinstance(data, dict) else {})
 
     def fetch_tickers(
@@ -208,7 +203,7 @@ class NexusExchange:
         ``GET /tickers`` returns an object keyed by market id; this maps each to
         a unified ticker. ``symbols`` filters the result client-side.
         """
-        data = self._client._request("GET", "/tickers", direct=True)
+        data = self._client._request("GET", "/tickers")
         if not isinstance(data, dict):
             return {}
         wanted = set(symbols) if symbols else None
@@ -229,9 +224,7 @@ class NexusExchange:
         bids descending and asks ascending, matching CCXT. ``limit`` truncates
         each side client-side (the endpoint returns a full snapshot).
         """
-        data = self._client._request(
-            "GET", f"/markets/{quote(symbol, safe='')}/orderbook", direct=True
-        )
+        data = self._client._request("GET", f"/markets/{quote(symbol, safe='')}/orderbook")
         data = data if isinstance(data, dict) else {}
         bids = self._parse_levels(data.get("bids"))
         asks = self._parse_levels(data.get("asks"))
@@ -275,7 +268,6 @@ class NexusExchange:
             "GET",
             f"/markets/{quote(symbol, safe='')}/candles",
             query=urlencode(query),
-            direct=True,
         )
         if not isinstance(rows, list):
             return []
@@ -304,7 +296,6 @@ class NexusExchange:
             "GET",
             f"/markets/{quote(symbol, safe='')}/trades",
             query=urlencode(query) if query else "",
-            direct=True,
         )
         if not isinstance(rows, list):
             return []

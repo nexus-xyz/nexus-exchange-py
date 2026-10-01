@@ -35,7 +35,7 @@ def _authed() -> Client:
 
 def test_create_trailing_limit_order_signs_and_serializes(httpx_mock) -> None:
     httpx_mock.add_response(
-        url="http://localhost:9090/api/v1/orders",
+        url="http://localhost:9090/orders",
         json={
             "order": {
                 "id": "o1",

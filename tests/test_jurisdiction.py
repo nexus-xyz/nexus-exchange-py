@@ -30,9 +30,9 @@ from nexus_exchange import (
 )
 
 _SECRET = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
-_ORDERS_URL = "http://localhost:9090/api/v1/orders"
-_CREDIT_URL = "http://localhost:9090/api/v1/account/credit"
-_FILLS_URL = "http://localhost:9090/api/v1/fills"
+_ORDERS_URL = "http://localhost:9090/orders"
+_CREDIT_URL = "http://localhost:9090/account/credit"
+_FILLS_URL = "http://localhost:9090/fills"
 
 
 def _authed() -> Client:

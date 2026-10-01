@@ -66,8 +66,10 @@ async def main() -> None:
                 # The client is already subscribing again. Refetch only once it
                 # is live: a refetch before that can miss trades published in
                 # between.
-                while sub.health != "live":
+                while sub.health == "resyncing":
                     await asyncio.sleep(0.1)
+                if sub.health == "closed":
+                    break
                 print("  [out of sync, resubscribed: refetch recent trades via REST now]")
                 continue
             print(f"  seq={event.seq} {event.data}")

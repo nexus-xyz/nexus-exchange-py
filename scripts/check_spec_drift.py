@@ -8,12 +8,11 @@ SDK is itself Python, so the code side is read with `ast` — every REST call go
 through `Client._request(METHOD, path, ..., direct=…)`, and an AST walk sees those
 calls exactly, including multi-line ones, without pattern-matching on formatting.
 
-`direct=True` routes the call at the direct backend service, which prefixes the
-path with `API_V1_PREFIX` (`/api/v1`) for both signing and the wire (see
-`Client._request`). So the operation a call targets is the *resolved* path, not the
-literal in the source — `_request("GET", "/bridge/assets", direct=True)` targets
-`GET /api/v1/bridge/assets`. The prefix is read out of client.py rather than
-hardcoded here, so moving the constant cannot silently desynchronize the checker.
+Since ENG-18322 the client sends the spec's bare path to one base, so the literal
+in the source is the operation (the bridge reads spell `/api/v1/...` out). The
+checker still resolves a `direct=True` keyword by prefixing `API_V1_PREFIX`, read
+out of client.py rather than hardcoded, so a call that reintroduced it would be
+checked against the operation it actually targets.
 
 Five invariants are enforced:
 
@@ -67,6 +66,12 @@ Five invariants are enforced:
    that deliberately does not carry its operation's name is in METHOD_NAME_EXEMPT
    with its reason, stale-checked the same way (ENG-18009, mirroring
    nexus-exchange-rs).
+
+5. SDK closed enum sets <-> spec `enum` arrays (ENG-18803, port of rs ENG-5474)
+   The sets the SDK enforces before sending (order types, portfolio windows, the
+   CCXT timeframes, the WS channels) must hold exactly the pinned spec's members,
+   both ways, modulo ENUM_MEMBERS_AHEAD_OF_SPEC / WS_CHANNELS_AHEAD_OF_SPEC, which
+   are stale-checked. A spec member the SDK rejects is one the caller cannot use.
 
 Usage: check_spec_drift.py <openapi.json>
 """
@@ -908,19 +913,19 @@ def check_declared_security(spec):
 # carries ENG-17740 empties this map. Keys are (METHOD, normalized path) exactly as
 # `requested_ops` reports them.
 OPERATION_IDS_AHEAD_OF_PIN: dict[tuple[str, str], str] = {
-    ("GET", "/api/v1/account/fees"): "fetchTradingFeesV1",
-    ("POST", "/api/v1/account/credit"): "claimCreditV1",
+    ("GET", "/account/fees"): "fetchTradingFees",
+    ("POST", "/account/credit"): "claimCredit",
     ("POST", "/account/margin"): "addMargin",
     ("GET", "/admin/tiers"): "fetchTiers",
     ("GET", "/agents"): "fetchAgents",
     ("GET", "/api/v1/bridge/assets"): "fetchBridgeAssets",
     ("GET", "/api/v1/bridge/deposits"): "fetchBridgeDeposits",
     ("GET", "/api/v1/bridge/deposits/{}"): "fetchBridgeDeposit",
-    ("GET", "/api/v1/fills"): "fetchMyTradesV1",
-    ("GET", "/api/v1/markets/{}/funding"): "fetchFundingRateHistoryV1",
-    ("POST", "/api/v1/orders/batch"): "createOrdersV1",
-    ("GET", "/api/v1/orders/history"): "fetchOrdersV1",
-    ("GET", "/api/v1/positions/closed"): "fetchPositionsHistoryV1",
+    ("GET", "/fills"): "fetchMyTrades",
+    ("GET", "/markets/{}/funding"): "fetchFundingRateHistory",
+    ("POST", "/orders/batch"): "createOrders",
+    ("GET", "/orders/history"): "fetchOrders",
+    ("GET", "/positions/closed"): "fetchPositionsHistory",
     ("GET", "/funding"): "fetchFundingHistory",
     ("GET", "/keys"): "fetchApiKeys",
 }
@@ -1059,6 +1064,194 @@ def check_pin_matches_spec(spec, pinned):
     return declared
 
 
+# --- Invariant 5: SDK enums <-> spec enums (ENG-18803, port of rs ENG-5474) ---
+#
+# Only sets the SDK actually enforces are listed. Fields it passes through as an
+# open `str` (side, time_in_force, stp, funds kind/status, funding direction)
+# accept a new member already, so there is nothing to diff. `JURISDICTION_CODES`
+# is documented in the spec's prose, not as an `enum`, so it is not covered.
+#
+# SDK side: (module, kind, name), read with `ast` rather than imported because CI
+# runs this script with bare python3 (no package deps). kind "set" = a frozenset /
+# set literal, "enum" = an Enum class's member values, "dict_values" = the values
+# of a dict literal. Spec side: ("schema", schema, property) or
+# ("param", "METHOD /path", parameter name).
+ENUM_SOURCES = {
+    "order types (types._KNOWN_ORDER_TYPES)": (
+        ("types.py", "set", "_KNOWN_ORDER_TYPES"),
+        ("schema", "OrderRequest", "order_type"),
+    ),
+    "PortfolioWindow": (
+        ("types.py", "enum", "PortfolioWindow"),
+        ("schema", "PortfolioHistory", "window"),
+    ),
+    "CCXT timeframes (ccxt_adapter.TIMEFRAMES)": (
+        ("ccxt_adapter.py", "dict_values", "TIMEFRAMES"),
+        ("param", "GET /markets/{market_id}/candles", "timeframe"),
+    ),
+}
+
+# (label, member) pairs the SDK models AHEAD OF the pinned spec. Move an entry out
+# once the pinned spec defines the member; a stale entry fails so the list can't rot.
+ENUM_MEMBERS_AHEAD_OF_SPEC: set[tuple[str, str]] = set()
+
+# WS channel names ws.py accepts that the pinned spec's `GET /ws` does not list yet.
+WS_CHANNELS_AHEAD_OF_SPEC: set[str] = set()
+
+_SCHEMA_REF_PREFIX = "#/components/schemas/"
+_MAX_REF_HOPS = 8
+
+
+def sdk_members(package, source):
+    """The member set a closed SDK set declares, read from `package/<module>`."""
+    module, kind, name = source
+    path = os.path.join(package, module)
+    try:
+        with open(path) as f:
+            tree = ast.parse(f.read(), path)
+    except (OSError, SyntaxError) as e:
+        fail(f"cannot parse {path}: {e}")
+    for node in tree.body:
+        if kind == "enum" and isinstance(node, ast.ClassDef) and node.name == name:
+            return {
+                stmt.value.value
+                for stmt in node.body
+                if isinstance(stmt, ast.Assign)
+                and isinstance(stmt.value, ast.Constant)
+                and isinstance(stmt.value.value, str)
+            }
+        if kind != "enum" and isinstance(node, (ast.Assign, ast.AnnAssign)):
+            targets = node.targets if isinstance(node, ast.Assign) else [node.target]
+            if not any(isinstance(t, ast.Name) and t.id == name for t in targets):
+                continue
+            value = node.value
+            if isinstance(value, ast.Call) and value.args:  # frozenset({...})
+                value = value.args[0]
+            literal = ast.literal_eval(value)
+            return set(literal.values() if kind == "dict_values" else literal)
+    fail(f"{path} no longer defines {name!r}; it was renamed or moved, so update ENUM_SOURCES.")
+
+
+def resolve_enum(schemas, node):
+    """The `enum` list a schema node resolves to, following a `$ref` or a one-branch
+    `allOf` (the compose-with-a-`default` idiom), or None. Bounded against cycles."""
+    seen = set()
+    for _ in range(_MAX_REF_HOPS):
+        if not isinstance(node, dict):
+            return None
+        if node.get("enum"):
+            return node["enum"]
+        ref = node.get("$ref")
+        if ref is None:
+            branches = node.get("allOf")
+            if not isinstance(branches, list) or len(branches) != 1:
+                return None
+            node = branches[0]
+            continue
+        if not isinstance(ref, str) or not ref.startswith(_SCHEMA_REF_PREFIX) or ref in seen:
+            return None
+        seen.add(ref)
+        node = schemas.get(ref[len(_SCHEMA_REF_PREFIX) :])
+    return None
+
+
+def spec_enum(spec, location):
+    """The spec members at `location`, `null` dropped (it spells nullability, not a
+    member). None when the location is gone or no longer resolves to an enum."""
+    schemas = spec.get("components", {}).get("schemas", {})
+    if location[0] == "schema":
+        _, schema, prop = location
+        node = schemas.get(schema, {}).get("properties", {}).get(prop)
+    else:
+        _, op, pname = location
+        method, path = op.split(" ", 1)
+        node = None
+        operation = spec.get("paths", {}).get(path, {}).get(method.lower(), {})
+        shared = spec.get("components", {}).get("parameters", {})
+        for param in operation.get("parameters", []):
+            ref = param.get("$ref", "")
+            if ref.startswith("#/components/parameters/"):
+                param = shared.get(ref.rsplit("/", 1)[1], {})
+            if param.get("name") == pname:
+                node = param.get("schema")
+    members = resolve_enum(schemas, node) if node is not None else None
+    return {m for m in members if m is not None} if members else None
+
+
+def report_enum_delta(label, sdk, spec_set, ahead, ahead_desc):
+    """Bidirectional diff plus the two stale-allowlist checks. Returns error count."""
+    problems = [
+        (sorted(spec_set - sdk), "defines member(s) the SDK rejects (add them to the SDK)"),
+        (
+            sorted(sdk - spec_set - ahead),
+            f"lacks member(s) the SDK offers (removed or renamed upstream, or add to {ahead_desc})",
+        ),
+        (sorted(ahead & spec_set), f"now defines {ahead_desc} member(s) (remove them from it)"),
+        (sorted(ahead - sdk), f"has {ahead_desc} member(s) the SDK no longer models (remove them)"),
+    ]
+    errors = 0
+    for members, what in problems:
+        if members:
+            errors += len(members)
+            print(f"\nERROR: {label}: the pinned spec {what}:")
+            for m in members:
+                print(f"  - {m}")
+    return errors
+
+
+def spec_ws_channels(spec):
+    """WS channel names from the `GET /ws` description's two marker lines. The spec
+    carries channels as prose, so this fails loudly if the phrasing moves."""
+    desc = spec.get("paths", {}).get("/ws", {}).get("get", {}).get("description")
+    if not isinstance(desc, str):
+        fail("spec has no `GET /ws` description to read channels from; update spec_ws_channels().")
+    channels = set()
+    for marker in ("Public channels", "Per-account channels"):
+        m = re.search(r"\*\*" + marker + r"\*\*[^:]*:(.*)", desc)
+        if not m:
+            fail(f"no '{marker}' line in `GET /ws`'s description; update spec_ws_channels().")
+        # Only the leading list is the channel set; trailing prose (`market`, `engine`) is cut.
+        channels |= set(re.findall(r"`([a-z_]+)`", re.split(r"\s—\s|\s-\s|\.\s", m.group(1))[0]))
+    if not channels:
+        fail("parsed zero WS channels from `GET /ws`'s description; update spec_ws_channels().")
+    return channels
+
+
+def check_enums(spec, package=PACKAGE, sources=None, ahead=None, ws_ahead=None):
+    """Invariant 5: every closed set in ENUM_SOURCES, and ws.py's channel sets, hold
+    exactly the pinned spec's members (modulo the allowlists). Returns error count."""
+    sources = ENUM_SOURCES if sources is None else sources
+    ahead = ENUM_MEMBERS_AHEAD_OF_SPEC if ahead is None else ahead
+    ws_ahead = WS_CHANNELS_AHEAD_OF_SPEC if ws_ahead is None else ws_ahead
+    errors = 0
+    for label, (source, location) in sorted(sources.items()):
+        spec_set = spec_enum(spec, location)
+        if not spec_set:
+            errors += 1
+            print(f"\nERROR: {label}: spec {location} is gone or not an enum; update ENUM_SOURCES.")
+            continue
+        errors += report_enum_delta(
+            label,
+            sdk_members(package, source),
+            spec_set,
+            {m for (lbl, m) in ahead if lbl == label},
+            "ENUM_MEMBERS_AHEAD_OF_SPEC",
+        )
+    sdk_channels = sdk_members(package, ("ws.py", "set", "PUBLIC_CHANNELS")) | sdk_members(
+        package, ("ws.py", "set", "ACCOUNT_CHANNELS")
+    )
+    errors += report_enum_delta(
+        "WS channels (ws.PUBLIC_CHANNELS | ws.ACCOUNT_CHANNELS)",
+        sdk_channels,
+        spec_ws_channels(spec),
+        set(ws_ahead),
+        "WS_CHANNELS_AHEAD_OF_SPEC",
+    )
+    if not errors:
+        print(f"\nOK: all {len(sources)} closed enum set(s) and the WS channels match the spec.")
+    return errors
+
+
 def main():
     if len(sys.argv) != 2:
         sys.exit(f"usage: {sys.argv[0]} <openapi.json>")
@@ -1140,6 +1333,9 @@ def main():
 
     # Invariant 4: each requesting method's name <-> its operationId.
     failures += check_method_names(spec)
+
+    # Invariant 5: the SDK's closed enum sets <-> the spec's `enum` arrays.
+    failures += check_enums(spec)
 
     if failures:
         print(f"\nFAILED: {failures} drift error(s).")

@@ -31,9 +31,9 @@ from nexus_exchange import (
 )
 
 BASE = "http://localhost:9090"
-ORDER_HISTORY_URL = f"{BASE}/api/v1/orders/history"
-CLOSED_POSITIONS_URL = f"{BASE}/api/v1/positions/closed"
-EQUITY_HISTORY_URL = f"{BASE}/api/v1/account/equity-history"
+ORDER_HISTORY_URL = f"{BASE}/orders/history"
+CLOSED_POSITIONS_URL = f"{BASE}/positions/closed"
+EQUITY_HISTORY_URL = f"{BASE}/account/equity-history"
 
 # A well-formed 32-byte hex secret, matching the other signed-request tests.
 _SECRET = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
