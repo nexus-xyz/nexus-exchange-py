@@ -444,7 +444,8 @@ class Position:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Position:
         return cls(
-            market_id=str(d.get("market_id", "")),
+            # Served under CCXT's `symbol`; the pinned spec still says `market_id`.
+            market_id=str(d.get("symbol", d.get("market_id", ""))),
             side=str(d.get("side", "")),
             size=to_decimal(d.get("size", 0)),
             entry_price=to_decimal(d.get("entry_price", 0)),
@@ -957,7 +958,8 @@ class Order:
     def from_dict(cls, d: dict[str, Any]) -> Order:
         return cls(
             id=str(d.get("id", "")),
-            market_id=str(d.get("market_id", "")),
+            # Served under CCXT's `symbol`; the pinned spec still says `market_id`.
+            market_id=str(d.get("symbol", d.get("market_id", ""))),
             account_id=str(d.get("account_id", "")),
             side=str(d.get("side", "")),
             order_type=str(d.get("order_type", "")),
@@ -1012,7 +1014,8 @@ class OrderHistoryEntry:
     def from_dict(cls, d: dict[str, Any]) -> OrderHistoryEntry:
         return cls(
             id=str(d.get("id", "")),
-            market_id=str(d.get("market_id", "")),
+            # Served under CCXT's `symbol`; the pinned spec still says `market_id`.
+            market_id=str(d.get("symbol", d.get("market_id", ""))),
             side=str(d.get("side", "")),
             order_type=str(d.get("order_type", "")),
             # Nullable in the spec: market orders carry no limit price.
