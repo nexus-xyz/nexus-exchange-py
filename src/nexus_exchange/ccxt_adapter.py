@@ -308,10 +308,11 @@ class NexusExchange:
     # -- parsers (raw → CCXT unified) -------------------------------------
     def _parse_market(self, m: dict[str, Any]) -> dict[str, Any]:
         # Served as `id`/`base`/`quote`; the pinned spec's names are the fallback
-        # (see `Market`). No id is a decode error, not a market keyed "".
+        # (see `Market`). A missing identifier is a decode error, not a market
+        # keyed "" or a unified row carrying None.
         symbol = to_str(m.get("id", m.get("market_id")), "id")
-        base = m.get("base", m.get("base_asset"))
-        quote_asset = m.get("quote", m.get("quote_asset"))
+        base = to_str(m.get("base", m.get("base_asset")), "base")
+        quote_asset = to_str(m.get("quote", m.get("quote_asset")), "quote")
         return {
             "id": symbol,
             "symbol": symbol,

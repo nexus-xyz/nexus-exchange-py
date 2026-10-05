@@ -445,6 +445,8 @@ class Position:
     def from_dict(cls, d: dict[str, Any]) -> Position:
         return cls(
             # Served under CCXT's `symbol`; the pinned spec still says `market_id`.
+            # Left lenient on purpose: unlike `Market`, nothing builds a request path
+            # from a private record's id, so a missing one reads back as "".
             market_id=str(d.get("symbol", d.get("market_id", ""))),
             side=str(d.get("side", "")),
             size=to_decimal(d.get("size", 0)),
@@ -959,6 +961,8 @@ class Order:
         return cls(
             id=str(d.get("id", "")),
             # Served under CCXT's `symbol`; the pinned spec still says `market_id`.
+            # Left lenient on purpose: unlike `Market`, nothing builds a request path
+            # from a private record's id, so a missing one reads back as "".
             market_id=str(d.get("symbol", d.get("market_id", ""))),
             account_id=str(d.get("account_id", "")),
             side=str(d.get("side", "")),
@@ -1015,6 +1019,8 @@ class OrderHistoryEntry:
         return cls(
             id=str(d.get("id", "")),
             # Served under CCXT's `symbol`; the pinned spec still says `market_id`.
+            # Left lenient on purpose: unlike `Market`, nothing builds a request path
+            # from a private record's id, so a missing one reads back as "".
             market_id=str(d.get("symbol", d.get("market_id", ""))),
             side=str(d.get("side", "")),
             order_type=str(d.get("order_type", "")),
