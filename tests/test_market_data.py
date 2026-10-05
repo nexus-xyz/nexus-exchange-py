@@ -61,6 +61,13 @@ def test_fetch_markets_decodes_the_served_shape(httpx_mock) -> None:
     assert m.max_leverage == 50
 
 
+def test_market_falls_back_to_the_pinned_spec_names() -> None:
+    renamed = {"id": "market_id", "base": "base_asset", "quote": "quote_asset"}
+    spec_shaped = {renamed.get(k, k): v for k, v in SERVED_MARKET.items()}
+    m = Market.from_dict(spec_shaped)
+    assert (m.market_id, m.base_asset, m.quote_asset) == ("BTC-USDX-PERP", "BTC", "USDX")
+
+
 @pytest.mark.parametrize(
     ("model", "payload"),
     [
