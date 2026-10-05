@@ -793,5 +793,20 @@ nexus_exchange.WsToken.from_dict classmethod(d: dict[str, Any]) -> WsToken
 nexus_exchange.WsToken.raw field: dict[str, Any]
 nexus_exchange.WsToken.token field: str
 nexus_exchange.__version__ constant: str
+nexus_exchange.ccxt_adapter.NexusExchange class
+nexus_exchange.ccxt_adapter.NexusExchange(*, network: Network | NetworkConfig | str | None = None, base_url: str | None = None, client: Client | None = None) -> None
+nexus_exchange.ccxt_adapter.NexusExchange.__enter__ method(self) -> NexusExchange
+nexus_exchange.ccxt_adapter.NexusExchange.__exit__ method(self, *exc: object) -> None
+nexus_exchange.ccxt_adapter.NexusExchange.close method(self) -> None
+nexus_exchange.ccxt_adapter.NexusExchange.describe method(self) -> dict[str, Any]
+nexus_exchange.ccxt_adapter.NexusExchange.fetch_markets method(self, params: dict[str, Any] | None = None) -> list[dict[str, Any]]
+nexus_exchange.ccxt_adapter.NexusExchange.fetch_ohlcv method(self, symbol: str, timeframe: str = '1m', since: int | None = None, limit: int | None = None, params: dict[str, Any] | None = None) -> list[list[float]]
+nexus_exchange.ccxt_adapter.NexusExchange.fetch_order_book method(self, symbol: str, limit: int | None = None, params: dict[str, Any] | None = None) -> dict[str, Any]
+nexus_exchange.ccxt_adapter.NexusExchange.fetch_ticker method(self, symbol: str, params: dict[str, Any] | None = None) -> dict[str, Any]
+nexus_exchange.ccxt_adapter.NexusExchange.fetch_tickers method(self, symbols: list[str] | None = None, params: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]
+nexus_exchange.ccxt_adapter.NexusExchange.fetch_trades method(self, symbol: str, since: int | None = None, limit: int | None = None, params: dict[str, Any] | None = None) -> list[dict[str, Any]]
+nexus_exchange.ccxt_adapter.NexusExchange.load_markets method(self, reload: bool = False) -> dict[str, dict[str, Any]]
+nexus_exchange.ccxt_adapter.NexusExchange.markets attribute: dict[str, dict[str, Any]] (set in __init__)
+nexus_exchange.ccxt_adapter.NexusExchange.symbols attribute: list[str] (set in __init__)
 nexus_exchange.iter_items function(fetch_page: Callable[[str | None], Page[T]], *, cursor: str | None = None, max_pages: int | None = None) -> Iterator[T]
 nexus_exchange.iter_pages function(fetch_page: Callable[[str | None], Page[T]], *, cursor: str | None = None, max_pages: int | None = None) -> Iterator[Page[T]]

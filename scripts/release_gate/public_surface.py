@@ -6,7 +6,9 @@ into a clean venv, and runs this file there with ``python -I``. It refuses to ru
 but that install, so the listing is what a ``pip install nexus-exchange`` user gets, not the source
 tree.
 
-The surface is ``nexus_exchange.__all__``. One sorted line per item, ``<path> <kind><detail>``:
+The surface is the ``__all__`` of each module in ``MODULES``: the package itself, and
+``nexus_exchange.ccxt_adapter``, which the README tells users to import from directly. One sorted
+line per item, ``<path> <kind><detail>``:
 
 * every name with its kind (class, dataclass, enum, exception, function, type alias,
   constant);
@@ -42,6 +44,9 @@ from pathlib import Path
 from typing import Any
 
 PACKAGE = "nexus_exchange"
+# Every module a user is told to import from. A public module missing here is invisible to the
+# check: deleting it would pass (ENG-18798 review).
+MODULES = (PACKAGE, f"{PACKAGE}.ccxt_adapter")
 SNAPSHOT_PYTHON = (3, 12)
 
 # A default whose repr carries a memory address (a sentinel `object()`) differs on every run.
@@ -166,8 +171,7 @@ def member(path: str, cls: type, owner: type, name: str, raw: Any) -> str | None
     return f"{path}.{name} attribute: {kind}"
 
 
-def class_lines(name: str, cls: type) -> Iterator[str]:
-    path = f"{PACKAGE}.{name}"
+def class_lines(path: str, cls: type) -> Iterator[str]:
     bases = ", ".join(type_name(b) for b in cls.__bases__ if b is not object)
     if issubclass(cls, enum.Enum):
         kind = "enum"
@@ -221,22 +225,25 @@ def class_lines(name: str, cls: type) -> Iterator[str]:
                     yield f"{path}.{attr} attribute{': ' + note if note else ''} (set in __init__)"
 
 
-def surface(module: Any) -> list[str]:
+def surface(modules: list[Any]) -> list[str]:
     lines: list[str] = []
-    for name in module.__all__:
-        value = getattr(module, name)
-        if isinstance(value, type):
-            lines.extend(class_lines(name, value))
-        elif inspect.isfunction(value):
-            kind = "async function" if inspect.iscoroutinefunction(value) else "function"
-            lines.append(f"{PACKAGE}.{name} {kind}{signature(value)}")
-        elif typing.get_origin(value) is not None:
-            # `WsHealth = Literal[...]`: the alias's members are the API, not its typing class.
-            lines.append(f"{PACKAGE}.{name} type alias = {default(value)}")
-        else:
-            lines.append(f"{PACKAGE}.{name} constant: {type(value).__name__}")
-    if len(set(module.__all__)) != len(module.__all__):
-        lines.append(f"{PACKAGE}.__all__ has duplicate names")
+    for module in modules:
+        prefix = module.__name__
+        for name in module.__all__:
+            value = getattr(module, name)
+            path = f"{prefix}.{name}"
+            if isinstance(value, type):
+                lines.extend(class_lines(path, value))
+            elif inspect.isfunction(value):
+                kind = "async function" if inspect.iscoroutinefunction(value) else "function"
+                lines.append(f"{path} {kind}{signature(value)}")
+            elif typing.get_origin(value) is not None:
+                # `WsHealth = Literal[...]`: the alias's members are the API, not its typing class.
+                lines.append(f"{path} type alias = {default(value)}")
+            else:
+                lines.append(f"{path} constant: {type(value).__name__}")
+        if len(set(module.__all__)) != len(module.__all__):
+            lines.append(f"{prefix}.__all__ has duplicate names")
     return sorted(lines)
 
 
@@ -260,7 +267,16 @@ def main() -> int:
             file=sys.stderr,
         )
         return 2
-    sys.stdout.write("".join(line + "\n" for line in surface(module)))
+    # A listed module that no longer imports is a removal like any other: its lines drop out of
+    # the diff and one MISSING line says why, instead of the run dying on a traceback.
+    modules, missing = [module], []
+    for name in MODULES[1:]:
+        try:
+            modules.append(importlib.import_module(name))
+        except ImportError as err:
+            missing.append(f"{name} module MISSING: {err}")
+    lines = sorted(surface(modules) + missing)
+    sys.stdout.write("".join(line + "\n" for line in lines))
     return 0
 
 

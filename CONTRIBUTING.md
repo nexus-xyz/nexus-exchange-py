@@ -243,7 +243,12 @@ click is kept manual on purpose.
 - `spec-drift` and `drift`, as on every PR.
 
 `release.yml` refuses a release that a bot asks for unless the tag sits on the
-merge commit of a merged release PR. So only that merge, or a person, can publish.
+merge commit of a merged release PR. That guard lives in `release.yml` itself, and
+a tag push runs the copy at the tagged commit, so a bot could still tag an older
+commit without it. What closes that is a repo setting, asked for in ENG-19615:
+the `pypi` environment accepts only runs on `main`, where release-please
+dispatches the release. Once it is on, a pushed tag no longer reaches PyPI,
+whoever pushed it; publish it with **Actions → Release → Run workflow**.
 
 **Enriching the notes.** release-please generates one bullet per commit, which is
 thinner than the prose this changelog has carried. To do better, edit
