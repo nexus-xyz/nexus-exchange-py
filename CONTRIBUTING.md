@@ -240,6 +240,10 @@ click is kept manual on purpose.
   version on PyPI, graded by the monorepo's classifier
   (`scripts/release_gate/VENDORED.md`). Below 1.0 a breaking change needs a minor
   bump. *Could not classify* fails and needs a person.
+  And the public API change since then: a line of `public-api.txt` at the
+  published version's tag that this branch no longer has is a removed or
+  reshaped export, and needs the same bump. Releases before ENG-18798 carry no
+  `public-api.txt`, so that part starts with the first release after it.
 - `spec-drift` and `drift`, as on every PR.
 
 `release.yml` refuses a release that a bot asks for unless the tag sits on the
