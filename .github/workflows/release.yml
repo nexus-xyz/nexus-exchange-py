@@ -26,6 +26,8 @@ name: Release
 #   * release-please creates its GitHub release as a DRAFT; this workflow
 #     undrafts it only after the artifacts are attached, so a published release
 #     with no artifacts never exists.
+#   * A bot may only release the merge commit of a merged release PR (guard
+#     below, ENG-18798). A person's tag push or dispatch is not affected.
 #   * Least privilege: the default token is read-only; only the release job gets
 #     `contents: write` and only the publish job gets `id-token: write`.
 #   * PyPI publishing stays DORMANT until the maintainer sets the repo variable
@@ -56,6 +58,10 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
+    # Still read-only; `pull-requests: read` is for the bot guard below.
+    permissions:
+      contents: read
+      pull-requests: read
     outputs:
       tag: ${{ steps.resolve.outputs.tag }}
       version: ${{ steps.resolve.outputs.version }}
@@ -74,6 +80,42 @@ jobs:
           fi
           echo "tag=$RAW_TAG" >> "$GITHUB_OUTPUT"
           echo "version=${RAW_TAG#v}" >> "$GITHUB_OUTPUT"
+
+      # A bot may only release a merged release PR (ENG-18798). Any `v*` tag push
+      # runs this workflow, and PyPI never takes a version back, so a GitHub App
+      # holding Contents: write could otherwise publish any commit it can tag.
+      # When the actor is a bot, the tagged commit must be the merge commit of a
+      # merged `release-please--*` PR from this repo: a change a person reviewed
+      # and merged. release-please's own dispatch passes (github-actions[bot],
+      # tagging that merge). A person pushing a tag or dispatching by hand is not
+      # a bot and is not asked, so the fallback in CONTRIBUTING.md "Releasing"
+      # still works. Two reads: `contents: read` resolves the tag to its commit,
+      # `pull-requests: read` lists the PRs that commit belongs to.
+      - name: "Guard: a bot may only release a merged release PR"
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ACTOR: ${{ github.actor }}
+          TAG: ${{ steps.resolve.outputs.tag }}
+        run: |
+          set -euo pipefail
+          if [[ "$ACTOR" != *"[bot]" ]]; then
+            echo "Actor $ACTOR is not a bot; nothing to check."
+            exit 0
+          fi
+          # Under refs/tags/, so a branch with the tag's name cannot answer.
+          SHA="$(gh api "repos/${GITHUB_REPOSITORY}/commits/refs/tags/${TAG}" --jq '.sha')"
+          export SHA
+          pr="$(gh api "repos/${GITHUB_REPOSITORY}/commits/${SHA}/pulls" \
+            --jq '[.[]
+                   | select(.merged_at != null and .merge_commit_sha == env.SHA)
+                   | select(.head.ref | startswith("release-please--"))
+                   | select(.head.repo.full_name == env.GITHUB_REPOSITORY)]
+                  | first | .number // empty')"
+          if [ -z "$pr" ]; then
+            echo "::error::Refusing to release $TAG for $ACTOR: its commit $SHA is not the merge commit of a release-please PR. A bot may only release a merged release PR; a person can still push the tag by hand (CONTRIBUTING.md \"Releasing\")."
+            exit 1
+          fi
+          echo "$TAG is $SHA, the merge commit of release PR #$pr, so $ACTOR may release it."
 
       - uses: actions/checkout@v7
         with:
