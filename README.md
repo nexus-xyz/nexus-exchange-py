@@ -34,6 +34,24 @@ with Client() as client:  # defaults to the public gateway
     print(ticker.last, ticker.mark_price)
 ```
 
+For asyncio code (a bot that streams over `WsClient` and trades in the same
+event loop), `AsyncClient` is the same surface over `httpx.AsyncClient`: the same
+constructor, methods, signing, retries and errors, with every method awaited and
+the `iter_*` walkers returning async iterators:
+
+```python
+from nexus_exchange import AsyncClient
+
+async with AsyncClient() as client:
+    ticker = await client.fetch_ticker("BTC-USDX-PERP")
+    async for fill in client.iter_my_trades(limit=500):  # needs credentials
+        ...
+```
+
+Retry backoff uses `asyncio.sleep`, so it never blocks the loop. `AsyncClient`'s
+methods are generated from `Client`'s (`scripts/gen_async_client.py`); a change
+to `Client` is followed by a regeneration, which the tests enforce.
+
 No credentials are needed for market data. Runnable, copy-pasteable programs for
 the public and signed surface live in [`examples/`](./examples/) (config read
 from the environment — no secrets in source).
@@ -67,6 +85,7 @@ from the environment — no secrets in source).
 | Create API key — `POST /keys` | ✅ implemented (session-token authenticated: pass `login().token` to `create_api_key`) |
 | Venue / market info — `GET /stats`, `/stats/history`, `/status`, `/markets/{id}/risk-params`, `/markets/{id}/funding-samples` | ✅ implemented |
 | WebSocket streaming — `GET /ws` (async `WsClient`, multiplexed, auto-resume) | ✅ implemented (`pip install nexus-exchange[ws]`) |
+| Async REST client: every method above as a coroutine (`AsyncClient`, `httpx.AsyncClient`) | ✅ implemented |
 | Retry on transient `GET` failures (5xx / 408 / `429`, honours `Retry-After`) | ✅ implemented, **off by default** — opt in with `Client(retry=RetryConfig())`; no client-side token bucket yet |
 | OAuth auth | ❌ not yet |
 
@@ -691,6 +710,7 @@ pytest          # tests — unit (mocked httpx) + an integration smoke over a
                 # real loopback socket; both run offline, no network
 ruff check .    # lint
 mypy src        # types
+python scripts/gen_async_client.py  # after changing `Client`: regenerate AsyncClient
 ```
 
 `tests/test_integration_smoke.py` stands up a real local HTTP server and drives
