@@ -95,11 +95,11 @@ Anything not listed there is not wrapped yet — contributions welcome.
 
 Against the pinned spec (`.api-version`), that is **63 of 68 operations**. The
 legacy `POST /ws-tokens` is deliberately not wrapped. Of the other four uncovered
-operations, one is `GET /stream`, the public market-data WebSocket
-upgrade. `GET /ws` is covered by `WsClient` (see below), with a token from
-`create_ws_token()`. The other three are the `/bridge/wallets` operations, which
-this SDK does not wrap, the same as nexus-exchange-rs: EX-Bridge, wrapped under
-ENG-5639 not here.
+operations, one is `GET /stream`, the public market-data WebSocket upgrade, and
+three are the `/bridge/wallets` operations, which this SDK does not wrap, the
+same as nexus-exchange-rs: EX-Bridge, wrapped under ENG-5639 not here. The
+private WebSocket, `GET /ws`, is covered: `WsClient` (see below), with a token
+from `create_ws_token()`.
 
 **Migrating off the bridge wallet methods (ENG-18009).** `list_bridge_wallets`,
 `create_bridge_wallet_challenge` and `register_bridge_wallet` (with the
