@@ -232,3 +232,16 @@ jobs:
           # Idempotent: a re-run of an already-published version is a no-op
           # rather than a hard failure.
           skip-existing: true
+
+  # Publish the pdoc reference for this tag to GitHub Pages (ENG-20362). After
+  # github-release, so the docs never describe a release that is not public yet;
+  # independent of pypi-publish, which stays dormant until opted in.
+  docs:
+    needs: [build, github-release]
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/docs.yml
+    with:
+      ref: ${{ needs.build.outputs.tag }}

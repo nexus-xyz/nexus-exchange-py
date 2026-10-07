@@ -1,0 +1,63 @@
+name: Docs
+
+# pdoc API reference, published to GitHub Pages
+# (https://nexus-xyz.github.io/nexus-exchange-py/) (ENG-20362).
+#
+#   * pull_request: build only, so a change that breaks the doc build fails CI.
+#   * workflow_call: release.yml calls this once the release is public, with the
+#     tag to build. Not a `release: published` trigger: the release is undrafted
+#     with GITHUB_TOKEN, and events raised by that token start no workflow runs.
+#   * workflow_dispatch: rebuild and redeploy from the chosen ref by hand.
+#
+# Deploying needs Pages enabled with source "GitHub Actions" in repo settings.
+
+on:
+  pull_request:
+  workflow_call:
+    inputs:
+      ref:
+        description: "Ref to build (the release tag); defaults to the triggering commit"
+        required: false
+        type: string
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: docs-${{ github.event_name == 'pull_request' && github.ref || 'pages' }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ inputs.ref }}
+          persist-credentials: false
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+      # `ws` too: pdoc imports the package, and the WebSocket client's types
+      # should render the same way users see them.
+      - run: pip install ".[docs,ws]"
+      - run: pdoc nexus_exchange -o site
+      - if: github.event_name != 'pull_request'
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5
