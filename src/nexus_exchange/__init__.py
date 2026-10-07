@@ -48,6 +48,7 @@ from .errors import (
     RestrictedJurisdictionError,
     TransportError,
 )
+from .markets import round_price, round_size
 from .networks import (
     Funds,
     Network,
@@ -210,6 +211,8 @@ __all__ = [
     "PaginationError",
     "RestrictedJurisdictionError",
     "JURISDICTION_CODES",
+    "round_price",
+    "round_size",
     "Page",
     "iter_pages",
     "iter_items",
