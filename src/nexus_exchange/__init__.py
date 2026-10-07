@@ -7,10 +7,13 @@ See the README for the current support table. Quick start::
     with Client() as client:
         for market in client.fetch_markets():
             print(market.market_id)
+
+``AsyncClient`` is the same surface for asyncio code (``async with``, ``await``).
 """
 
 from __future__ import annotations
 
+from .async_client import AsyncClient
 from .auth import (
     SIGN_IN_MESSAGE,
     AgentRegistered,
@@ -55,7 +58,7 @@ from .networks import (
     NetworkConfig,
     SigningDomain,
 )
-from .pagination import Page, iter_items, iter_pages
+from .pagination import Page, aiter_items, aiter_pages, iter_items, iter_pages
 from .types import (
     AccountFees,
     AccountFunding,
@@ -131,6 +134,7 @@ __all__ = [
     "BridgeDeposit",
     "BridgeDepositAddress",
     "Client",
+    "AsyncClient",
     "Network",
     "RetryConfig",
     "NetworkConfig",
@@ -216,6 +220,8 @@ __all__ = [
     "Page",
     "iter_pages",
     "iter_items",
+    "aiter_pages",
+    "aiter_items",
     "ACCOUNT_FUNDING_LIMIT_MAX",
     "CLOSED_POSITIONS_LIMIT_MAX",
     "DEPOSITS_LIMIT_MAX",

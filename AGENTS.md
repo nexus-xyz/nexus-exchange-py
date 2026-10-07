@@ -28,6 +28,10 @@ The Python SDK for the Nexus Exchange API.
   both directions: every line exists in the pinned spec, and the operations the
   client requests are exactly that list. An operation the pinned spec doesn't
   define belongs in that script's `CODE_ONLY_OPS`, not in `endpoints.txt`.
+- `AsyncClient` (`src/nexus_exchange/async_client.py`) is generated from
+  `Client`. After any change to `Client`'s methods, run
+  `python scripts/gen_async_client.py`; never edit the generated file, and a
+  stale one fails `tests/test_async_client.py`.
 - Include the `/api/v1` prefix in an `endpoints.txt` line whenever the call passes
   `direct=True` — the prefix is part of the operation, and the spec lists the two
   surfaces separately.
