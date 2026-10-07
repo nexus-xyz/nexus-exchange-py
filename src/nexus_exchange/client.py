@@ -372,6 +372,35 @@ def _decode_body(resp: httpx.Response) -> Any:
         return resp.text
 
 
+def _next_cursor(resp: httpx.Response) -> str | None:
+    """The ``X-Next-Cursor`` header, or ``None`` when absent or blank.
+
+    Absent means "this was the last page", not a failure. A present-but-empty
+    header is treated as absent: an empty cursor cannot be sent back, so passing
+    it on would re-request the first page forever.
+    """
+    return (resp.headers.get(NEXT_CURSOR_HEADER) or "").strip() or None
+
+
+@dataclass(frozen=True)
+class _PreparedRequest:
+    """One request, validated and assembled once, re-sent unchanged per attempt.
+
+    Only the auth headers are rebuilt per attempt (see
+    :meth:`_ClientCore._attempt_headers`). ``content`` is ``None`` when there is
+    no body, which is also what decides the ``content-type`` header.
+    """
+
+    method: str
+    path: str
+    query: str
+    url: str
+    content: bytes | None
+    signed: bool
+    bearer: str | None
+    retryable: bool
+
+
 def _page_limit(limit: int | None, maximum: int, endpoint: str) -> int | None:
     """Validate a paginated list endpoint's ``limit`` against its spec maximum.
 
@@ -461,81 +490,14 @@ def _warn_renamed(old: str, new: str) -> None:
     )
 
 
-class Client:
-    """Client for the Nexus Exchange REST API.
+class _ClientCore:
+    """Everything :class:`Client` and :class:`~nexus_exchange.AsyncClient` share.
 
-    Public market-data methods need no credentials. Pass ``api_key`` +
-    ``api_secret`` (HMAC), **or** ``agent`` (a registered
-    :class:`~nexus_exchange.AgentSigner`), to sign requests — one request
-    credential per client, never both (see ``agent`` below). Note the public gateway proxies
-    signed calls to the *site* account; for per-account auth point ``base_url``
-    at a direct gateway (e.g. ``Network.LOCAL``). See the README.
-
-    ``network`` selects which network — whose money — the client talks to, and
-    defaults to :attr:`Network.TESTNET` (play funds). One client targets exactly
-    one network: credentials are minted per network and are invalid on any
-    other, so never reuse a key, signature or agent registration across clients
-    pointing at different networks.
-
-    It also accepts a :class:`NetworkConfig` directly, which is how a deployment
-    this SDK ships no hostname for is reached (ENG-9826)::
-
-        Client(NetworkConfig.custom(
-            label="dev",
-            funds=Funds.PLAY,          # required — there is no safe default
-            base_url="https://exchange.example.com",
-        ))
-
-    Every request goes to one base (:attr:`NetworkConfig.base_url`) plus the
-    spec's bare path, and is signed over that bare path. On the public hosts the
-    base is the spec's ``/v1`` REST base, which the edge strips before the
-    indexer verifies (EDR-006); a custom base's own path prefix must likewise be
-    one its deployment strips.
-
-    **A bare** ``base_url`` **with no network named is deprecated** (ENG-10955).
-    Use :meth:`NetworkConfig.custom` instead: it reaches the same target, but it
-    declares the funds, the faucet and the signing domain, which a bare URL
-    cannot. That is why the bare form builds a custom config with
-    :attr:`Funds.UNKNOWN` and no faucet — a URL on its own says nothing about
-    what is behind it, and the guardrails must not keep reporting play money
-    while pointed somewhere else.
-
-    It still works, unchanged, and deliberately does **not** warn at runtime —
-    the marker each SDK carries was chosen per ecosystem (decided once for the
-    five in ENG-10950), and Python's is prose. So a caller who never opens these
-    docs gets no signal at all, which is exactly why **removal has to be
-    preceded by a release that does warn**: a real ``DeprecationWarning``, which
-    Python shows by default when the caller is ``__main__``, i.e. in the local
-    scripts and notebooks this form exists for. Nothing is removed here, and
-    nothing is removed before that runway has shipped.
-
-    Deprecated is the *selector* — a URL that picks the target on its own —
-    not the modifier: a URL passed alongside a named network
-    (``Client(Network.LOCAL, base_url=...)``, which is also mainnet's required
-    override) keeps that network's funds semantics because the caller has
-    declared them. It stays.
-
-    **Agent keys** (``agent=``). Every ``signed`` request is then sent with the
-    ``agentAuth`` headers (``x-agent`` / ``x-timestamp`` / ``x-nonce`` /
-    ``x-signature``) instead of HMAC. Combining ``agent`` with ``api_key`` or
-    ``api_secret`` raises :class:`ValueError`: the two schemes share the
-    ``x-timestamp`` and ``x-signature`` header names, and the server tries the
-    agent first and falls back to HMAC, so a request carrying both would
-    present two identities and leave the server to pick. Pick one per client;
-    use two clients to hold both. The session bearer token is unaffected —
-    :meth:`create_api_key` sends only ``Authorization: Bearer`` whichever
-    request credential the client holds.
-
-    Agent keys are trade-only: an agent client refuses withdrawals, agent
-    management (:meth:`fetch_agents`, :meth:`revoke_agent`) locally with
-    :class:`~nexus_exchange.AgentKeyRefusedError`, before signing. Writes from
-    one agent key in flight concurrently can be refused as nonce replays
-    (ENG-17010); see :class:`~nexus_exchange.AgentSigner`.
-
-    Usable as a context manager::
-
-        with Client() as client:
-            markets = client.fetch_markets()
+    Configuration, credentials, signing, the retry policy and the error mapping
+    live here, so both clients behave identically by construction. Only the I/O
+    differs: each subclass owns an ``httpx`` client and a ``_send`` loop that
+    calls :meth:`_prepare`, :meth:`_attempt_headers` and the two
+    ``_*_retry_delay`` methods around its one request call (ENG-20361).
     """
 
     def __init__(
@@ -546,8 +508,6 @@ class Client:
         api_key: str | None = None,
         api_secret: str | None = None,
         api_version: str | None = None,
-        timeout: float = DEFAULT_TIMEOUT,
-        http_client: httpx.Client | None = None,
         retry: RetryConfig | None = None,
         agent: AgentSigner | None = None,
     ) -> None:
@@ -576,7 +536,7 @@ class Client:
         # than sending an empty header.
         self._api_version = (api_version or "").strip() or DEFAULT_API_VERSION
         # Emitted on every request, whether the httpx client is owned or
-        # caller-supplied. Copied per request in ``_request`` so the per-call
+        # caller-supplied. Copied per attempt in ``_attempt_headers`` so the per-call
         # content-type / signing headers never mutate this shared dict.
         self._default_headers = {
             "user-agent": DEFAULT_USER_AGENT,
@@ -584,12 +544,9 @@ class Client:
         }
         # Off unless the caller opts in: one attempt per request by default.
         self._retry = retry if retry is not None else RetryConfig(max_retries=0)
-        self._owns_http = http_client is None
-        self._http = http_client or httpx.Client(timeout=timeout)
-        # Injectable so tests record backoff delays, control jitter, and advance
-        # the signing clock without real waiting or nondeterminism; production
-        # uses the real clock/RNG.
-        self._sleep: Callable[[float], None] = time.sleep
+        # Injectable so tests control jitter and advance the signing clock
+        # without nondeterminism; production uses the real clock/RNG. Each
+        # subclass adds its own `_sleep` (blocking or awaitable).
         self._rand: Callable[[], float] = random.random
         self._now_ms: Callable[[], int] = lambda: int(time.time() * 1000)
 
@@ -683,17 +640,6 @@ class Client:
             )
         return _clean_base_url(base, param)
 
-    # -- lifecycle --------------------------------------------------------
-    def close(self) -> None:
-        if self._owns_http:
-            self._http.close()
-
-    def __enter__(self) -> Client:
-        return self
-
-    def __exit__(self, *exc: object) -> None:
-        self.close()
-
     @property
     def has_credentials(self) -> bool:
         """Whether this client can send ``signed`` requests (HMAC or agent key)."""
@@ -734,6 +680,316 @@ class Client:
         trailing slash — rather than the string that was passed in.
         """
         return self._base_url
+
+    # -- request plumbing (I/O-free) -------------------------------------
+    def _sign(self, method: str, path: str, query: str, body: bytes) -> dict[str, str]:
+        """Auth headers for one attempt of a ``signed`` request.
+
+        Called once per attempt, so every retry gets a fresh timestamp — and,
+        for an agent key, a fresh nonce.
+        """
+        if self._agent is not None:
+            return self._agent.headers(method, path, query, body, self._now_ms())
+        if not self._api_key or not self._api_secret:
+            raise MissingCredentialsError(
+                "signed request requires api_key and api_secret, or an agent key"
+            )
+        ts = str(self._now_ms())
+        body_hash = hashlib.sha256(body).hexdigest()
+        # Canonical string the indexer verifies (auth.rs::verify_hmac):
+        #   <ts>\n<METHOD>\n<path>\n<query>\n<sha256hex(body)>
+        canonical = "\n".join([ts, method.upper(), path, query, body_hash])
+        signature = hmac.new(
+            bytes.fromhex(self._api_secret), canonical.encode(), hashlib.sha256
+        ).hexdigest()
+        return {"x-api-key": self._api_key, "x-timestamp": ts, "x-signature": signature}
+
+    def _backoff_delay(self, attempt: int) -> float:
+        """Exponential backoff (seconds) before retry ``attempt`` (0-indexed).
+
+        ``min(min_delay * factor**attempt, max_delay)``, then full jitter —
+        uniform in ``[0, base]`` — so many clients failing at once don't
+        synchronize into a thundering herd.
+        """
+        base = min(self._retry.min_delay * (self._retry.factor**attempt), self._retry.max_delay)
+        return base * self._rand() if self._retry.jitter else base
+
+    @staticmethod
+    def _parse_retry_after(value: str | None) -> int | None:
+        """Parse a ``Retry-After`` header (integer seconds) to milliseconds.
+
+        Only the integer-seconds form is honored — the server sends that; an
+        HTTP-date form is ignored rather than mis-parsed.
+        """
+        if not value:
+            return None
+        try:
+            secs = int(value.strip())
+        except ValueError:
+            return None
+        return max(0, secs) * 1000
+
+    def _prepare(
+        self,
+        method: str,
+        path: str,
+        *,
+        query: str,
+        body: Any | None,
+        signed: bool,
+        bearer: str | None,
+    ) -> _PreparedRequest:
+        """Validate and assemble one request, once, before any attempt is made."""
+        # One base for every request (EDR-006): the path is the spec path the
+        # server verifies, and the base's own prefix (`/v1`) is stripped at the
+        # edge, so the same value is both signed and appended to the base.
+        full_path = path
+
+        # HMAC and session-bearer are alternative credentials for the same
+        # request, never both. `POST /keys` is the single operation the pinned
+        # spec puts behind `bearerAuth`; sending an HMAC signature alongside the
+        # session token would present two identities for one call and leave the
+        # server to pick. Refusing here keeps that choice from ever being made
+        # implicitly. Unreachable from the public surface — no method passes
+        # both — so this guards the plumbing, not the caller.
+        if signed and bearer is not None:
+            raise ValueError("a request cannot be both HMAC-signed and bearer-authenticated")
+        # Agent keys are trade-only. Refuse what the server would 403 before
+        # signing, so a refused call never consumes a nonce.
+        if signed and self._agent is not None:
+            refusal = _agent_refusal(method, full_path)
+            if refusal is not None:
+                raise AgentKeyRefusedError(method.upper(), full_path, refusal)
+
+        # Build the URL by hand so the signed query matches the sent query byte
+        # for byte (no client-side re-encoding).
+        url = f"{self._base_url}{full_path}"
+        if query:
+            url = f"{url}?{query}"
+
+        return _PreparedRequest(
+            method=method,
+            path=full_path,
+            query=query,
+            url=url,
+            content=None if body is None else json.dumps(body).encode(),
+            signed=signed,
+            bearer=bearer,
+            # Only idempotent (GET) requests are auto-retried (ENG-5295); a
+            # retried write could double-submit if the first attempt's response
+            # was lost in transit, so POST/PATCH/PUT/DELETE always surface the
+            # first failure.
+            retryable=method.upper() in _IDEMPOTENT_METHODS,
+        )
+
+    def _attempt_headers(self, req: _PreparedRequest) -> dict[str, str]:
+        """Headers for one attempt of ``req``.
+
+        Seeded from the defaults (User-Agent + X-Nexus-Api-Version) so both ride
+        along on every request; copied so per-call headers stay local. Rebuilt
+        every attempt: the HMAC timestamp must be fresh, or a retry after backoff
+        would present a stale (server-rejected) signature. An agent key also
+        issues a fresh nonce per attempt.
+        """
+        headers: dict[str, str] = dict(self._default_headers)
+        if req.content is not None:
+            headers["content-type"] = "application/json"
+        if req.signed:
+            headers.update(self._sign(req.method, req.path, req.query, req.content or b""))
+        elif req.bearer is not None:
+            headers["authorization"] = f"Bearer {req.bearer}"
+        return headers
+
+    def _transport_retry_delay(
+        self, req: _PreparedRequest, attempt: int, exc: httpx.HTTPError
+    ) -> float:
+        """Backoff before retrying a transport failure, or raise it as final."""
+        if req.retryable and attempt < self._retry.max_retries:
+            return self._backoff_delay(attempt)
+        raise TransportError(str(exc)) from exc
+
+    def _response_retry_delay(
+        self, req: _PreparedRequest, attempt: int, resp: httpx.Response
+    ) -> float | None:
+        """``None`` for a 2xx/3xx, a backoff to sleep before retrying, or raise.
+
+        Raises :class:`RestrictedJurisdictionError` / :class:`ApiError` for a
+        final failure, so the caller's ``_send`` only decides how to sleep.
+        """
+        if resp.status_code < 400:
+            return None
+
+        code: str | None = None
+        message: str | None = None
+        try:
+            parsed = resp.json()
+            if isinstance(parsed, dict):
+                code = parsed.get("code")
+                message = parsed.get("message")
+        except ValueError:
+            pass
+
+        # A jurisdiction refusal gets its own type: it is permanent for the
+        # caller's origin, so it is not a 403 to surface and retry later.
+        #
+        # Discriminated on the header first, because `x-nexus-block-reason`
+        # is only ever sent by a jurisdiction control — that makes it proof
+        # on its own, and it holds even when the body is missing, truncated
+        # or not JSON. The body `code` is the fallback for a deployment or
+        # proxy that drops the header. Both are needed: 403 alone would
+        # wrongly capture `credits_frozen` (the other 403 on
+        # `POST /account/credit`) and the admin-secret 403.
+        #
+        # The header test is truthiness, not presence: a header sent with an
+        # empty (or whitespace-only) value is malformed and carries no reason
+        # to branch on, so it is treated as absent and the body `code` decides
+        # — same normalization `_next_cursor` applies to `X-Next-Cursor`.
+        # Stripping also keeps a padded value comparable, since callers branch
+        # on `block_reason` by equality.
+        block_reason = (resp.headers.get("x-nexus-block-reason") or "").strip() or None
+        if resp.status_code == 403 and (block_reason or code in JURISDICTION_CODES):
+            raise RestrictedJurisdictionError(
+                resp.status_code,
+                resp.text[:2000],
+                code=code,
+                message=message,
+                block_reason=block_reason,
+            )
+
+        retry_after_ms = self._parse_retry_after(resp.headers.get("retry-after"))
+        status = resp.status_code
+        is_transient = status >= 500 or status in (408, 429)
+        if req.retryable and is_transient and attempt < self._retry.max_retries:
+            delay = self._backoff_delay(attempt)
+            # A 429's Retry-After raises the floor (clamped so a bogus hint
+            # can't stall the caller); backoff still applies to 5xx/408.
+            if status == 429 and retry_after_ms is not None:
+                delay = max(delay, min(retry_after_ms / 1000.0, RETRY_AFTER_MAX_SECONDS))
+            return delay
+
+        raise ApiError(
+            status,
+            resp.text[:2000],
+            code=code,
+            message=message,
+            retry_after_ms=retry_after_ms,
+        )
+
+
+class Client(_ClientCore):
+    """Client for the Nexus Exchange REST API.
+
+    Public market-data methods need no credentials. Pass ``api_key`` +
+    ``api_secret`` (HMAC), **or** ``agent`` (a registered
+    :class:`~nexus_exchange.AgentSigner`), to sign requests — one request
+    credential per client, never both (see ``agent`` below). Note the public gateway proxies
+    signed calls to the *site* account; for per-account auth point ``base_url``
+    at a direct gateway (e.g. ``Network.LOCAL``). See the README.
+
+    ``network`` selects which network — whose money — the client talks to, and
+    defaults to :attr:`Network.TESTNET` (play funds). One client targets exactly
+    one network: credentials are minted per network and are invalid on any
+    other, so never reuse a key, signature or agent registration across clients
+    pointing at different networks.
+
+    It also accepts a :class:`NetworkConfig` directly, which is how a deployment
+    this SDK ships no hostname for is reached (ENG-9826)::
+
+        Client(NetworkConfig.custom(
+            label="dev",
+            funds=Funds.PLAY,          # required — there is no safe default
+            base_url="https://exchange.example.com",
+        ))
+
+    Every request goes to one base (:attr:`NetworkConfig.base_url`) plus the
+    spec's bare path, and is signed over that bare path. On the public hosts the
+    base is the spec's ``/v1`` REST base, which the edge strips before the
+    indexer verifies (EDR-006); a custom base's own path prefix must likewise be
+    one its deployment strips.
+
+    **A bare** ``base_url`` **with no network named is deprecated** (ENG-10955).
+    Use :meth:`NetworkConfig.custom` instead: it reaches the same target, but it
+    declares the funds, the faucet and the signing domain, which a bare URL
+    cannot. That is why the bare form builds a custom config with
+    :attr:`Funds.UNKNOWN` and no faucet — a URL on its own says nothing about
+    what is behind it, and the guardrails must not keep reporting play money
+    while pointed somewhere else.
+
+    It still works, unchanged, and deliberately does **not** warn at runtime —
+    the marker each SDK carries was chosen per ecosystem (decided once for the
+    five in ENG-10950), and Python's is prose. So a caller who never opens these
+    docs gets no signal at all, which is exactly why **removal has to be
+    preceded by a release that does warn**: a real ``DeprecationWarning``, which
+    Python shows by default when the caller is ``__main__``, i.e. in the local
+    scripts and notebooks this form exists for. Nothing is removed here, and
+    nothing is removed before that runway has shipped.
+
+    Deprecated is the *selector* — a URL that picks the target on its own —
+    not the modifier: a URL passed alongside a named network
+    (``Client(Network.LOCAL, base_url=...)``, which is also mainnet's required
+    override) keeps that network's funds semantics because the caller has
+    declared them. It stays.
+
+    **Agent keys** (``agent=``). Every ``signed`` request is then sent with the
+    ``agentAuth`` headers (``x-agent`` / ``x-timestamp`` / ``x-nonce`` /
+    ``x-signature``) instead of HMAC. Combining ``agent`` with ``api_key`` or
+    ``api_secret`` raises :class:`ValueError`: the two schemes share the
+    ``x-timestamp`` and ``x-signature`` header names, and the server tries the
+    agent first and falls back to HMAC, so a request carrying both would
+    present two identities and leave the server to pick. Pick one per client;
+    use two clients to hold both. The session bearer token is unaffected —
+    :meth:`create_api_key` sends only ``Authorization: Bearer`` whichever
+    request credential the client holds.
+
+    Agent keys are trade-only: an agent client refuses withdrawals, agent
+    management (:meth:`fetch_agents`, :meth:`revoke_agent`) locally with
+    :class:`~nexus_exchange.AgentKeyRefusedError`, before signing. Writes from
+    one agent key in flight concurrently can be refused as nonce replays
+    (ENG-17010); see :class:`~nexus_exchange.AgentSigner`.
+
+    Usable as a context manager::
+
+        with Client() as client:
+            markets = client.fetch_markets()
+    """
+
+    def __init__(
+        self,
+        network: Network | NetworkConfig | str | None = None,
+        *,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        api_secret: str | None = None,
+        api_version: str | None = None,
+        timeout: float = DEFAULT_TIMEOUT,
+        http_client: httpx.Client | None = None,
+        retry: RetryConfig | None = None,
+        agent: AgentSigner | None = None,
+    ) -> None:
+        super().__init__(
+            network,
+            base_url=base_url,
+            api_key=api_key,
+            api_secret=api_secret,
+            api_version=api_version,
+            retry=retry,
+            agent=agent,
+        )
+        self._owns_http = http_client is None
+        self._http = http_client or httpx.Client(timeout=timeout)
+        # Injectable so tests record backoff delays without real waiting.
+        self._sleep: Callable[[float], None] = time.sleep
+
+    # -- lifecycle --------------------------------------------------------
+    def close(self) -> None:
+        if self._owns_http:
+            self._http.close()
+
+    def __enter__(self) -> Client:
+        return self
+
+    def __exit__(self, *exc: object) -> None:
+        self.close()
 
     # -- public market data ----------------------------------------------
     def fetch_markets(self) -> list[Market]:
@@ -1777,7 +2033,10 @@ class Client:
         when upgrading to ``GET /ws``, and mint a fresh one per connection.
         :class:`~nexus_exchange.ws.WsClient` does both for you: pass
         ``token_provider=lambda: client.create_ws_token().token`` and it re-mints
-        on every (re)connect.
+        on every (re)connect. With :class:`~nexus_exchange.AsyncClient`, pass an
+        ``async def`` that returns ``(await client.create_ws_token()).token``
+        instead: ``WsClient`` awaits a coroutine function, and runs anything else
+        in a worker thread.
         """
         data = self._request("POST", "/ws/token", signed=True)
         return WsToken.from_dict(data if isinstance(data, dict) else {})
@@ -1918,53 +2177,6 @@ class Client:
     list_bridge_deposit_addresses = fetch_bridge_deposit_addresses
 
     # -- request plumbing -------------------------------------------------
-    def _sign(self, method: str, path: str, query: str, body: bytes) -> dict[str, str]:
-        """Auth headers for one attempt of a ``signed`` request.
-
-        Called once per attempt, so every retry gets a fresh timestamp — and,
-        for an agent key, a fresh nonce.
-        """
-        if self._agent is not None:
-            return self._agent.headers(method, path, query, body, self._now_ms())
-        if not self._api_key or not self._api_secret:
-            raise MissingCredentialsError(
-                "signed request requires api_key and api_secret, or an agent key"
-            )
-        ts = str(self._now_ms())
-        body_hash = hashlib.sha256(body).hexdigest()
-        # Canonical string the indexer verifies (auth.rs::verify_hmac):
-        #   <ts>\n<METHOD>\n<path>\n<query>\n<sha256hex(body)>
-        canonical = "\n".join([ts, method.upper(), path, query, body_hash])
-        signature = hmac.new(
-            bytes.fromhex(self._api_secret), canonical.encode(), hashlib.sha256
-        ).hexdigest()
-        return {"x-api-key": self._api_key, "x-timestamp": ts, "x-signature": signature}
-
-    def _backoff_delay(self, attempt: int) -> float:
-        """Exponential backoff (seconds) before retry ``attempt`` (0-indexed).
-
-        ``min(min_delay * factor**attempt, max_delay)``, then full jitter —
-        uniform in ``[0, base]`` — so many clients failing at once don't
-        synchronize into a thundering herd.
-        """
-        base = min(self._retry.min_delay * (self._retry.factor**attempt), self._retry.max_delay)
-        return base * self._rand() if self._retry.jitter else base
-
-    @staticmethod
-    def _parse_retry_after(value: str | None) -> int | None:
-        """Parse a ``Retry-After`` header (integer seconds) to milliseconds.
-
-        Only the integer-seconds form is honored — the server sends that; an
-        HTTP-date form is ignored rather than mis-parsed.
-        """
-        if not value:
-            return None
-        try:
-            secs = int(value.strip())
-        except ValueError:
-            return None
-        return max(0, secs) * 1000
-
     def _send(
         self,
         method: str,
@@ -1979,130 +2191,25 @@ class Client:
 
         Split out of :meth:`_request` so the paginated readers can see the
         ``X-Next-Cursor`` *header* as well as the body — signing, routing, and
-        error mapping stay in one place for every caller.
+        error mapping stay in one place for every caller. Everything but the
+        request call and the sleep is :class:`_ClientCore`'s, shared with
+        :class:`~nexus_exchange.AsyncClient`.
         """
-        # One base for every request (EDR-006): the path is the spec path the
-        # server verifies, and the base's own prefix (`/v1`) is stripped at the
-        # edge, so the same value is both signed and appended to the base.
-        base = self._base_url
-        full_path = path
-
-        body_bytes = b"" if body is None else json.dumps(body).encode()
-        # HMAC and session-bearer are alternative credentials for the same
-        # request, never both. `POST /keys` is the single operation the pinned
-        # spec puts behind `bearerAuth`; sending an HMAC signature alongside the
-        # session token would present two identities for one call and leave the
-        # server to pick. Refusing here keeps that choice from ever being made
-        # implicitly. Unreachable from the public surface — no method passes
-        # both — so this guards the plumbing, not the caller.
-        if signed and bearer is not None:
-            raise ValueError("a request cannot be both HMAC-signed and bearer-authenticated")
-        # Agent keys are trade-only. Refuse what the server would 403 before
-        # signing, so a refused call never consumes a nonce.
-        if signed and self._agent is not None:
-            refusal = _agent_refusal(method, full_path)
-            if refusal is not None:
-                raise AgentKeyRefusedError(method.upper(), full_path, refusal)
-
-        # Build the URL by hand so the signed query matches the sent query byte
-        # for byte (no client-side re-encoding).
-        url = f"{base}{full_path}"
-        if query:
-            url = f"{url}?{query}"
-
-        # Only idempotent (GET) requests are auto-retried (ENG-5295); a retried
-        # write could double-submit if the first attempt's response was lost in
-        # transit, so POST/PATCH/PUT/DELETE always surface the first failure.
-        retryable = method.upper() in _IDEMPOTENT_METHODS
+        req = self._prepare(method, path, query=query, body=body, signed=signed, bearer=bearer)
         attempt = 0
         while True:
-            # Seed from the defaults (User-Agent + X-Nexus-Api-Version) so both
-            # ride along on every request; copy so per-call headers stay local.
-            # Rebuilt every attempt: the HMAC timestamp must be fresh, or a retry
-            # after backoff would present a stale (server-rejected) signature.
-            # An agent key also issues a fresh nonce per attempt.
-            headers: dict[str, str] = dict(self._default_headers)
-            if body is not None:
-                headers["content-type"] = "application/json"
-            if signed:
-                headers.update(self._sign(method, full_path, query, body_bytes))
-            elif bearer is not None:
-                headers["authorization"] = f"Bearer {bearer}"
-
+            headers = self._attempt_headers(req)
             try:
-                resp = self._http.request(
-                    method,
-                    url,
-                    headers=headers,
-                    content=body_bytes if body is not None else None,
-                )
+                resp = self._http.request(method, req.url, headers=headers, content=req.content)
             except httpx.HTTPError as exc:
-                if retryable and attempt < self._retry.max_retries:
-                    self._sleep(self._backoff_delay(attempt))
-                    attempt += 1
-                    continue
-                raise TransportError(str(exc)) from exc
-
-            if resp.status_code < 400:
-                return resp
-
-            code: str | None = None
-            message: str | None = None
-            try:
-                parsed = resp.json()
-                if isinstance(parsed, dict):
-                    code = parsed.get("code")
-                    message = parsed.get("message")
-            except ValueError:
-                pass
-
-            # A jurisdiction refusal gets its own type: it is permanent for the
-            # caller's origin, so it is not a 403 to surface and retry later.
-            #
-            # Discriminated on the header first, because `x-nexus-block-reason`
-            # is only ever sent by a jurisdiction control — that makes it proof
-            # on its own, and it holds even when the body is missing, truncated
-            # or not JSON. The body `code` is the fallback for a deployment or
-            # proxy that drops the header. Both are needed: 403 alone would
-            # wrongly capture `credits_frozen` (the other 403 on
-            # `POST /account/credit`) and the admin-secret 403.
-            #
-            # The header test is truthiness, not presence: a header sent with an
-            # empty (or whitespace-only) value is malformed and carries no reason
-            # to branch on, so it is treated as absent and the body `code` decides
-            # — same normalization `_request_page` applies to `X-Next-Cursor`.
-            # Stripping also keeps a padded value comparable, since callers branch
-            # on `block_reason` by equality.
-            block_reason = (resp.headers.get("x-nexus-block-reason") or "").strip() or None
-            if resp.status_code == 403 and (block_reason or code in JURISDICTION_CODES):
-                raise RestrictedJurisdictionError(
-                    resp.status_code,
-                    resp.text[:2000],
-                    code=code,
-                    message=message,
-                    block_reason=block_reason,
-                )
-
-            retry_after_ms = self._parse_retry_after(resp.headers.get("retry-after"))
-            status = resp.status_code
-            is_transient = status >= 500 or status in (408, 429)
-            if retryable and is_transient and attempt < self._retry.max_retries:
-                delay = self._backoff_delay(attempt)
-                # A 429's Retry-After raises the floor (clamped so a bogus hint
-                # can't stall the caller); backoff still applies to 5xx/408.
-                if status == 429 and retry_after_ms is not None:
-                    delay = max(delay, min(retry_after_ms / 1000.0, RETRY_AFTER_MAX_SECONDS))
-                self._sleep(delay)
-                attempt += 1
-                continue
-
-            raise ApiError(
-                status,
-                resp.text[:2000],
-                code=code,
-                message=message,
-                retry_after_ms=retry_after_ms,
-            )
+                delay = self._transport_retry_delay(req, attempt, exc)
+            else:
+                retry_delay = self._response_retry_delay(req, attempt, resp)
+                if retry_delay is None:
+                    return resp
+                delay = retry_delay
+            self._sleep(delay)
+            attempt += 1
 
     def _request(
         self,
@@ -2133,5 +2240,4 @@ class Client:
         on would re-request the first page forever.
         """
         resp = self._send("GET", path, query=query, signed=signed)
-        cursor = (resp.headers.get(NEXT_CURSOR_HEADER) or "").strip() or None
-        return _decode_body(resp), cursor
+        return _decode_body(resp), _next_cursor(resp)
