@@ -18,7 +18,10 @@ from nexus_exchange import (
     Client,
     MissingCredentialsError,
     Network,
+    Order,
+    OrderHistoryEntry,
     OrderRequest,
+    Position,
 )
 
 _SECRET = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
@@ -422,3 +425,11 @@ def test_signed_endpoint_without_credentials_raises() -> None:
     with Client(Network.LOCAL) as client:
         with pytest.raises(MissingCredentialsError):
             client.fetch_balance()
+
+
+@pytest.mark.parametrize("model", [Position, Order, OrderHistoryEntry])
+def test_private_records_read_the_served_symbol(model) -> None:
+    # The indexer serves these under CCXT's `symbol` (ENG-15117); the pinned
+    # spec's `market_id` is the fallback.
+    assert model.from_dict({"symbol": "BTC-USDX-PERP"}).market_id == "BTC-USDX-PERP"
+    assert model.from_dict({"market_id": "BTC-USDX-PERP"}).market_id == "BTC-USDX-PERP"
