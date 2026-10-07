@@ -9,7 +9,7 @@ name = "nexus-exchange"
 # `_resolve_version` fallback literal in src/nexus_exchange/client.py and
 # .release-please-manifest.json, so all three stay in step.
 version = "0.7.0"
-description = "Official Python SDK for the Nexus Exchange API (experimental)"
+description = "Official Python SDK for the Nexus Exchange API (beta)"
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT OR Apache-2.0"
@@ -17,7 +17,7 @@ license-files = ["LICENSE-MIT", "LICENSE-APACHE"]
 keywords = ["nexus", "exchange", "trading", "crypto", "perpetuals"]
 authors = [{ name = "Nexus" }]
 classifiers = [
-  "Development Status :: 3 - Alpha",
+  "Development Status :: 4 - Beta",
   "Intended Audience :: Developers",
   "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",

@@ -9,18 +9,19 @@ thin, typed wrapper over the public REST API.
 [pdoc](https://pdoc.dev) from the docstrings and republished on every release
 (`pip install -e ".[docs,ws]" && pdoc nexus_exchange -o site` builds it locally).
 
-> **⚠️ Experimental / in development.** This is an early skeleton. The surface is
-> small and may change without notice; only the endpoints in the table below are
-> implemented. For the complete, ahead-of-this surface use the
-> [Rust SDK](https://github.com/nexus-xyz/nexus-exchange-rs). This SDK exists so
-> agents and bots can be written in **Python or Rust** depending on the
-> libraries they need.
+> **Status: beta.** Pre-1.0: the API may change between minor versions. Built
+> and tested against testnet; mainnet is not live yet.
+>
+> Covers **63 of the 68 operations** in the pinned spec (`.api-version`),
+> listed in [`endpoints.txt`](./endpoints.txt) and checked against the
+> spec in CI; see [What's supported](#whats-supported) for the five it does not
+> wrap. Sync `Client` and `AsyncClient`, a WebSocket client, cursor pagination,
+> and wallet and agent-key signing all ship.
 
 ## Install
 
 ```bash
-pip install nexus-exchange   # once published; for now, install from source:
-pip install git+https://github.com/nexus-xyz/nexus-exchange-py
+pip install nexus-exchange
 ```
 
 Requires Python **3.10+**. Depends only on [`httpx`](https://www.python-httpx.org/).
@@ -97,13 +98,13 @@ from the environment — no secrets in source).
 The hand-maintained coverage source of truth is [`endpoints.txt`](./endpoints.txt).
 Anything not listed there is not wrapped yet — contributions welcome.
 
-Against the pinned spec (`.api-version`), that is **63 of 67 operations**, not
-counting the legacy `POST /ws-tokens`, which is deliberately not wrapped. One of
-the four uncovered operations is `GET /stream`, the public market-data WebSocket
-upgrade. `GET /ws` is covered by `WsClient` (see below), with a token from
-`create_ws_token()`. The other three are the `/bridge/wallets` operations, which
-this SDK does not wrap, the same as nexus-exchange-rs: EX-Bridge, wrapped under
-ENG-5639 not here.
+Against the pinned spec (`.api-version`), that is **63 of 68 operations**. The
+legacy `POST /ws-tokens` is deliberately not wrapped. Of the other four uncovered
+operations, one is `GET /stream`, the public market-data WebSocket upgrade, and
+three are the `/bridge/wallets` operations, which this SDK does not wrap, the
+same as nexus-exchange-rs: EX-Bridge, wrapped under ENG-5639 not here. The
+private WebSocket, `GET /ws`, is covered: `WsClient` (see below), with a token
+from `create_ws_token()`.
 
 **Migrating off the bridge wallet methods (ENG-18009).** `list_bridge_wallets`,
 `create_bridge_wallet_challenge` and `register_bridge_wallet` (with the
