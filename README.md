@@ -77,6 +77,7 @@ from the environment — no secrets in source).
 | CCXT-compatible adapter — public market data | ✅ implemented, frozen: no private methods; superseded by upstream `ccxt.nexus`, see [CCXT compatibility](#ccxt-compatibility) |
 | Error taxonomy (terminal vs transient, incl. the jurisdiction `403`) | ✅ implemented |
 | Typed money — `Decimal` prices/sizes (full payload still on `.raw` / `.info`) | ✅ implemented |
+| Tick/lot rounding — `round_price(market, price, side)` (buy rounds down, sell up), `round_size(market, size)` (toward zero), exact `Decimal` | ✅ implemented, mirrors the Rust SDK's `markets.rs` |
 | Account reads — `GET /account`, `/positions`, `/positions/closed`, `/fills`, `/withdrawals`, `/account/rate-limit` | ✅ implemented |
 | Portfolio — `GET /account/state` (summary + positions, incl. `withdrawable`), `/account/summary`, `/account/fees`, `/account/portfolio-history`, `/account/equity-history` | ✅ implemented |
 | Trading — `POST /orders`, `/orders/batch`, `/orders/preview`; `GET /orders`, `/orders/{id}`, `/orders/history`; `DELETE /orders`, `/orders/{id}`; `PATCH /orders/{id}` | ✅ implemented — every by-id call takes the order's `market_id` (`fetch_order(id, market_id)`, `cancel_order(id, market_id)`, `edit_order(id, market_id, …)`); the engine rejects one without it |
