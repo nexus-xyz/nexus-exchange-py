@@ -1,18 +1,21 @@
-"""EVM signing: the two wallet-authorized auth flows, and agent-key requests.
+"""EVM signing: the wallet-authorized auth flows, and agent-key requests.
 
 This mirrors the Rust SDK's ``EthSigner`` (``nexus-exchange-rs``): a pure,
-deterministic, side-effect-free signer that produces the *signed request bodies*
-for the two unauthenticated, wallet-authorized endpoints:
+deterministic, side-effect-free signer that produces the signed payloads for the
+wallet-authorized endpoints:
 
 - :meth:`EthSigner.sign_in` — EIP-191 ``personal_sign`` over a fixed message,
   the body for ``POST /auth/login``.
 - :meth:`EthSigner.register_agent` — EIP-712 typed-data over
   ``RegisterAgent(address agent, uint64 expiresAt, uint64 nonce)``, the body for
   ``POST /agents/register``.
+- :meth:`EthSigner.revoke_agent` — EIP-712 typed-data over
+  ``RevokeAgentKey(address account, address agent, uint64 nonce)``, the
+  ``x-wallet-*`` headers for ``DELETE /agents/{address}``.
 
 The signer is ignorant of the network: it never sends anything, never stores a
 session, and carries no clock — nonces and expiries are caller-supplied. Hand
-the returned body to :class:`~nexus_exchange.Client` to send it.
+the returned payload to :class:`~nexus_exchange.Client` to send it.
 
 :class:`AgentSigner` is the third piece: once a wallet has registered an agent
 key, the agent signs each *request* itself with the ``x-agent`` /
@@ -56,6 +59,7 @@ __all__ = [
     "agent_canonical_string",
     "LoginRequest",
     "AgentRegistration",
+    "AgentRevocation",
     "LoginResponse",
     "AgentRegistered",
     "SIGN_IN_MESSAGE",
@@ -126,6 +130,39 @@ class AgentRegistration:
         if self.label is not None:
             body["label"] = self.label
         return body
+
+
+@dataclass(frozen=True)
+class AgentRevocation:
+    """Wallet-signed ``DELETE /agents/{address}`` (EIP-712 ``RevokeAgentKey``).
+
+    Produced by :meth:`EthSigner.revoke_agent`; hand it to
+    :meth:`~nexus_exchange.Client.revoke_agent`. A signature made elsewhere (in
+    a browser wallet with ``eth_signTypedData_v4``) can be wrapped in one
+    directly.
+    """
+
+    #: Owner wallet address (``0x``-prefixed, lowercase).
+    account: str
+    #: Agent address being revoked (``0x``-prefixed, lowercase), the path segment.
+    agent: str
+    #: Unix milliseconds when the wallet signed; single use (see
+    #: :meth:`EthSigner.revoke_agent`).
+    nonce: int
+    #: EIP-712 signature over ``RevokeAgentKey{account, agent, nonce}``,
+    #: ``0x``-prefixed (65 bytes).
+    signature: str
+    #: The domain ``chainId`` the wallet signed with.
+    chain_id: int
+
+    def headers(self) -> dict[str, str]:
+        """The four ``walletSignature`` headers the revoke request carries."""
+        return {
+            "x-wallet-account": self.account,
+            "x-wallet-nonce": str(self.nonce),
+            "x-wallet-signature": self.signature,
+            "x-wallet-chain-id": str(self.chain_id),
+        }
 
 
 @dataclass(frozen=True)
@@ -244,12 +281,12 @@ def _require_chain_id(chain_id: object) -> None:
 
 
 def _register_salt(network: Network | NetworkConfig | str) -> bytes:
-    """The network's ``RegisterAgent`` domain salt, or refuse to sign.
+    """The network's agent-management domain salt, or refuse to sign.
 
-    The server verifies ``RegisterAgent`` under a domain salted with its own
-    network name, with no unsalted fallback (ENG-15643). A custom target names
-    no network, so there is no salt to sign under, and an unsalted signature
-    would only be refused by the server as ``signer_mismatch``.
+    The server verifies ``RegisterAgent`` and ``RevokeAgentKey`` under a domain
+    salted with its own network name, with no unsalted fallback (ENG-15643). A
+    custom target names no network, so there is no salt to sign under, and an
+    unsalted signature would only be refused by the server as ``signer_mismatch``.
     """
     config = Network(network).config if isinstance(network, str) else network
     salt = config.signing_domain.salt
@@ -265,14 +302,11 @@ def _register_salt(network: Network | NetworkConfig | str) -> bytes:
     return salt
 
 
-def _register_agent_digest(
-    agent: bytes, expires_at: int, nonce: int, chain_id: int, salt: bytes
-) -> bytes:
-    """EIP-712 digest for ``RegisterAgent{agent, expiresAt, nonce}``.
+def _typed_data_digest(chain_id: int, salt: bytes, hash_struct: bytes) -> bytes:
+    """``keccak256(0x1901 || domainSeparator || hashStruct)`` for one message.
 
-    ``keccak256(0x1901 || domainSeparator || hashStruct(message))`` under the
-    ``Nexus Exchange`` domain with ``salt`` and no ``verifyingContract``. Matches
-    the server's ``agent_store::eip712::register_agent_digest``.
+    The ``Nexus Exchange`` domain with ``salt`` and no ``verifyingContract``,
+    shared by every agent-management message.
     """
     if len(salt) != 32:
         raise AuthError("salt must be 32 bytes")
@@ -286,11 +320,33 @@ def _register_agent_digest(
         + _u256(chain_id)
         + salt
     )
+    return keccak(b"\x19\x01" + domain_separator + hash_struct)
 
+
+def _register_agent_digest(
+    agent: bytes, expires_at: int, nonce: int, chain_id: int, salt: bytes
+) -> bytes:
+    """EIP-712 digest for ``RegisterAgent{agent, expiresAt, nonce}``.
+
+    Matches the server's ``agent_store::eip712::register_agent_digest``.
+    """
     struct_type_hash = keccak(text="RegisterAgent(address agent,uint64 expiresAt,uint64 nonce)")
     hash_struct = keccak(struct_type_hash + _address_word(agent) + _u64(expires_at) + _u64(nonce))
+    return _typed_data_digest(chain_id, salt, hash_struct)
 
-    return keccak(b"\x19\x01" + domain_separator + hash_struct)
+
+def _revoke_agent_key_digest(
+    account: bytes, agent: bytes, nonce: int, chain_id: int, salt: bytes
+) -> bytes:
+    """EIP-712 digest for ``RevokeAgentKey{account, agent, nonce}``.
+
+    Pinned against the accounts service's ``PINNED_REVOKE`` vector.
+    """
+    struct_type_hash = keccak(text="RevokeAgentKey(address account,address agent,uint64 nonce)")
+    hash_struct = keccak(
+        struct_type_hash + _address_word(account) + _address_word(agent) + _u64(nonce)
+    )
+    return _typed_data_digest(chain_id, salt, hash_struct)
 
 
 class EthSigner:
@@ -413,6 +469,47 @@ class EthSigner:
             nonce=nonce,
             signature=_to_0x(signed.signature),
             label=label,
+        )
+
+    def revoke_agent(
+        self,
+        agent: str,
+        nonce: int,
+        chain_id: int,
+        *,
+        network: Network | NetworkConfig | str,
+    ) -> AgentRevocation:
+        """Sign an agent-key revocation with EIP-712 (``RevokeAgentKey``).
+
+        Yields the wallet headers for ``DELETE /agents/{address}``, which accepts
+        only the owner wallet's signature: HMAC, session and agent credentials
+        are refused with ``401 WALLET_SIGNATURE_REQUIRED``.
+
+        ``agent`` is the agent address to revoke (``0x``-prefixed, 20 bytes).
+        ``nonce`` is the Unix time in milliseconds when you sign
+        (``int(time.time() * 1000)``). The server takes it only within
+        ``[now - 5 min, now + 60 s]`` of its clock, and only when it is strictly
+        greater than the last nonce this wallet used for a rename or revoke, so
+        each revocation is single use: sign a fresh one per attempt.
+
+        ``chain_id`` and ``network`` select the signing domain exactly as for
+        :meth:`register_agent`, the same domain and salt, and the same refusals
+        (no ``chain_id``, or a custom target with no salt).
+        """
+        _require_chain_id(chain_id)
+        if isinstance(nonce, bool) or not isinstance(nonce, int):
+            raise AuthError("nonce must be an integer")
+        salt = _register_salt(network)
+        agent_addr = _parse_address(agent)
+        digest = _revoke_agent_key_digest(self._address, agent_addr, nonce, chain_id, salt)
+        # A prehash we built ourselves; see register_agent on `unsafe_sign_hash`.
+        signed = Account.unsafe_sign_hash(digest, self._key.to_bytes())
+        return AgentRevocation(
+            account=self.address,
+            agent="0x" + agent_addr.hex(),
+            nonce=nonce,
+            signature=_to_0x(signed.signature),
+            chain_id=chain_id,
         )
 
 

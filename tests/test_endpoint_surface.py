@@ -20,7 +20,7 @@ import hmac
 
 import pytest
 
-from nexus_exchange import Client, MissingCredentialsError, Network
+from nexus_exchange import AgentRevocation, Client, MissingCredentialsError, Network
 
 _SECRET = "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
 _BASE = "http://localhost:9090"
@@ -130,11 +130,19 @@ def test_delete_api_key_hits_id_path(httpx_mock) -> None:
     _assert_signed(httpx_mock.get_request(), "DELETE", "/keys/nx_a")
 
 
-def test_revoke_agent_hits_address_path(httpx_mock) -> None:
-    httpx_mock.add_response(url=f"{_BASE}/agents/0xagent", method="DELETE", json={"revoked": True})
+def test_revoke_agent_hits_address_path_without_hmac(httpx_mock) -> None:
+    # Wallet-signed: an HMAC client sends the wallet headers and not its key.
+    agent = "0x" + "ab" * 20
+    httpx_mock.add_response(url=f"{_BASE}/agents/{agent}", method="DELETE", json={"revoked": True})
+    rev = AgentRevocation(
+        account="0x" + "11" * 20, agent=agent, nonce=1, signature="0x", chain_id=1
+    )
     with _authed() as client:
-        client.revoke_agent("0xagent")
-    _assert_signed(httpx_mock.get_request(), "DELETE", "/agents/0xagent")
+        client.revoke_agent(rev)
+    req = httpx_mock.get_request()
+    assert (req.method, req.url.raw_path.decode()) == ("DELETE", f"/agents/{agent}")
+    assert req.headers["x-wallet-signature"] == "0x"
+    assert "x-api-key" not in req.headers
 
 
 # -- admin tier reads / reset --------------------------------------------------
@@ -215,7 +223,6 @@ def test_create_order_uses_post_verb(httpx_mock) -> None:
         lambda c: c.fetch_api_keys(),
         lambda c: c.delete_api_key("nx_a"),
         lambda c: c.fetch_agents(),
-        lambda c: c.revoke_agent("0xagent"),
         lambda c: c.create_ws_token(),
         lambda c: c.fetch_tiers(),
         lambda c: c.delete_tier("0xabc"),

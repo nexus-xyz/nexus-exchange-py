@@ -4,7 +4,8 @@ The sign-in vectors are copied verbatim from the Rust SDK
 (``nexus-exchange-rs`` ``src/auth/eth.rs``), which pins them against an
 independent ethers v6 implementation. The ``RegisterAgent`` digest is the
 server's own pinned vector (``agent_store::tests::eip712_register_agent_digest_pinned``,
-alloy, salted with ``Network::Testnet`` since ENG-15643), with the same inputs.
+alloy, salted with ``Network::Testnet`` since ENG-15643), with the same inputs,
+and the ``RevokeAgentKey`` digest is the accounts service's ``PINNED_REVOKE``.
 Matching it proves the Python signer builds the exact domain the server
 verifies: a wrong-but-self-consistent domain separator, type string, salt or
 field order would fail. Auth correctness is critical, so these are the
@@ -30,7 +31,12 @@ from nexus_exchange import (
     Network,
     NetworkConfig,
 )
-from nexus_exchange.auth import _parse_address, _register_agent_digest, _u64
+from nexus_exchange.auth import (
+    _parse_address,
+    _register_agent_digest,
+    _revoke_agent_key_digest,
+    _u64,
+)
 
 # Canonical Hardhat/ethers account #0: a published, externally verifiable
 # keypair. Pins keccak + pubkey-to-address derivation against a known vector.
@@ -56,6 +62,13 @@ REGISTER_SIG = (
     "0x40cc533ba443982d33463c30426a3e81569d07d68be841daefb2bf6baf4c8904"
     "03efb48f19c76ab06bceec7530b149a5c91d71688f6c7009de47a99d2e68af951c"
 )
+
+
+# The accounts service's RevokeAgentKey vector (testnet salt, chainId 20056).
+REVOKE_ACCOUNT = "0x" + "11" * 20
+REVOKE_AGENT = "0x" + "ab" * 20
+REVOKE_NONCE = 1_790_000_000_000
+REVOKE_DIGEST = "0x73669adde69e6f7cd9f9ecc0825887403ee05d5fc6322d462e91c42920192bcb"
 
 
 def signer() -> EthSigner:
@@ -153,6 +166,64 @@ def test_register_agent_recovers_to_wallet() -> None:
     )
     pub = sig.recover_public_key_from_msg_hash(digest)
     assert "0x" + pub.to_canonical_address().hex() == TEST_ADDR
+
+
+# -- EIP-712 revoke_agent (RevokeAgentKey) --------------------------------
+
+
+def test_revoke_agent_digest_matches_the_accounts_service_pin() -> None:
+    digest = _revoke_agent_key_digest(
+        _parse_address(REVOKE_ACCOUNT),
+        _parse_address(REVOKE_AGENT),
+        REVOKE_NONCE,
+        KAT_CHAIN_ID,
+        KAT_NETWORK.signing_domain.salt,  # type: ignore[arg-type]
+    )
+    assert "0x" + digest.hex() == REVOKE_DIGEST
+
+
+def test_revoke_agent_recovers_to_wallet() -> None:
+    # Mixed case in, lowercase out.
+    rev = signer().revoke_agent("0x" + "AB" * 20, REVOKE_NONCE, KAT_CHAIN_ID, network=KAT_NETWORK)
+    assert (rev.account, rev.agent, rev.nonce, rev.chain_id) == (
+        TEST_ADDR,
+        REVOKE_AGENT,
+        REVOKE_NONCE,
+        KAT_CHAIN_ID,
+    )
+    digest = _revoke_agent_key_digest(
+        _parse_address(TEST_ADDR),
+        _parse_address(REVOKE_AGENT),
+        REVOKE_NONCE,
+        KAT_CHAIN_ID,
+        KAT_NETWORK.signing_domain.salt,  # type: ignore[arg-type]
+    )
+    raw = bytes.fromhex(rev.signature[2:])
+    sig = keys.Signature(
+        vrs=(raw[64] - 27, int.from_bytes(raw[0:32], "big"), int.from_bytes(raw[32:64], "big"))
+    )
+    pub = sig.recover_public_key_from_msg_hash(digest)
+    assert "0x" + pub.to_canonical_address().hex() == TEST_ADDR
+
+
+@pytest.mark.parametrize(
+    ("agent", "nonce", "chain_id", "network"),
+    [
+        (REVOKE_AGENT, REVOKE_NONCE, None, KAT_NETWORK),
+        (
+            REVOKE_AGENT,
+            REVOKE_NONCE,
+            KAT_CHAIN_ID,
+            NetworkConfig.custom(label="dev", funds=Funds.PLAY, base_url="http://localhost:1"),
+        ),
+        ("0x1234", REVOKE_NONCE, KAT_CHAIN_ID, KAT_NETWORK),
+        (REVOKE_AGENT, True, KAT_CHAIN_ID, KAT_NETWORK),
+        (REVOKE_AGENT, 1 << 64, KAT_CHAIN_ID, KAT_NETWORK),
+    ],
+)
+def test_revoke_agent_refuses_to_sign(agent, nonce, chain_id, network) -> None:
+    with pytest.raises(AuthError):
+        signer().revoke_agent(agent, nonce, chain_id, network=network)
 
 
 # Published in the spec's x-nexus-networks[*].signing_domain.salt.
@@ -315,3 +386,24 @@ def test_register_agent_posts_eip712_body_and_parses(httpx_mock) -> None:
         "signature": REGISTER_SIG,
         "label": "my-bot",
     }
+
+
+def test_revoke_agent_sends_exactly_the_four_wallet_headers(httpx_mock) -> None:
+    httpx_mock.add_response(
+        url=f"http://localhost:9090/agents/{REVOKE_AGENT}", method="DELETE", json={}
+    )
+    rev = signer().revoke_agent(REVOKE_AGENT, REVOKE_NONCE, KAT_CHAIN_ID, network=KAT_NETWORK)
+    # No credentials at all: the wallet signature is the whole of the auth.
+    with Client(Network.LOCAL) as client:
+        client.revoke_agent(rev)
+
+    req = httpx_mock.get_request()
+    assert req.method == "DELETE"
+    assert {k: v for k, v in req.headers.items() if k.startswith("x-wallet-")} == {
+        "x-wallet-account": TEST_ADDR,
+        "x-wallet-nonce": str(REVOKE_NONCE),
+        "x-wallet-signature": rev.signature,
+        "x-wallet-chain-id": str(KAT_CHAIN_ID),
+    }
+    for name in ("x-api-key", "x-agent", "x-signature", "x-timestamp", "x-nonce", "authorization"):
+        assert name not in req.headers

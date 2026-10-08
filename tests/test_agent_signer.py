@@ -25,6 +25,7 @@ from nexus_exchange import (
     AgentSigner,
     AuthError,
     Client,
+    EthSigner,
     MissingCredentialsError,
     Network,
     OrderRequest,
@@ -285,7 +286,6 @@ def test_public_call_on_an_agent_client_sends_no_credential(httpx_mock) -> None:
     ("call", "method", "path"),
     [
         (lambda c: c.fetch_agents(), "GET", "/agents"),
-        (lambda c: c.revoke_agent("0xabc"), "DELETE", "/agents/0xabc"),
     ],
 )
 def test_agent_forbidden_operations_are_refused_before_any_request(
@@ -300,6 +300,22 @@ def test_agent_forbidden_operations_are_refused_before_any_request(
     assert (exc.value.method, exc.value.path) == (method, path)
     assert isinstance(exc.value, MissingCredentialsError)
     assert httpx_mock.get_requests() == []
+
+
+def test_agent_client_revokes_with_the_wallet_signature_only(httpx_mock) -> None:
+    wallet = EthSigner.from_hex("11" * 32)
+    rev = wallet.revoke_agent(_AGENT, 1_790_000_000_000, 20056, network=Network.LOCAL)
+    httpx_mock.add_response(
+        url=f"http://localhost:9090/agents/{rev.agent}", method="DELETE", json={}
+    )
+    with _agent_client() as client:
+        client.revoke_agent(rev)
+        assert client.agent is not None
+        assert client.agent.next_nonce(0) == 1, "the revoke consumed no agent nonce"
+    (req,) = httpx_mock.get_requests()
+    assert req.headers["x-wallet-account"] == wallet.address
+    for name in ("x-agent", "x-nonce", "x-signature", "x-timestamp"):
+        assert name not in req.headers
 
 
 @pytest.mark.parametrize(

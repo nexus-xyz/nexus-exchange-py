@@ -83,6 +83,7 @@ def spec_of(*ops, security=None):
 HMAC = [{"hmacAuth": []}]
 BEARER = [{"bearerAuth": []}]
 ADMIN = [{"adminAuth": []}]
+WALLET = [{"walletSignature": []}]
 PUBLIC = []  # `security: []` — explicitly public, the strongest public spelling
 
 
@@ -619,6 +620,12 @@ class TestDeclaredSecurity(unittest.TestCase):
             0,
         )
 
+    def test_wallet_call_against_wallet_signature_passes(self):
+        call = 'def a(self, h):\n    self._request("DELETE", "/agents/x", wallet=h)\n'
+        self.assertEqual(self._errors(call, spec_of(("DELETE", "/agents/x", WALLET))), 0)
+        # ...and it is a credential of its own, not a stand-in for HMAC.
+        self.assertEqual(self._errors(call, spec_of(("DELETE", "/agents/x", HMAC))), 1)
+
     def test_either_of_two_alternatives_satisfies(self):
         # `[{a}, {b}]` is a choice, so both credentials are acceptable — this is
         # the shape the ENG-13303 /keys rows resolve into if the SPEC is the side
@@ -808,6 +815,14 @@ class TestDeclaredSecurity(unittest.TestCase):
             self._errors(
                 'def a(self, t):\n    self._request("POST", "/keys", signed=True, bearer=t)\n',
                 spec_of(("POST", "/keys", BEARER)),
+            )
+
+    def test_wallet_with_another_credential_fails(self):
+        with self.assertRaises(SystemExit):
+            self._errors(
+                'def a(self, h):\n    self._request("DELETE", "/agents/x", signed=True, '
+                "wallet=h)\n",
+                spec_of(("DELETE", "/agents/x", WALLET)),
             )
 
     def test_an_explicit_bearer_none_reads_as_unauthenticated(self):

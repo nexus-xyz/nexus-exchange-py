@@ -145,10 +145,11 @@ class SigningDomain:
     ``salt`` is ``keccak256(network name)`` and is what the server binds a
     ``RegisterAgent`` signature to its network with (ENG-15643): a registration
     signed for testnet does not verify on mainnet. It is published per network
-    in the spec's ``x-nexus-networks[*].signing_domain``. Only ``RegisterAgent``
-    is signed under it; the server leaves ``RevokeAgent`` and ``WithdrawIntent``
-    unsalted. ``None`` on a custom target, where no network name is known, and
-    agent registration refuses to sign there rather than drop the salt.
+    in the spec's ``x-nexus-networks[*].signing_domain``. The agent-management
+    messages (``RegisterAgent``, ``ListAgents``, ``RenameAgent``,
+    ``RevokeAgentKey``) are signed under it; ``WithdrawIntent`` is not. ``None``
+    on a custom target, where no network name is known, and agent registration
+    and revocation refuse to sign there rather than drop the salt.
     """
 
     name: str = _DOMAIN_NAME
@@ -158,7 +159,7 @@ class SigningDomain:
 
 
 def _network_salt(network: str) -> bytes:
-    """The ``RegisterAgent`` domain salt for a named network: ``keccak256(network)``."""
+    """The agent-management domain salt for a named network: ``keccak256(network)``."""
     return keccak(text=network)
 
 

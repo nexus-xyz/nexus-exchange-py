@@ -3,9 +3,9 @@
 A thin wrapper mirroring the Rust SDK: typed methods over the REST routes, HMAC
 request signing, one error hierarchy. **Experimental.** Covers the public
 market-data routes, the signed account / trading / admin routes, and the
-wallet-signed auth flows (EIP-191 login, EIP-712 agent registration) — see the
-README's support table. WebSocket streaming lives in the async
-:mod:`nexus_exchange.ws` client (:class:`~nexus_exchange.WsClient`).
+wallet-signed auth flows (EIP-191 login, EIP-712 agent registration and
+revocation) — see the README's support table. WebSocket streaming lives in the
+async :mod:`nexus_exchange.ws` client (:class:`~nexus_exchange.WsClient`).
 """
 
 from __future__ import annotations
@@ -27,7 +27,14 @@ from urllib.parse import quote, urlencode
 import httpx
 
 from ._parse import to_dict_list
-from .auth import AgentRegistered, AgentRegistration, AgentSigner, EthSigner, LoginResponse
+from .auth import (
+    AgentRegistered,
+    AgentRegistration,
+    AgentRevocation,
+    AgentSigner,
+    EthSigner,
+    LoginResponse,
+)
 from .errors import (
     JURISDICTION_CODES,
     AgentKeyRefusedError,
@@ -187,11 +194,9 @@ _AGENT_WITHDRAWAL_PATHS = frozenset({"/withdrawals", "/account/withdraw", "/brid
 
 #: Non-withdrawal operations the spec leaves off ``agentAuth`` and the server
 #: refuses for agent keys with ``403 AGENT_KEY_FORBIDDEN``: agent management.
-#: ``(METHOD, path regex)``.
-_AGENT_FORBIDDEN_OPS = (
-    ("GET", re.compile(r"/agents")),
-    ("DELETE", re.compile(r"/agents/[^/]+")),
-)
+#: ``(METHOD, path regex)``. Revoking is not here: it is wallet-signed and sends
+#: no agent credential (ENG-20579).
+_AGENT_FORBIDDEN_OPS = (("GET", re.compile(r"/agents")),)
 
 
 def _agent_refusal(method: str, full_path: str) -> str | None:
@@ -398,6 +403,7 @@ class _PreparedRequest:
     content: bytes | None
     signed: bool
     bearer: str | None
+    wallet: dict[str, str] | None
     retryable: bool
 
 
@@ -738,6 +744,7 @@ class _ClientCore:
         body: Any | None,
         signed: bool,
         bearer: str | None,
+        wallet: dict[str, str] | None,
     ) -> _PreparedRequest:
         """Validate and assemble one request, once, before any attempt is made."""
         # One base for every request (EDR-006): the path is the spec path the
@@ -775,6 +782,7 @@ class _ClientCore:
             content=None if body is None else json.dumps(body).encode(),
             signed=signed,
             bearer=bearer,
+            wallet=wallet,
             # Only idempotent (GET) requests are auto-retried (ENG-5295); a
             # retried write could double-submit if the first attempt's response
             # was lost in transit, so POST/PATCH/PUT/DELETE always surface the
@@ -798,6 +806,8 @@ class _ClientCore:
             headers.update(self._sign(req.method, req.path, req.query, req.content or b""))
         elif req.bearer is not None:
             headers["authorization"] = f"Bearer {req.bearer}"
+        elif req.wallet is not None:
+            headers.update(req.wallet)
         return headers
 
     def _transport_retry_delay(
@@ -941,9 +951,10 @@ class Client(_ClientCore):
     :meth:`create_api_key` sends only ``Authorization: Bearer`` whichever
     request credential the client holds.
 
-    Agent keys are trade-only: an agent client refuses withdrawals, agent
-    management (:meth:`fetch_agents`, :meth:`revoke_agent`) locally with
-    :class:`~nexus_exchange.AgentKeyRefusedError`, before signing. Writes from
+    Agent keys are trade-only: an agent client refuses withdrawals and
+    :meth:`fetch_agents` locally with
+    :class:`~nexus_exchange.AgentKeyRefusedError`, before signing.
+    :meth:`revoke_agent` is wallet-signed, so any client can send it. Writes from
     one agent key in flight concurrently can be refused as nonce replays
     (ENG-17010); see :class:`~nexus_exchange.AgentSigner`.
 
@@ -2013,13 +2024,21 @@ class Client(_ClientCore):
         data = self._request("GET", "/agents", signed=True)
         return [AgentInfo.from_dict(a) for a in (data if isinstance(data, list) else [])]
 
-    def revoke_agent(self, address: str) -> Any:
-        """``DELETE /agents/{address}`` — revoke an agent key. Requires HMAC credentials.
+    def revoke_agent(self, revocation: AgentRevocation) -> Any:
+        """``DELETE /agents/{address}`` — revoke an agent key with the wallet's signature.
 
-        Refused for an agent-key client (:class:`~nexus_exchange.AgentKeyRefusedError`):
-        an agent key cannot revoke itself or any other agent.
+        Takes a pre-signed revocation from
+        :meth:`EthSigner.revoke_agent <nexus_exchange.EthSigner.revoke_agent>`.
+        Its four ``x-wallet-*`` headers are the request's only credential: no
+        HMAC, agent or session auth is sent, so a client with no credentials, or
+        only an agent key, can revoke. The server refuses any other credential
+        here with ``401 WALLET_SIGNATURE_REQUIRED``.
         """
-        return self._request("DELETE", f"/agents/{quote(address, safe='')}", signed=True)
+        return self._request(
+            "DELETE",
+            f"/agents/{quote(revocation.agent, safe='')}",
+            wallet=revocation.headers(),
+        )
 
     def create_ws_token(self) -> WsToken:
         """``POST /ws/token`` — mint a single-use WebSocket token. Requires credentials.
@@ -2186,6 +2205,7 @@ class Client(_ClientCore):
         body: Any | None = None,
         signed: bool = False,
         bearer: str | None = None,
+        wallet: dict[str, str] | None = None,
     ) -> httpx.Response:
         """Issue one request and return the raw 2xx response.
 
@@ -2195,7 +2215,9 @@ class Client(_ClientCore):
         request call and the sleep is :class:`_ClientCore`'s, shared with
         :class:`~nexus_exchange.AsyncClient`.
         """
-        req = self._prepare(method, path, query=query, body=body, signed=signed, bearer=bearer)
+        req = self._prepare(
+            method, path, query=query, body=body, signed=signed, bearer=bearer, wallet=wallet
+        )
         attempt = 0
         while True:
             headers = self._attempt_headers(req)
@@ -2220,8 +2242,11 @@ class Client(_ClientCore):
         body: Any | None = None,
         signed: bool = False,
         bearer: str | None = None,
+        wallet: dict[str, str] | None = None,
     ) -> Any:
-        resp = self._send(method, path, query=query, body=body, signed=signed, bearer=bearer)
+        resp = self._send(
+            method, path, query=query, body=body, signed=signed, bearer=bearer, wallet=wallet
+        )
         return _decode_body(resp)
 
     def _request_page(

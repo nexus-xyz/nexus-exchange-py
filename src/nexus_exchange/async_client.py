@@ -18,7 +18,13 @@ from urllib.parse import quote, urlencode
 
 from ._async_transport import _AsyncTransport
 from ._parse import to_dict_list
-from .auth import AgentRegistered, AgentRegistration, EthSigner, LoginResponse
+from .auth import (
+    AgentRegistered,
+    AgentRegistration,
+    AgentRevocation,
+    EthSigner,
+    LoginResponse,
+)
 from .client import (
     ACCOUNT_FUNDING_LIMIT_MAX,
     CLOSED_POSITIONS_LIMIT_MAX,
@@ -1154,13 +1160,21 @@ class AsyncClient(_AsyncTransport):
         data = await self._request("GET", "/agents", signed=True)
         return [AgentInfo.from_dict(a) for a in (data if isinstance(data, list) else [])]
 
-    async def revoke_agent(self, address: str) -> Any:
-        """``DELETE /agents/{address}`` — revoke an agent key. Requires HMAC credentials.
+    async def revoke_agent(self, revocation: AgentRevocation) -> Any:
+        """``DELETE /agents/{address}`` — revoke an agent key with the wallet's signature.
 
-        Refused for an agent-key client (:class:`~nexus_exchange.AgentKeyRefusedError`):
-        an agent key cannot revoke itself or any other agent.
+        Takes a pre-signed revocation from
+        :meth:`EthSigner.revoke_agent <nexus_exchange.EthSigner.revoke_agent>`.
+        Its four ``x-wallet-*`` headers are the request's only credential: no
+        HMAC, agent or session auth is sent, so a client with no credentials, or
+        only an agent key, can revoke. The server refuses any other credential
+        here with ``401 WALLET_SIGNATURE_REQUIRED``.
         """
-        return await self._request("DELETE", f"/agents/{quote(address, safe='')}", signed=True)
+        return await self._request(
+            "DELETE",
+            f"/agents/{quote(revocation.agent, safe='')}",
+            wallet=revocation.headers(),
+        )
 
     async def create_ws_token(self) -> WsToken:
         """``POST /ws/token`` — mint a single-use WebSocket token. Requires credentials.
