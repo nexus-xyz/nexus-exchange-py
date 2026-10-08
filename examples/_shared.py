@@ -45,9 +45,13 @@ from __future__ import annotations
 
 import os
 import sys
+from typing import TypeVar
 from urllib.parse import urlparse
 
-from nexus_exchange import Client, Funds, Network
+from nexus_exchange import AsyncClient, Client, Funds, Network
+
+#: Either client: both take the same constructor arguments.
+C = TypeVar("C", Client, AsyncClient)
 
 #: Hosts a *signed* example is allowed to point at. Loopback, plus every host
 #: reachable from a network that declares **play** funds.
@@ -124,8 +128,11 @@ def _network_from_env(default: Network) -> Network:
         raise SystemExit(2) from None
 
 
-def make_client() -> Client:
-    """Unauthenticated client for public market-data examples."""
+def make_client(cls: type[C] = Client) -> C:
+    """Unauthenticated client for public market-data examples.
+
+    Pass ``AsyncClient`` for an asyncio example; the configuration is the same.
+    """
     # `or None` treats a set-but-blank NEXUS_BASE_URL as unset, matching how the
     # client itself treats an empty base URL -- otherwise `NEXUS_BASE_URL=`
     # (no value) silently pins the empty string as an explicit override instead
@@ -133,11 +140,14 @@ def make_client() -> Client:
     base_url = os.environ.get("NEXUS_BASE_URL") or None
     network = _network_from_env(Network.TESTNET)
     print(f"-> {base_url or network.base_url}")
-    return Client(network=network, base_url=base_url)
+    return cls(network=network, base_url=base_url)
 
 
-def make_signed_client() -> Client:
-    """HMAC-signed client; exits with a hint if credentials are not set."""
+def make_signed_client(cls: type[C] = Client) -> C:
+    """HMAC-signed client; exits with a hint if credentials are not set.
+
+    Pass ``AsyncClient`` for an asyncio example; the guards are the same.
+    """
     api_key = os.environ.get("NEXUS_API_KEY")
     api_secret = os.environ.get("NEXUS_API_SECRET")
     if not (api_key and api_secret):
@@ -218,4 +228,4 @@ def make_signed_client() -> Client:
             raise SystemExit(2)
 
     print(f"-> {base_url or network.base_url}")
-    return Client(network=network, base_url=base_url, api_key=api_key, api_secret=api_secret)
+    return cls(network=network, base_url=base_url, api_key=api_key, api_secret=api_secret)

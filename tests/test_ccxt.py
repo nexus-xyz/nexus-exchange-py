@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import pytest
 
-from nexus_exchange import Network
+from nexus_exchange import DecodeError, Network
 from nexus_exchange.ccxt_adapter import NexusExchange
 
 
@@ -82,6 +82,26 @@ def test_load_markets_caches_by_symbol(httpx_mock) -> None:
     assert first is second
     assert "ETH-USDX-PERP" in ex.markets
     assert ex.symbols == ["ETH-USDX-PERP"]
+
+
+def test_fetch_markets_reads_the_served_keys(httpx_mock) -> None:
+    # Testnet serves `id`/`base`/`quote`, not the spec's names (ENG-19673).
+    httpx_mock.add_response(
+        url="http://localhost:9090/markets",
+        json=[{"id": "BTC-USDX-PERP", "base": "BTC", "quote": "USDX", "tick_size": "0.5"}],
+    )
+    with exchange() as ex:
+        (m,) = ex.fetch_markets()
+    assert (m["symbol"], m["base"], m["quote"]) == ("BTC-USDX-PERP", "BTC", "USDX")
+
+
+@pytest.mark.parametrize("missing", ["id", "base", "quote"])
+def test_fetch_markets_rejects_a_missing_identifier(httpx_mock, missing) -> None:
+    row = {"id": "BTC-USDX-PERP", "base": "BTC", "quote": "USDX", "tick_size": "0.5"}
+    del row[missing]
+    httpx_mock.add_response(url="http://localhost:9090/markets", json=[row])
+    with exchange() as ex, pytest.raises(DecodeError):
+        ex.fetch_markets()
 
 
 # -- fetch_ticker ---------------------------------------------------------

@@ -24,7 +24,8 @@ Account-scoped channels (``orders`` / ``fills`` / ``positions`` / ``balances`` /
 ``liquidations``)
 require a short-lived, account-bound token minted via ``POST /ws/token``.
 Supply a ``token_provider`` that wraps :meth:`Client.create_ws_token`, e.g.
-``lambda: rest.create_ws_token().token``. That token encodes the account, so
+``lambda: rest.create_ws_token().token``, or an ``async def`` awaiting
+:meth:`AsyncClient.create_ws_token`. That token encodes the account, so
 the account channels scope themselves to the connected wallet, and agent keys
 can mint it.
 

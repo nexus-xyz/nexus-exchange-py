@@ -33,6 +33,13 @@ class Market:
     """A tradable market and its trading rules (``GET /markets``).
 
     ``raw`` holds the full entry. Trading-rule fields are exact decimal strings.
+
+    The server sends the identifiers under CCXT's names, ``id`` / ``base`` /
+    ``quote``. The pinned spec (v0.8.1) still declares ``market_id`` /
+    ``base_asset`` / ``quote_asset``, so those keys are read as a fallback. If
+    neither name is present, decoding raises :class:`~nexus_exchange.DecodeError`.
+    An empty ``market_id`` would only fail later, in the next call
+    (``/markets//orderbook`` comes back 401), so it is not allowed (ENG-19673).
     """
 
     market_id: str
@@ -50,9 +57,9 @@ class Market:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Market:
         return cls(
-            market_id=str(d.get("market_id", "")),
-            base_asset=str(d.get("base_asset", "")),
-            quote_asset=str(d.get("quote_asset", "")),
+            market_id=to_str(d.get("id", d.get("market_id")), "id"),
+            base_asset=to_str(d.get("base", d.get("base_asset")), "base"),
+            quote_asset=to_str(d.get("quote", d.get("quote_asset")), "quote"),
             tick_size=to_decimal(d.get("tick_size")),
             lot_size=to_decimal(d.get("lot_size")),
             min_order_size=to_decimal(d.get("min_order_size")),
@@ -87,7 +94,7 @@ class MarketSummary:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> MarketSummary:
         return cls(
-            market_id=str(d.get("market_id", "")),
+            market_id=to_str(d.get("market_id"), "market_id"),
             last_trade_price=opt_decimal(d.get("last_trade_price")),
             volume_24h=to_decimal(d.get("volume_24h")),
             trade_count=int(d.get("trade_count", 0)),
@@ -113,7 +120,7 @@ class MarketStatus:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> MarketStatus:
         return cls(
-            market_id=str(d.get("market_id", "")),
+            market_id=to_str(d.get("market_id"), "market_id"),
             status=str(d.get("status", "")),
             halt_reason=d.get("halt_reason"),
             halted_at=d.get("halted_at"),
@@ -317,7 +324,7 @@ class MarkPrice:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> MarkPrice:
         return cls(
-            market_id=str(d.get("market_id", "")),
+            market_id=to_str(d.get("market_id"), "market_id"),
             mark_price=to_decimal(d.get("mark_price")),
             raw=d,
         )
@@ -437,7 +444,10 @@ class Position:
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Position:
         return cls(
-            market_id=str(d.get("market_id", "")),
+            # Served under CCXT's `symbol`; the pinned spec still says `market_id`.
+            # Left lenient on purpose: unlike `Market`, nothing builds a request path
+            # from a private record's id, so a missing one reads back as "".
+            market_id=str(d.get("symbol", d.get("market_id", ""))),
             side=str(d.get("side", "")),
             size=to_decimal(d.get("size", 0)),
             entry_price=to_decimal(d.get("entry_price", 0)),
@@ -950,7 +960,10 @@ class Order:
     def from_dict(cls, d: dict[str, Any]) -> Order:
         return cls(
             id=str(d.get("id", "")),
-            market_id=str(d.get("market_id", "")),
+            # Served under CCXT's `symbol`; the pinned spec still says `market_id`.
+            # Left lenient on purpose: unlike `Market`, nothing builds a request path
+            # from a private record's id, so a missing one reads back as "".
+            market_id=str(d.get("symbol", d.get("market_id", ""))),
             account_id=str(d.get("account_id", "")),
             side=str(d.get("side", "")),
             order_type=str(d.get("order_type", "")),
@@ -1005,7 +1018,10 @@ class OrderHistoryEntry:
     def from_dict(cls, d: dict[str, Any]) -> OrderHistoryEntry:
         return cls(
             id=str(d.get("id", "")),
-            market_id=str(d.get("market_id", "")),
+            # Served under CCXT's `symbol`; the pinned spec still says `market_id`.
+            # Left lenient on purpose: unlike `Market`, nothing builds a request path
+            # from a private record's id, so a missing one reads back as "".
+            market_id=str(d.get("symbol", d.get("market_id", ""))),
             side=str(d.get("side", "")),
             order_type=str(d.get("order_type", "")),
             # Nullable in the spec: market orders carry no limit price.

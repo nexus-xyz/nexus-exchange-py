@@ -12,7 +12,78 @@ from decimal import Decimal
 
 import pytest
 
-from nexus_exchange import Client, MarkPrice, Network, Ticker
+from nexus_exchange import (
+    Client,
+    DecodeError,
+    Market,
+    MarketStatus,
+    MarketSummary,
+    MarkPrice,
+    Network,
+    Ticker,
+)
+
+# One `/markets` row verbatim as public testnet served it on 2026-10-05: CCXT
+# names (`id`/`base`/`quote`), not the pinned spec's `market_id`/`base_asset`/
+# `quote_asset` (ENG-19673).
+SERVED_MARKET = {
+    "active": True,
+    "base": "BTC",
+    "contractSize": "1",
+    "funding_rate_cap": "0.001",
+    "id": "BTC-USDX-PERP",
+    "initial_margin_rate": "0.02",
+    "lifecycle": "active",
+    "lot_size": "0.001",
+    "maintenance_margin_rate": "0.01",
+    "maker_rebate_bps": -2,
+    "marginModes": {"cross": True, "isolated": True},
+    "max_leverage": 50,
+    "max_open_interest": "10000",
+    "max_open_interest_notional": None,
+    "max_order_size": "100",
+    "min_order_size": "0.001",
+    "price_band_bps": 500,
+    "quote": "USDX",
+    "settle": "USDX",
+    "taker_fee_bps": 5,
+    "tick_size": "0.5",
+    "type": "swap",
+}
+
+
+def test_fetch_markets_decodes_the_served_shape(httpx_mock) -> None:
+    httpx_mock.add_response(url="http://localhost:9090/markets", json=[SERVED_MARKET])
+    with Client(Network.LOCAL) as client:
+        (m,) = client.fetch_markets()
+    assert (m.market_id, m.base_asset, m.quote_asset) == ("BTC-USDX-PERP", "BTC", "USDX")
+    assert m.tick_size == Decimal("0.5")
+    assert m.max_leverage == 50
+
+
+def test_market_falls_back_to_the_pinned_spec_names() -> None:
+    renamed = {"id": "market_id", "base": "base_asset", "quote": "quote_asset"}
+    spec_shaped = {renamed.get(k, k): v for k, v in SERVED_MARKET.items()}
+    m = Market.from_dict(spec_shaped)
+    assert (m.market_id, m.base_asset, m.quote_asset) == ("BTC-USDX-PERP", "BTC", "USDX")
+
+
+@pytest.mark.parametrize(
+    ("model", "payload"),
+    [
+        (Market, {k: v for k, v in SERVED_MARKET.items() if k != "id"}),
+        (Market, {k: v for k, v in SERVED_MARKET.items() if k != "base"}),
+        (Market, {k: v for k, v in SERVED_MARKET.items() if k != "quote"}),
+        (MarketSummary, {"volume_24h": 0.0}),
+        (MarketStatus, {"status": "active"}),
+        (MarkPrice, {"mark_price": "50011.60"}),
+    ],
+)
+def test_missing_market_identifier_raises(model, payload) -> None:
+    # An absent identifier used to decode to "", which surfaced one call later as
+    # a 401 on `/markets//orderbook`. It must fail at the decode instead.
+    with pytest.raises(DecodeError):
+        model.from_dict(payload)
 
 
 def test_fetch_market_summaries_handles_numbers_and_halted_null(httpx_mock) -> None:

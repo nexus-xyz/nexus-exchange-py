@@ -28,7 +28,7 @@ first page).
 
 from __future__ import annotations
 
-from collections.abc import Callable, Iterator
+from collections.abc import AsyncIterator, Awaitable, Callable, Iterator
 from dataclasses import dataclass
 from typing import Generic, TypeVar
 
@@ -40,7 +40,7 @@ T = TypeVar("T")
 #: page. Matched case-insensitively by httpx's header mapping.
 NEXT_CURSOR_HEADER = "x-next-cursor"
 
-__all__ = ["NEXT_CURSOR_HEADER", "Page", "iter_pages", "iter_items"]
+__all__ = ["NEXT_CURSOR_HEADER", "Page", "iter_pages", "iter_items", "aiter_pages", "aiter_items"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -110,24 +110,44 @@ def iter_pages(
     An empty page that still carries a cursor is *not* the end: it is yielded as
     is and paging continues, so a sparse window does not truncate the walk.
     """
-    if max_pages is not None and max_pages < 0:
-        raise ValueError(f"max_pages must be non-negative (got {max_pages})")
-
-    pages = 0
-    # Every cursor this walk has requested. Seeded with the resume cursor, so a
-    # server that sends the caller straight back to where they resumed from is
-    # caught on the first hop rather than after a second lap.
-    seen: set[str] = set() if cursor is None else {cursor}
-    while max_pages is None or pages < max_pages:
-        requested = cursor
-        page = fetch_page(requested)
-        pages += 1
+    walk = _Walk(cursor, max_pages)
+    while walk.wants_more():
+        page = fetch_page(walk.cursor)
         yield page
+        if not walk.advance(page):
+            return
 
+
+class _Walk:
+    """The I/O-free half of a cursor walk, shared by :func:`iter_pages` and
+    :func:`aiter_pages` so the two cannot disagree on when a walk ends.
+
+    Holds the cursor to request next, the page count and every cursor seen;
+    see :func:`iter_pages` for the rules it enforces.
+    """
+
+    def __init__(self, cursor: str | None, max_pages: int | None) -> None:
+        if max_pages is not None and max_pages < 0:
+            raise ValueError(f"max_pages must be non-negative (got {max_pages})")
+        self.cursor = cursor
+        self.max_pages = max_pages
+        self.pages = 0
+        # Every cursor this walk has requested. Seeded with the resume cursor, so a
+        # server that sends the caller straight back to where they resumed from is
+        # caught on the first hop rather than after a second lap.
+        self.seen: set[str] = set() if cursor is None else {cursor}
+
+    def wants_more(self) -> bool:
+        return self.max_pages is None or self.pages < self.max_pages
+
+    def advance(self, page: Page[T]) -> bool:
+        """Record ``page`` (already yielded); ``False`` when it was the last."""
+        self.pages += 1
+        requested = self.cursor
         nxt = page.next_cursor
         if nxt is None:
-            return
-        if nxt in seen:
+            return False
+        if nxt in self.seen:
             # Same message for both shapes, because the caller's situation is
             # identical: the walk cannot advance and what they have is partial.
             # The distinction is only in how obvious the server's bug is, so it
@@ -136,11 +156,12 @@ def iter_pages(
             raise PaginationError(
                 f"server returned a pagination cursor it had already issued: {nxt!r}"
                 f"{immediate}. Refusing to page in a cycle forever. "
-                f"{pages} page(s) were read, so any results collected so far are "
+                f"{self.pages} page(s) were read, so any results collected so far are "
                 "incomplete."
             )
-        seen.add(nxt)
-        cursor = nxt
+        self.seen.add(nxt)
+        self.cursor = nxt
+        return True
 
 
 def iter_items(
@@ -160,3 +181,44 @@ def iter_items(
     """
     for page in iter_pages(fetch_page, cursor=cursor, max_pages=max_pages):
         yield from page.items
+
+
+async def aiter_pages(
+    fetch_page: Callable[[str | None], Awaitable[Page[T]]],
+    *,
+    cursor: str | None = None,
+    max_pages: int | None = None,
+) -> AsyncIterator[Page[T]]:
+    """:func:`iter_pages` for :class:`~nexus_exchange.AsyncClient`: ``fetch_page``
+    returns an awaitable, and pages are yielded from an async generator.
+
+    Same arguments and termination rules (one shared walk), with one
+    difference: an async generator does not run until first iterated, so a bad
+    ``max_pages`` raises on the first ``async for`` step rather than here. The
+    ``AsyncClient.iter_*`` methods check their arguments eagerly before
+    building it, as the sync ones do.
+    """
+    walk = _Walk(cursor, max_pages)
+    while walk.wants_more():
+        page = await fetch_page(walk.cursor)
+        yield page
+        if not walk.advance(page):
+            return
+
+
+async def aiter_items(
+    fetch_page: Callable[[str | None], Awaitable[Page[T]]],
+    *,
+    cursor: str | None = None,
+    max_pages: int | None = None,
+) -> AsyncIterator[T]:
+    """Every item across every page: :func:`aiter_pages`, flattened.
+
+    ::
+
+        async for fill in client.iter_my_trades(limit=500):
+            ...
+    """
+    async for page in aiter_pages(fetch_page, cursor=cursor, max_pages=max_pages):
+        for item in page.items:
+            yield item
