@@ -132,6 +132,106 @@ nexus_exchange.ApiKeyInfo.from_dict classmethod(d: dict[str, Any]) -> ApiKeyInfo
 nexus_exchange.ApiKeyInfo.key_id field: str
 nexus_exchange.ApiKeyInfo.raw field: dict[str, Any]
 nexus_exchange.ApiKeyInfo.tier field: str
+nexus_exchange.AsyncClient class(_AsyncTransport)
+nexus_exchange.AsyncClient(network: Network | NetworkConfig | str | None = None, *, base_url: str | None = None, api_key: str | None = None, api_secret: str | None = None, api_version: str | None = None, timeout: float = 30.0, http_client: httpx.AsyncClient | None = None, retry: RetryConfig | None = None, agent: AgentSigner | None = None) -> None
+nexus_exchange.AsyncClient.__aenter__ async method(self: _Self) -> _Self
+nexus_exchange.AsyncClient.__aexit__ async method(self, *exc: object) -> None
+nexus_exchange.AsyncClient.aclose async method(self) -> None
+nexus_exchange.AsyncClient.add_margin async method(self, market_id: str, direction: str, amount: Decimal | str) -> MarginAdjustment
+nexus_exchange.AsyncClient.adjust_margin async method(self, market_id: str, direction: str, amount: Decimal | str) -> MarginAdjustment
+nexus_exchange.AsyncClient.agent property: AgentSigner | None
+nexus_exchange.AsyncClient.amend_order async method(self, order_id: str, market_id: str, amend: AmendOrder) -> OrderResponse
+nexus_exchange.AsyncClient.base_url property: str
+nexus_exchange.AsyncClient.cancel_all_orders async method(self) -> Any
+nexus_exchange.AsyncClient.cancel_order async method(self, order_id: str, market_id: str) -> Any
+nexus_exchange.AsyncClient.claim_credit async method(self, amount: Decimal | str | None = None) -> CreditResult
+nexus_exchange.AsyncClient.claim_faucet async method(self) -> FaucetResponse
+nexus_exchange.AsyncClient.create_api_key async method(self, session_token: str) -> ApiKeyCreated
+nexus_exchange.AsyncClient.create_bridge_deposit_address async method(self, chain: str) -> BridgeDepositAddress
+nexus_exchange.AsyncClient.create_deposit async method(self, amount: Decimal | str, asset: str | None = None) -> DepositResponse
+nexus_exchange.AsyncClient.create_order async method(self, order: OrderRequest) -> OrderResponse
+nexus_exchange.AsyncClient.create_orders async method(self, orders: list[OrderRequest]) -> list[BatchOrderResult]
+nexus_exchange.AsyncClient.create_ws_token async method(self) -> WsToken
+nexus_exchange.AsyncClient.delete_api_key async method(self, key_id: str) -> Any
+nexus_exchange.AsyncClient.delete_tier async method(self, address: str) -> Any
+nexus_exchange.AsyncClient.deposit async method(self, amount: Decimal | str) -> DepositResult
+nexus_exchange.AsyncClient.edit_order async method(self, order_id: str, market_id: str, amend: AmendOrder) -> OrderResponse
+nexus_exchange.AsyncClient.fetch_account_adl_history async method(self, address: str, limit: int | None = None) -> list[AdlEvent]
+nexus_exchange.AsyncClient.fetch_account_fees async method(self) -> AccountFees
+nexus_exchange.AsyncClient.fetch_account_funding async method(self, limit: int | None = None) -> list[AccountFunding]
+nexus_exchange.AsyncClient.fetch_account_state async method(self) -> AccountState
+nexus_exchange.AsyncClient.fetch_account_summary async method(self) -> AccountPortfolioSummary
+nexus_exchange.AsyncClient.fetch_adl_events async method(self, market_id: str, limit: int | None = None) -> list[AdlEvent]
+nexus_exchange.AsyncClient.fetch_adl_history async method(self, address: str, limit: int | None = None) -> list[AdlEvent]
+nexus_exchange.AsyncClient.fetch_agents async method(self) -> list[AgentInfo]
+nexus_exchange.AsyncClient.fetch_api_keys async method(self) -> list[ApiKeyInfo]
+nexus_exchange.AsyncClient.fetch_balance async method(self) -> AccountSummary
+nexus_exchange.AsyncClient.fetch_bridge_assets async method(self) -> BridgeAssetsResponse
+nexus_exchange.AsyncClient.fetch_bridge_deposit async method(self, deposit_id: str) -> BridgeDeposit
+nexus_exchange.AsyncClient.fetch_bridge_deposit_addresses async method(self) -> list[BridgeDepositAddress]
+nexus_exchange.AsyncClient.fetch_bridge_deposits async method(self, limit: int | None = None, chain: str | None = None, asset: str | None = None, status: str | None = None) -> list[BridgeDeposit]
+nexus_exchange.AsyncClient.fetch_cancel_on_disconnect async method(self) -> CancelOnDisconnectStatus
+nexus_exchange.AsyncClient.fetch_closed_positions async method(self, limit: int | None = None) -> list[ClosedPosition]
+nexus_exchange.AsyncClient.fetch_closed_positions_page async method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[ClosedPosition]
+nexus_exchange.AsyncClient.fetch_deposits async method(self, limit: int | None = None) -> list[FundsEntry]
+nexus_exchange.AsyncClient.fetch_equity_history async method(self, limit: int | None = None) -> list[EquityPoint]
+nexus_exchange.AsyncClient.fetch_equity_history_page async method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[EquityPoint]
+nexus_exchange.AsyncClient.fetch_funding_history async method(self, limit: int | None = None) -> list[AccountFunding]
+nexus_exchange.AsyncClient.fetch_funding_rate_history async method(self, market_id: str, limit: int | None = None) -> list[FundingSample]
+nexus_exchange.AsyncClient.fetch_funding_samples async method(self, market_id: str, limit: int | None = None) -> list[FundingPremiumSample]
+nexus_exchange.AsyncClient.fetch_mark_price async method(self, market_id: str) -> MarkPrice
+nexus_exchange.AsyncClient.fetch_market_adl_events async method(self, market_id: str, limit: int | None = None) -> list[AdlEvent]
+nexus_exchange.AsyncClient.fetch_market_risk_params async method(self, market_id: str) -> MarketRiskParams
+nexus_exchange.AsyncClient.fetch_market_status async method(self, market_id: str) -> MarketStatus
+nexus_exchange.AsyncClient.fetch_market_summaries async method(self) -> list[MarketSummary]
+nexus_exchange.AsyncClient.fetch_markets async method(self) -> list[Market]
+nexus_exchange.AsyncClient.fetch_markets_summary async method(self) -> list[MarketSummary]
+nexus_exchange.AsyncClient.fetch_my_trades async method(self, limit: int | None = None) -> list[Fill]
+nexus_exchange.AsyncClient.fetch_my_trades_page async method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[Fill]
+nexus_exchange.AsyncClient.fetch_ohlcv async method(self, market_id: str, timeframe: str | None = None, limit: int | None = None) -> list[Ohlcv]
+nexus_exchange.AsyncClient.fetch_open_orders async method(self) -> list[Order]
+nexus_exchange.AsyncClient.fetch_order async method(self, order_id: str, market_id: str) -> Order
+nexus_exchange.AsyncClient.fetch_order_book async method(self, market_id: str) -> OrderBook
+nexus_exchange.AsyncClient.fetch_order_history async method(self, limit: int | None = None) -> list[OrderHistoryEntry]
+nexus_exchange.AsyncClient.fetch_order_history_page async method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[OrderHistoryEntry]
+nexus_exchange.AsyncClient.fetch_orders async method(self, limit: int | None = None) -> list[OrderHistoryEntry]
+nexus_exchange.AsyncClient.fetch_orders_page async method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[OrderHistoryEntry]
+nexus_exchange.AsyncClient.fetch_portfolio_history async method(self, window: PortfolioWindow | str | None = None, limit: int | None = None) -> PortfolioHistory
+nexus_exchange.AsyncClient.fetch_positions async method(self) -> list[Position]
+nexus_exchange.AsyncClient.fetch_positions_history async method(self, limit: int | None = None) -> list[ClosedPosition]
+nexus_exchange.AsyncClient.fetch_positions_history_page async method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[ClosedPosition]
+nexus_exchange.AsyncClient.fetch_rate_limit_status async method(self) -> RateLimitStatus
+nexus_exchange.AsyncClient.fetch_service_health async method(self) -> ServiceHealth
+nexus_exchange.AsyncClient.fetch_stats async method(self) -> StatsSnapshot
+nexus_exchange.AsyncClient.fetch_stats_history async method(self) -> list[ThroughputSample]
+nexus_exchange.AsyncClient.fetch_status async method(self) -> ServiceHealth
+nexus_exchange.AsyncClient.fetch_ticker async method(self, market_id: str) -> Ticker
+nexus_exchange.AsyncClient.fetch_tickers async method(self) -> dict[str, Ticker]
+nexus_exchange.AsyncClient.fetch_tier_overrides async method(self) -> list[TierOverride]
+nexus_exchange.AsyncClient.fetch_tiers async method(self) -> list[TierOverride]
+nexus_exchange.AsyncClient.fetch_trades async method(self, market_id: str, limit: int | None = None) -> list[Trade]
+nexus_exchange.AsyncClient.fetch_trades_page async method(self, market_id: str, *, limit: int | None = None, cursor: str | None = None) -> Page[Trade]
+nexus_exchange.AsyncClient.fetch_trading_fees async method(self) -> AccountFees
+nexus_exchange.AsyncClient.fetch_withdrawals async method(self) -> list[Withdrawal]
+nexus_exchange.AsyncClient.has_credentials property: bool
+nexus_exchange.AsyncClient.iter_closed_positions method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[ClosedPosition]
+nexus_exchange.AsyncClient.iter_equity_history method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[EquityPoint]
+nexus_exchange.AsyncClient.iter_my_trades method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[Fill]
+nexus_exchange.AsyncClient.iter_order_history method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[OrderHistoryEntry]
+nexus_exchange.AsyncClient.iter_orders method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[OrderHistoryEntry]
+nexus_exchange.AsyncClient.iter_positions_history method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[ClosedPosition]
+nexus_exchange.AsyncClient.iter_trades method(self, market_id: str, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[Trade]
+nexus_exchange.AsyncClient.list_bridge_deposit_addresses async method(self) -> list[BridgeDepositAddress]
+nexus_exchange.AsyncClient.login async method(self, signer: EthSigner) -> LoginResponse
+nexus_exchange.AsyncClient.network property: NetworkConfig
+nexus_exchange.AsyncClient.preview_order async method(self, order: OrderRequest) -> PreviewResponse
+nexus_exchange.AsyncClient.register_agent async method(self, registration: AgentRegistration) -> AgentRegistered
+nexus_exchange.AsyncClient.reset_account_tier async method(self, address: str) -> Any
+nexus_exchange.AsyncClient.revoke_agent async method(self, address: str) -> Any
+nexus_exchange.AsyncClient.set_account_tier async method(self, address: str, tier: str) -> TierOverride
+nexus_exchange.AsyncClient.set_cancel_on_disconnect async method(self, enabled: bool) -> CancelOnDisconnectStatus
+nexus_exchange.AsyncClient.set_tier async method(self, address: str, tier: str) -> TierOverride
+nexus_exchange.AsyncClient.sign_in async method(self, signer: EthSigner) -> LoginResponse
 nexus_exchange.AuthError exception(NexusExchangeError)
 nexus_exchange.AuthError.transient attribute: bool
 nexus_exchange.BatchOrderResult dataclass(frozen)
@@ -204,7 +304,7 @@ nexus_exchange.CancelOnDisconnectStatus.enabled field: bool
 nexus_exchange.CancelOnDisconnectStatus.from_dict classmethod(d: dict[str, Any]) -> CancelOnDisconnectStatus
 nexus_exchange.CancelOnDisconnectStatus.grace_secs field: int | None
 nexus_exchange.CancelOnDisconnectStatus.raw field: dict[str, Any]
-nexus_exchange.Client class
+nexus_exchange.Client class(_ClientCore)
 nexus_exchange.Client(network: Network | NetworkConfig | str | None = None, *, base_url: str | None = None, api_key: str | None = None, api_secret: str | None = None, api_version: str | None = None, timeout: float = 30.0, http_client: httpx.Client | None = None, retry: RetryConfig | None = None, agent: AgentSigner | None = None) -> None
 nexus_exchange.Client.__enter__ method(self) -> Client
 nexus_exchange.Client.__exit__ method(self, *exc: object) -> None
@@ -793,6 +893,8 @@ nexus_exchange.WsToken.from_dict classmethod(d: dict[str, Any]) -> WsToken
 nexus_exchange.WsToken.raw field: dict[str, Any]
 nexus_exchange.WsToken.token field: str
 nexus_exchange.__version__ constant: str
+nexus_exchange.aiter_items function(fetch_page: Callable[[str | None], Awaitable[Page[T]]], *, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[T]
+nexus_exchange.aiter_pages function(fetch_page: Callable[[str | None], Awaitable[Page[T]]], *, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[Page[T]]
 nexus_exchange.ccxt_adapter.NexusExchange class
 nexus_exchange.ccxt_adapter.NexusExchange(*, network: Network | NetworkConfig | str | None = None, base_url: str | None = None, client: Client | None = None) -> None
 nexus_exchange.ccxt_adapter.NexusExchange.__enter__ method(self) -> NexusExchange
@@ -810,3 +912,5 @@ nexus_exchange.ccxt_adapter.NexusExchange.markets attribute: dict[str, dict[str,
 nexus_exchange.ccxt_adapter.NexusExchange.symbols attribute: list[str] (set in __init__)
 nexus_exchange.iter_items function(fetch_page: Callable[[str | None], Page[T]], *, cursor: str | None = None, max_pages: int | None = None) -> Iterator[T]
 nexus_exchange.iter_pages function(fetch_page: Callable[[str | None], Page[T]], *, cursor: str | None = None, max_pages: int | None = None) -> Iterator[Page[T]]
+nexus_exchange.round_price function(market: Market, price: Decimal, side: str) -> Decimal
+nexus_exchange.round_size function(market: Market, size: Decimal) -> Decimal
