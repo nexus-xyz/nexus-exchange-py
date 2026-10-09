@@ -142,7 +142,7 @@ def _resolve_version() -> str:
     try:
         return metadata.version(_DISTRIBUTION_NAME)
     except metadata.PackageNotFoundError:  # pragma: no cover - only without an install
-        return "0.7.0"  # x-release-please-version
+        return "0.8.0"  # x-release-please-version
 
 
 #: Package version, resolved from installed distribution metadata.

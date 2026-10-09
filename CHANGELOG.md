@@ -15,6 +15,31 @@ future release below it. To improve the wording of a release, edit
 below `0.4.0` predate this and follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.8.0](https://github.com/nexus-xyz/nexus-exchange-py/compare/v0.7.0...v0.8.0) (2026-10-09)
+
+
+### ⚠ BREAKING CHANGES
+
+* **auth:** Client.revoke_agent(address) and AsyncClient.revoke_agent(address) now take an AgentRevocation. Migration: sign with EthSigner.revoke_agent(agent, nonce=<unix ms>, chain_id=..., network=...) and pass the result. The request no longer sends HMAC credentials, which the server refuses on this route from spec 0.9.119.
+
+### Features
+
+* add AsyncClient, an async REST client with the sync surface (ENG-20361) ([#109](https://github.com/nexus-xyz/nexus-exchange-py/issues/109)) ([08c5a42](https://github.com/nexus-xyz/nexus-exchange-py/commit/08c5a42a15c388ec73ec210a04361680ef4bd105))
+* **auth:** revoke agents with the wallet signature (ENG-20579) ([#112](https://github.com/nexus-xyz/nexus-exchange-py/issues/112)) ([31df515](https://github.com/nexus-xyz/nexus-exchange-py/commit/31df515a65e29ab9d8c7c80eb5952f51de474736))
+* **auth:** sign the typed trading actions on the eight order routes (ENG-20652) ([#113](https://github.com/nexus-xyz/nexus-exchange-py/issues/113)) ([a5d1f03](https://github.com/nexus-xyz/nexus-exchange-py/commit/a5d1f03800d4aa27bd5973a445725a8f986715f1))
+* **markets:** round_price and round_size tick/lot helpers, matching the Rust SDK (ENG-20360) ([#108](https://github.com/nexus-xyz/nexus-exchange-py/issues/108)) ([15012c4](https://github.com/nexus-xyz/nexus-exchange-py/commit/15012c46f76322b7bf4587c2b7fde43f4b2ad803))
+
+
+### Bug Fixes
+
+* **types:** decode market ids from the served id/base/quote keys (ENG-19673) ([#106](https://github.com/nexus-xyz/nexus-exchange-py/issues/106)) ([8f846e7](https://github.com/nexus-xyz/nexus-exchange-py/commit/8f846e7459ab697b54012c6518707cfd67879fd7))
+
+
+### Documentation
+
+* publish a pdoc API reference to GitHub Pages on release (ENG-20362) ([#111](https://github.com/nexus-xyz/nexus-exchange-py/issues/111)) ([11fb180](https://github.com/nexus-xyz/nexus-exchange-py/commit/11fb1809fc16d7a29fd27ce02c846761664219d2))
+* state real coverage and beta status in the README (ENG-20357) ([#110](https://github.com/nexus-xyz/nexus-exchange-py/issues/110)) ([c3ec8f8](https://github.com/nexus-xyz/nexus-exchange-py/commit/c3ec8f8e8fb7f5e21c949516141a95918c794fa9))
+
 ## [0.7.0](https://github.com/nexus-xyz/nexus-exchange-py/compare/v0.6.0...v0.7.0) (2026-10-01)
 
 
