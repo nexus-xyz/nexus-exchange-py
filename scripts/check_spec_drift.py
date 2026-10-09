@@ -48,11 +48,12 @@ Five invariants are enforced:
 
 3. client credential <-> the spec's declared `security` (ENG-13303)
    Same AST walk, one more axis: the credential each call sends (`signed=True` ->
-   HMAC, `bearer=` -> session token, neither -> unauthenticated) must satisfy the
-   `security` the pinned spec declares for that operation. Nine operations
-   disagreed when this was first measured by hand — including a public one the
-   client signed, which made it unreachable without credentials — and nothing
-   noticed, because agreement on the *path* was all anything checked. The
+   HMAC, `bearer=` -> session token, `wallet=` -> wallet signature, none of them
+   -> unauthenticated) must satisfy the `security` the pinned spec declares for
+   that operation. Nine operations disagreed when this was first measured by
+   hand — including a public one the client signed, which made it unreachable
+   without credentials — and nothing noticed, because agreement on the *path*
+   was all anything checked. The
    surviving disagreements are pinned in `SECURITY_EXCEPTIONS`, which fails when
    one is resolved as loudly as when a new one appears.
 
@@ -185,14 +186,19 @@ NOT_TARGETED: dict[tuple[str, str], str] = {
 
 # -- invariant 3: the credential a call sends vs. the security it declares ------
 
-# The three credentials `Client._send` can put on a request, and the spec scheme
-# each one satisfies. They are mutually exclusive by construction — `_send`
-# refuses `signed=True` together with `bearer=`, and this walk refuses the same
-# pair statically, so exactly one of these describes any call.
+# The credentials `Client._send` can put on a request, and the spec scheme each
+# one satisfies. They are mutually exclusive: `_send` refuses `signed=True`
+# together with `bearer=`, and this walk refuses any two statically, so exactly
+# one of these describes any call.
 AUTH_HMAC = "hmac"  # signed=True  -> X-API-Key + X-Timestamp + X-Signature
 AUTH_BEARER = "bearer"  # bearer=…      -> Authorization: Bearer <session token>
-AUTH_PUBLIC = "public"  # neither       -> no credential at all
-SCHEME_FOR_AUTH = {AUTH_HMAC: "hmacAuth", AUTH_BEARER: "bearerAuth"}
+AUTH_WALLET = "wallet"  # wallet=…      -> the four x-wallet-* headers (EIP-712)
+AUTH_PUBLIC = "public"  # none          -> no credential at all
+SCHEME_FOR_AUTH = {
+    AUTH_HMAC: "hmacAuth",
+    AUTH_BEARER: "bearerAuth",
+    AUTH_WALLET: "walletSignature",
+}
 
 # How a declaration with no scheme in it renders. An operation is public when it
 # declares `security: []`, when it declares an empty `{}` alternative, or when it
@@ -219,7 +225,7 @@ PUBLIC_DECLARATION = "public"
 # prints all of them, because a tolerated divergence nobody sees is one nobody
 # resolves.
 #
-# The four shapes, as filed:
+# The five shapes, as filed:
 #
 #   1. `GET /keys`, `DELETE /keys/{key_id}` declare `bearerAuth` ("used only for
 #      API key management") and the client signs them with the caller's API key.
@@ -238,7 +244,14 @@ PUBLIC_DECLARATION = "public"
 #      documented and exercised as public, and every keyless quickstart depends on
 #      it — so the spec almost certainly over-declares, but it does declare it.
 #
-# The fourth shape — `GET /api/v1/bridge/assets`, declared public and sent signed
+#   4. `DELETE /agents/{address}` declares `hmacAuth` in the pinned v0.8.1, and
+#      the client sends the owner wallet's signature (ENG-20579). Not a contract
+#      question: the monorepo's spec 0.9.119 (nexus-xyz/nexus#15232) declares
+#      `walletSignature` only, and the server already accepts it. The entry goes
+#      stale, and red, once a published tag carrying that declaration is pinned;
+#      delete it then.
+#
+# The other shape — `GET /api/v1/bridge/assets`, declared public and sent signed
 # — is NOT here: it was the one row with no contract question attached (the client
 # was strictly stricter than the contract, at the cost of making a public read
 # unreachable without credentials) and it was fixed in the same change that added
@@ -255,6 +268,7 @@ SECURITY_EXCEPTIONS: dict[tuple[str, str], tuple[str, str]] = {
     ("GET", "/markets"): (AUTH_PUBLIC, "hmacAuth"),
     ("GET", "/markets/{}/adl-events"): (AUTH_PUBLIC, "hmacAuth"),
     ("GET", "/account/{}/adl-history"): (AUTH_PUBLIC, "hmacAuth"),
+    ("DELETE", "/agents/{}"): (AUTH_WALLET, "hmacAuth"),
 }
 
 
@@ -527,6 +541,7 @@ def requested_ops(modules, api_v1_prefix):
             direct = False
             signed = False
             bearer = False
+            wallet = False
             for kw in node.keywords:
                 if kw.arg is None:
                     fail(
@@ -554,15 +569,25 @@ def requested_ops(modules, api_v1_prefix):
                     # explicit `bearer=None` is the parameter's own default and
                     # sends no credential, so it reads as absent.
                     bearer = not (isinstance(kw.value, ast.Constant) and kw.value.value is None)
-            if signed and bearer:
-                # `_send` raises on this pair at runtime; refusing it here too means
-                # the walk never has to guess which of two credentials a call sends.
+                elif kw.arg == "wallet":
+                    # Presence decides, as for `bearer=`: the headers are a
+                    # runtime signature.
+                    wallet = not (isinstance(kw.value, ast.Constant) and kw.value.value is None)
+            if signed + bearer + wallet > 1:
+                # Refusing it here means the walk never has to guess which of two
+                # credentials a call sends.
                 fail(
-                    f"{where}: {called}() passes both `signed=True` and `bearer=`; a "
-                    f"request carries one credential, and {SENDING_FUNC}() refuses this "
-                    f"pair at runtime."
+                    f"{where}: {called}() passes more than one of `signed=True`, "
+                    f"`bearer=` and `wallet=`; a request carries one credential."
                 )
-            auth = AUTH_HMAC if signed else (AUTH_BEARER if bearer else AUTH_PUBLIC)
+            if signed:
+                auth = AUTH_HMAC
+            elif bearer:
+                auth = AUTH_BEARER
+            elif wallet:
+                auth = AUTH_WALLET
+            else:
+                auth = AUTH_PUBLIC
             resolved = f"{api_v1_prefix}{literal}" if direct else literal
             ops.setdefault((method, normalize_path(resolved)), []).append(
                 RequestCall(where, auth, enclosing.get(node))

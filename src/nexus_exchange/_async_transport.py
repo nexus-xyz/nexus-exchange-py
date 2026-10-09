@@ -44,6 +44,7 @@ class _AsyncTransport(_ClientCore):
         http_client: httpx.AsyncClient | None = None,
         retry: RetryConfig | None = None,
         agent: AgentSigner | None = None,
+        acting_account: str | None = None,
     ) -> None:
         super().__init__(
             network,
@@ -53,6 +54,7 @@ class _AsyncTransport(_ClientCore):
             api_version=api_version,
             retry=retry,
             agent=agent,
+            acting_account=acting_account,
         )
         self._owns_http = http_client is None
         self._http = http_client or httpx.AsyncClient(timeout=timeout)
@@ -82,9 +84,12 @@ class _AsyncTransport(_ClientCore):
         body: Any | None = None,
         signed: bool = False,
         bearer: str | None = None,
+        wallet: dict[str, str] | None = None,
     ) -> httpx.Response:
         """The async twin of ``Client._send``: same steps, awaited I/O."""
-        req = self._prepare(method, path, query=query, body=body, signed=signed, bearer=bearer)
+        req = self._prepare(
+            method, path, query=query, body=body, signed=signed, bearer=bearer, wallet=wallet
+        )
         attempt = 0
         while True:
             headers = self._attempt_headers(req)
@@ -111,8 +116,11 @@ class _AsyncTransport(_ClientCore):
         body: Any | None = None,
         signed: bool = False,
         bearer: str | None = None,
+        wallet: dict[str, str] | None = None,
     ) -> Any:
-        resp = await self._send(method, path, query=query, body=body, signed=signed, bearer=bearer)
+        resp = await self._send(
+            method, path, query=query, body=body, signed=signed, bearer=bearer, wallet=wallet
+        )
         return _decode_body(resp)
 
     async def _request_page(

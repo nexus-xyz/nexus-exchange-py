@@ -25,6 +25,7 @@ from nexus_exchange import (
     AgentSigner,
     AuthError,
     Client,
+    EthSigner,
     MissingCredentialsError,
     Network,
     OrderRequest,
@@ -226,17 +227,21 @@ def test_each_retry_attempt_gets_a_fresh_timestamp_and_nonce(httpx_mock) -> None
 # -- credential precedence ------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "hmac",
-    [
-        {"api_key": "nx_test", "api_secret": _HMAC_SECRET},
-        {"api_key": "nx_test"},
-        {"api_secret": _HMAC_SECRET},
-    ],
-)
-def test_agent_and_any_hmac_field_together_is_refused(hmac: dict[str, str]) -> None:
-    with pytest.raises(ValueError, match="not both"):
+@pytest.mark.parametrize("hmac", [{"api_key": "nx_test"}, {"api_secret": _HMAC_SECRET}])
+def test_agent_with_half_an_hmac_key_is_refused(hmac: dict[str, str]) -> None:
+    with pytest.raises(ValueError, match="together"):
         Client(Network.LOCAL, agent=AgentSigner.from_hex(_KEY), **hmac)
+
+
+def test_agent_and_hmac_together_authenticate_with_hmac(httpx_mock) -> None:
+    # D26: HMAC authenticates; the agent only signs trading actions.
+    httpx_mock.add_response(url="http://localhost:9090/orders", json=[])
+    agent = AgentSigner.from_hex(_KEY)
+    with Client(Network.LOCAL, agent=agent, api_key="nx_test", api_secret=_HMAC_SECRET) as c:
+        c.fetch_open_orders()
+    (req,) = httpx_mock.get_requests()
+    assert req.headers["x-api-key"] == "nx_test"
+    assert "x-agent" not in req.headers
 
 
 def test_agent_must_be_an_agent_signer() -> None:
@@ -285,7 +290,6 @@ def test_public_call_on_an_agent_client_sends_no_credential(httpx_mock) -> None:
     ("call", "method", "path"),
     [
         (lambda c: c.fetch_agents(), "GET", "/agents"),
-        (lambda c: c.revoke_agent("0xabc"), "DELETE", "/agents/0xabc"),
     ],
 )
 def test_agent_forbidden_operations_are_refused_before_any_request(
@@ -300,6 +304,22 @@ def test_agent_forbidden_operations_are_refused_before_any_request(
     assert (exc.value.method, exc.value.path) == (method, path)
     assert isinstance(exc.value, MissingCredentialsError)
     assert httpx_mock.get_requests() == []
+
+
+def test_agent_client_revokes_with_the_wallet_signature_only(httpx_mock) -> None:
+    wallet = EthSigner.from_hex("11" * 32)
+    rev = wallet.revoke_agent(_AGENT, 1_790_000_000_000, 20056, network=Network.LOCAL)
+    httpx_mock.add_response(
+        url=f"http://localhost:9090/agents/{rev.agent}", method="DELETE", json={}
+    )
+    with _agent_client() as client:
+        client.revoke_agent(rev)
+        assert client.agent is not None
+        assert client.agent.next_nonce(0) == 1, "the revoke consumed no agent nonce"
+    (req,) = httpx_mock.get_requests()
+    assert req.headers["x-wallet-account"] == wallet.address
+    for name in ("x-agent", "x-nonce", "x-signature", "x-timestamp"):
+        assert name not in req.headers
 
 
 @pytest.mark.parametrize(

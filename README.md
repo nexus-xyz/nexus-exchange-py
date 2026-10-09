@@ -73,7 +73,7 @@ from the environment — no secrets in source).
 | Funding / mark price / status — `GET /markets/{id}/{funding,mark-price,status}` | ✅ implemented |
 | ADL events — `GET /markets/{id}/adl-events`, `/account/{addr}/adl-history` | ✅ implemented |
 | HMAC request signing (the plumbing for authed calls) | ✅ implemented |
-| Wallet-signed auth — `login` (EIP-191) + `register_agent` (EIP-712) | ✅ implemented |
+| Wallet-signed auth — `login` (EIP-191), `register_agent` and `revoke_agent` (EIP-712) | ✅ implemented |
 | Agent-key request signing — `x-agent` / `x-timestamp` / `x-nonce` / `x-signature` (`Client(agent=AgentSigner…)`) | ✅ implemented — trade-only; see [Agent-key request signing](#agent-key-request-signing) |
 | CCXT-compatible adapter — public market data | ✅ implemented, frozen: no private methods; superseded by upstream `ccxt.nexus`, see [CCXT compatibility](#ccxt-compatibility) |
 | Error taxonomy (terminal vs transient, incl. the jurisdiction `403`) | ✅ implemented |
@@ -206,12 +206,14 @@ Three things worth knowing before you pick one:
   new client *and* new credentials — never carry a signature, nonce or agent
   registration across.
 - **The signing domain's `chain_id` is not published statically.** Read it from
-  the edge's `/metadata` for the network you are on. `register_agent` refuses to
-  sign without one rather than defaulting: a wrong domain either fails
-  verification or produces a signature valid on a *different* network.
-- **`register_agent` needs the network.** The server salts the `RegisterAgent`
-  domain with `keccak256(network name)`, so pass `network=` (the salt is in
-  `signing_domain.salt`). A custom target has no salt and is refused.
+  the edge's `/metadata` for the network you are on. `register_agent` and
+  `revoke_agent` refuse to sign without one rather than defaulting: a wrong
+  domain either fails verification or produces a signature valid on a
+  *different* network.
+- **`register_agent` and `revoke_agent` need the network.** The server salts the
+  agent-management domain with `keccak256(network name)`, so pass `network=`
+  (the salt is in `signing_domain.salt`). A custom target has no salt and is
+  refused.
 
 The retired `stable` / `beta` release channels were never networks. `stable`
 became `Network.TESTNET` (same target); `beta` is now a custom target:
@@ -331,10 +333,12 @@ is the low-level escape hatch in the meantime.
 
 ### Wallet-signed auth
 
-The HMAC scheme above signs *requests* with an API key. The two wallet-authorized
-flows are different: an EVM wallet key authorizes a **session** or an **agent
-key**, with the signature carried in the request *body* (these POSTs are
-themselves unauthenticated). This mirrors the
+The HMAC scheme above signs *requests* with an API key. The wallet-authorized
+flows are different: an EVM wallet key authorizes a **session**, an **agent
+key**, or an agent key's **revocation**. Login and registration carry the
+signature in the request *body* (those POSTs are themselves unauthenticated);
+revocation carries it in four `x-wallet-*` headers, the only credential
+`DELETE /agents/{address}` accepts. This mirrors the
 [Rust SDK](https://github.com/nexus-xyz/nexus-exchange-rs)'s `EthSigner` and the
 digests are cross-checked, byte-for-byte, against the server's known-answer
 vectors.
@@ -345,6 +349,8 @@ pattern; there is no key prompt or file handling). It needs the
 with the SDK.
 
 ```python
+import time
+
 from nexus_exchange import Client, EthSigner
 
 signer = EthSigner.from_hex("0x<wallet-private-key>")  # you own the key
@@ -360,12 +366,23 @@ with Client() as client:
         agent="0x<agent-address>",
         expires_at_ms=1_782_000_000_000,
         nonce=1,
-        chain_id=393,
+        chain_id=20056,
         network=client.network,  # salts the domain: valid on this network only
         label="my-bot",
     )
     registered = client.register_agent(registration)
     print(registered.agent_address, registered.expires_at)
+
+    # EIP-712 → DELETE /agents/{address}. The nonce is the Unix time in ms when
+    # you sign: it must be within [now - 5 min, now + 60 s] and strictly greater
+    # than this wallet's last rename/revoke nonce, so sign a fresh one per call.
+    revocation = signer.revoke_agent(
+        agent="0x<agent-address>",
+        nonce=int(time.time() * 1000),
+        chain_id=20056,
+        network=client.network,
+    )
+    client.revoke_agent(revocation)  # sends no HMAC: any client can revoke
 ```
 
 ### Agent-key request signing
@@ -394,11 +411,10 @@ EIP-191 prefix**, signed low-S as `0x` + 65-byte `r||s||v` with `v ∈ {27, 28}`
 `x-timestamp` must be within ±30 s of the server's clock. The signer's output is
 pinned byte-for-byte to the spec's `x-nexus-test-vectors`.
 
-- **One credential per client.** `agent=` together with `api_key` or `api_secret`
-  raises `ValueError`: the two schemes share the `x-timestamp` / `x-signature`
-  header names, and the server would pick one identity for you. Use two clients.
-  A session token passed to `create_api_key` is unaffected — that call sends only
-  the bearer.
+- **One request credential.** `agent=` together with `api_key` *and*
+  `api_secret` authenticates with HMAC; the agent then only signs trading actions
+  (below). Half an HMAC key beside an agent raises `ValueError`. A session token
+  passed to `create_api_key` is unaffected — that call sends only the bearer.
 - **Nonces.** The signer issues `max(last + 1, timestamp_ms)` under a lock, so
   nonces are unique and increasing per signer, across threads and restarts.
   Writes must carry a strictly increasing nonce; reads don't consume one. Every
@@ -412,10 +428,36 @@ pinned byte-for-byte to the spec's `x-nexus-test-vectors`.
   agent key per concurrent writer (and per process).
 - **Agent keys cannot withdraw.** They are trade-only. An agent client refuses
   any withdrawal route (`/withdrawals`, `/account/withdraw`,
-  `/bridge/withdrawals`) and agent management (`fetch_agents`, `revoke_agent`)
-  **locally**, with `AgentKeyRefusedError`, before anything is signed or sent —
-  the server would `403` them. Use an HMAC client for those; `create_ws_token`
-  accepts agent keys.
+  `/bridge/withdrawals`) and `fetch_agents` **locally**, with
+  `AgentKeyRefusedError`, before anything is signed or sent — the server would
+  `403` them. Use an HMAC client for those; `create_ws_token` accepts agent
+  keys. `revoke_agent` works from any client: the wallet's signature is its
+  credential.
+
+#### Signed trading actions
+
+The eight order-path writes (`POST /orders`, `POST /orders/batch`,
+`PATCH /orders/{id}`, `DELETE /orders/{id}`, `DELETE /orders`,
+`POST /account/margin`, `POST /account/margin-mode`, `POST /leverage`) can carry
+an EIP-712 action signed by an agent key (spec "Signed trading actions"). Once
+the engine enforces it, an order without one is refused, **HMAC orders
+included**. On a network whose `deployment_domain` is set, the agent signs the
+route's struct into `x-action-signature` / `x-action-timestamp` /
+`x-action-nonce`: an agent-only client sends them with `x-agent` in place of the
+canonical string, and an HMAC client given `agent=` sends them beside its HMAC
+headers. The struct names the account, so the agent needs `account=`:
+
+```python
+agent = AgentSigner.from_hex("0x<agent-private-key>", account="0x<wallet>")
+dev = NetworkConfig.custom(
+    label="dev", funds=Funds.PLAY, base_url="https://<apps-dev>", deployment_domain="devnet"
+)
+with Client(dev, agent=agent) as client:  # add acting_account="0x<sub>" for a subaccount
+    client.create_order(order)
+```
+
+No named network sets `deployment_domain` yet (the server refuses a typed action
+it has no domain for), so on those every request keeps the canonical string.
 
 ## Bridge
 

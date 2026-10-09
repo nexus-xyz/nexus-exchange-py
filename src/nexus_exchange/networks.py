@@ -145,10 +145,11 @@ class SigningDomain:
     ``salt`` is ``keccak256(network name)`` and is what the server binds a
     ``RegisterAgent`` signature to its network with (ENG-15643): a registration
     signed for testnet does not verify on mainnet. It is published per network
-    in the spec's ``x-nexus-networks[*].signing_domain``. Only ``RegisterAgent``
-    is signed under it; the server leaves ``RevokeAgent`` and ``WithdrawIntent``
-    unsalted. ``None`` on a custom target, where no network name is known, and
-    agent registration refuses to sign there rather than drop the salt.
+    in the spec's ``x-nexus-networks[*].signing_domain``. The agent-management
+    messages (``RegisterAgent``, ``ListAgents``, ``RenameAgent``,
+    ``RevokeAgentKey``) are signed under it; ``WithdrawIntent`` is not. ``None``
+    on a custom target, where no network name is known, and agent registration
+    and revocation refuse to sign there rather than drop the salt.
     """
 
     name: str = _DOMAIN_NAME
@@ -158,7 +159,7 @@ class SigningDomain:
 
 
 def _network_salt(network: str) -> bytes:
-    """The ``RegisterAgent`` domain salt for a named network: ``keccak256(network)``."""
+    """The agent-management domain salt for a named network: ``keccak256(network)``."""
     return keccak(text=network)
 
 
@@ -344,6 +345,14 @@ class NetworkConfig:
     #: verifies.
     base_url: str | None
 
+    #: The deployment's name as its operator configures it (``devnet`` on
+    #: apps-dev), signed as the ``domain`` field of every trading action (spec
+    #: "Signed trading actions"). ``None`` where the server has none configured:
+    #: the agent then keeps signing the canonical string, because the server
+    #: refuses a typed action it has no domain for. Unset on every named network
+    #: today; set it with :meth:`custom`.
+    deployment_domain: str | None = None
+
     def __post_init__(self) -> None:
         """Enforce the invariants on every instance, however it was built.
 
@@ -431,6 +440,7 @@ class NetworkConfig:
         chain_id: int | None = None,
         ws_market_data_url: str | None = None,
         ws_authenticated_url: str | None = None,
+        deployment_domain: str | None = None,
     ) -> NetworkConfig:
         """Build a frozen config for a deployment this SDK ships no hostname for.
 
@@ -463,6 +473,10 @@ class NetworkConfig:
         The two WebSocket bases are informational and default to empty. Nothing
         reads them on your behalf: :class:`~nexus_exchange.ws.WsClient` connects
         only to the URL you pass it.
+
+        ``deployment_domain`` is the target's deployment name (``devnet`` for
+        apps-dev). With it set, an agent key signs the eight order-path routes'
+        typed trading actions; see :attr:`deployment_domain`.
         """
         cleaned_base = _clean_base_url(base_url, "base_url")
         try:
@@ -492,6 +506,7 @@ class NetworkConfig:
             ws_authenticated_url=(ws_authenticated_url or "").strip(),
             signing_domain=SigningDomain(chain_id=chain_id),
             base_url=cleaned_base,
+            deployment_domain=(deployment_domain or "").strip() or None,
         )
 
 
