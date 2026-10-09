@@ -97,14 +97,24 @@ nexus_exchange.AgentRegistration.nonce field: int
 nexus_exchange.AgentRegistration.signature field: str
 nexus_exchange.AgentRegistration.to_dict method(self) -> dict[str, Any]
 nexus_exchange.AgentRegistration.wallet field: str
+nexus_exchange.AgentRevocation dataclass(frozen)
+nexus_exchange.AgentRevocation(account: str, agent: str, nonce: int, signature: str, chain_id: int) -> None
+nexus_exchange.AgentRevocation.account field: str
+nexus_exchange.AgentRevocation.agent field: str
+nexus_exchange.AgentRevocation.chain_id field: int
+nexus_exchange.AgentRevocation.headers method(self) -> dict[str, str]
+nexus_exchange.AgentRevocation.nonce field: int
+nexus_exchange.AgentRevocation.signature field: str
 nexus_exchange.AgentSigner class
-nexus_exchange.AgentSigner(private_key: PrivateKey, address: bytes) -> None
+nexus_exchange.AgentSigner(private_key: PrivateKey, address: bytes, account: bytes | None = None) -> None
 nexus_exchange.AgentSigner.__repr__ method(self) -> str
+nexus_exchange.AgentSigner.account property: str | None
 nexus_exchange.AgentSigner.address property: str
-nexus_exchange.AgentSigner.from_hex classmethod(private_key: str) -> AgentSigner
+nexus_exchange.AgentSigner.from_hex classmethod(private_key: str, *, account: str | None = None) -> AgentSigner
 nexus_exchange.AgentSigner.headers method(self, method: str, path: str, query: str, body: bytes, timestamp_ms: int) -> dict[str, str]
 nexus_exchange.AgentSigner.next_nonce method(self, floor: int) -> int
 nexus_exchange.AgentSigner.sign_request method(self, method: str, path: str, query: str, body: bytes, timestamp_ms: int, nonce: int) -> dict[str, str]
+nexus_exchange.AgentSigner.sign_trading_action method(self, action: tuple[str, dict[str, Any]], *, domain: str, timestamp_ms: int, nonce: int, acting_account: str | None = None) -> dict[str, str]
 nexus_exchange.AmendOrder dataclass(frozen)
 nexus_exchange.AmendOrder(price: Decimal | None = None, size: Decimal | None = None) -> None
 nexus_exchange.AmendOrder.has_changes method(self) -> bool
@@ -133,7 +143,7 @@ nexus_exchange.ApiKeyInfo.key_id field: str
 nexus_exchange.ApiKeyInfo.raw field: dict[str, Any]
 nexus_exchange.ApiKeyInfo.tier field: str
 nexus_exchange.AsyncClient class(_AsyncTransport)
-nexus_exchange.AsyncClient(network: Network | NetworkConfig | str | None = None, *, base_url: str | None = None, api_key: str | None = None, api_secret: str | None = None, api_version: str | None = None, timeout: float = 30.0, http_client: httpx.AsyncClient | None = None, retry: RetryConfig | None = None, agent: AgentSigner | None = None) -> None
+nexus_exchange.AsyncClient(network: Network | NetworkConfig | str | None = None, *, base_url: str | None = None, api_key: str | None = None, api_secret: str | None = None, api_version: str | None = None, timeout: float = 30.0, http_client: httpx.AsyncClient | None = None, retry: RetryConfig | None = None, agent: AgentSigner | None = None, acting_account: str | None = None) -> None
 nexus_exchange.AsyncClient.__aenter__ async method(self: _Self) -> _Self
 nexus_exchange.AsyncClient.__aexit__ async method(self, *exc: object) -> None
 nexus_exchange.AsyncClient.aclose async method(self) -> None
@@ -227,7 +237,7 @@ nexus_exchange.AsyncClient.network property: NetworkConfig
 nexus_exchange.AsyncClient.preview_order async method(self, order: OrderRequest) -> PreviewResponse
 nexus_exchange.AsyncClient.register_agent async method(self, registration: AgentRegistration) -> AgentRegistered
 nexus_exchange.AsyncClient.reset_account_tier async method(self, address: str) -> Any
-nexus_exchange.AsyncClient.revoke_agent async method(self, address: str) -> Any
+nexus_exchange.AsyncClient.revoke_agent async method(self, revocation: AgentRevocation) -> Any
 nexus_exchange.AsyncClient.set_account_tier async method(self, address: str, tier: str) -> TierOverride
 nexus_exchange.AsyncClient.set_cancel_on_disconnect async method(self, enabled: bool) -> CancelOnDisconnectStatus
 nexus_exchange.AsyncClient.set_tier async method(self, address: str, tier: str) -> TierOverride
@@ -305,7 +315,7 @@ nexus_exchange.CancelOnDisconnectStatus.from_dict classmethod(d: dict[str, Any])
 nexus_exchange.CancelOnDisconnectStatus.grace_secs field: int | None
 nexus_exchange.CancelOnDisconnectStatus.raw field: dict[str, Any]
 nexus_exchange.Client class(_ClientCore)
-nexus_exchange.Client(network: Network | NetworkConfig | str | None = None, *, base_url: str | None = None, api_key: str | None = None, api_secret: str | None = None, api_version: str | None = None, timeout: float = 30.0, http_client: httpx.Client | None = None, retry: RetryConfig | None = None, agent: AgentSigner | None = None) -> None
+nexus_exchange.Client(network: Network | NetworkConfig | str | None = None, *, base_url: str | None = None, api_key: str | None = None, api_secret: str | None = None, api_version: str | None = None, timeout: float = 30.0, http_client: httpx.Client | None = None, retry: RetryConfig | None = None, agent: AgentSigner | None = None, acting_account: str | None = None) -> None
 nexus_exchange.Client.__enter__ method(self) -> Client
 nexus_exchange.Client.__exit__ method(self, *exc: object) -> None
 nexus_exchange.Client.add_margin method(self, market_id: str, direction: str, amount: Decimal | str) -> MarginAdjustment
@@ -399,7 +409,7 @@ nexus_exchange.Client.network property: NetworkConfig
 nexus_exchange.Client.preview_order method(self, order: OrderRequest) -> PreviewResponse
 nexus_exchange.Client.register_agent method(self, registration: AgentRegistration) -> AgentRegistered
 nexus_exchange.Client.reset_account_tier method(self, address: str) -> Any
-nexus_exchange.Client.revoke_agent method(self, address: str) -> Any
+nexus_exchange.Client.revoke_agent method(self, revocation: AgentRevocation) -> Any
 nexus_exchange.Client.set_account_tier method(self, address: str, tier: str) -> TierOverride
 nexus_exchange.Client.set_cancel_on_disconnect method(self, enabled: bool) -> CancelOnDisconnectStatus
 nexus_exchange.Client.set_tier method(self, address: str, tier: str) -> TierOverride
@@ -451,6 +461,7 @@ nexus_exchange.EthSigner.address property: str
 nexus_exchange.EthSigner.checksum_address property: str
 nexus_exchange.EthSigner.from_hex classmethod(private_key: str) -> EthSigner
 nexus_exchange.EthSigner.register_agent method(self, agent: str, expires_at_ms: int, nonce: int, chain_id: int, label: str | None = None, *, network: Network | NetworkConfig | str) -> AgentRegistration
+nexus_exchange.EthSigner.revoke_agent method(self, agent: str, nonce: int, chain_id: int, *, network: Network | NetworkConfig | str) -> AgentRevocation
 nexus_exchange.EthSigner.sign_in method(self) -> LoginRequest
 nexus_exchange.FILLS_LIMIT_MAX constant: int
 nexus_exchange.FUNDING_SAMPLES_LIMIT_MAX constant: int
@@ -588,9 +599,10 @@ nexus_exchange.Network.signing_domain property: SigningDomain
 nexus_exchange.Network.ws_authenticated_url property: str
 nexus_exchange.Network.ws_market_data_url property: str
 nexus_exchange.NetworkConfig dataclass(frozen)
-nexus_exchange.NetworkConfig(label: str, funds: Funds, has_faucet: bool, published_rest_base: str, ws_market_data_url: str, ws_authenticated_url: str, signing_domain: SigningDomain, base_url: str | None) -> None
+nexus_exchange.NetworkConfig(label: str, funds: Funds, has_faucet: bool, published_rest_base: str, ws_market_data_url: str, ws_authenticated_url: str, signing_domain: SigningDomain, base_url: str | None, deployment_domain: str | None = None) -> None
 nexus_exchange.NetworkConfig.base_url field: str | None
-nexus_exchange.NetworkConfig.custom classmethod(*, label: str, funds: Funds | str, base_url: str, has_faucet: bool = False, chain_id: int | None = None, ws_market_data_url: str | None = None, ws_authenticated_url: str | None = None) -> NetworkConfig
+nexus_exchange.NetworkConfig.custom classmethod(*, label: str, funds: Funds | str, base_url: str, has_faucet: bool = False, chain_id: int | None = None, ws_market_data_url: str | None = None, ws_authenticated_url: str | None = None, deployment_domain: str | None = None) -> NetworkConfig
+nexus_exchange.NetworkConfig.deployment_domain field: str | None = None
 nexus_exchange.NetworkConfig.funds field: Funds
 nexus_exchange.NetworkConfig.has_faucet field: bool
 nexus_exchange.NetworkConfig.label field: str
