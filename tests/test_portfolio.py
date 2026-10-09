@@ -399,6 +399,62 @@ def test_fetch_account_fees_signs_and_parses(httpx_mock) -> None:
     assert str(req.url) == _FEES_URL
 
 
+@pytest.mark.parametrize(
+    ("maker_wire", "taker_wire", "maker", "taker"),
+    [
+        # A whole rate is served as an integer.
+        ("-2", "5", Decimal("-2"), Decimal("5")),
+        # From spec 0.9.123 a rate can be a tenth of a bps (ENG-21111).
+        ("-0.4", "2.8", Decimal("-0.4"), Decimal("2.8")),
+        # A positive maker rate is a fee the maker pays.
+        ("0.4", "2.8", Decimal("0.4"), Decimal("2.8")),
+    ],
+)
+def test_fetch_account_fees_decodes_whole_and_fractional_rates_exactly(
+    httpx_mock, maker_wire: str, taker_wire: str, maker: Decimal, taker: Decimal
+) -> None:
+    # Raw JSON text, so the test pins the digits on the wire, not a Python float.
+    body = (
+        f'{{"maker_fee_bps": {maker_wire}, "taker_fee_bps": {taker_wire}, '
+        '"tier": "base", "schedule": "standard", "markets": [], '
+        '"volume_30d": "1", "volume_30d_estimated": false, "discounts": []}'
+    )
+    httpx_mock.add_response(
+        url=_FEES_URL,
+        method="GET",
+        content=body.encode(),
+        headers={"content-type": "application/json"},
+    )
+    with _authed() as client:
+        fees = client.fetch_trading_fees()
+    assert isinstance(fees.maker_fee_bps, Decimal)
+    assert isinstance(fees.taker_fee_bps, Decimal)
+    # str() pins the exact digits, so float noise such as 2.8000000000000003 fails.
+    assert str(fees.maker_fee_bps) == maker_wire
+    assert str(fees.taker_fee_bps) == taker_wire
+    assert fees.maker_fee_bps == maker
+    assert fees.taker_fee_bps == taker
+
+
+@pytest.mark.parametrize("value", [True, "nan", "abc", {"bps": 2}])
+def test_fetch_account_fees_rejects_a_malformed_rate(httpx_mock, value: object) -> None:
+    # A bool, a non-finite value or a non-number is a payload defect, not a rate.
+    httpx_mock.add_response(
+        url=_FEES_URL,
+        method="GET",
+        json={
+            "maker_fee_bps": value,
+            "taker_fee_bps": 5,
+            "tier": "base",
+            "schedule": "standard",
+            "volume_30d": "1",
+            "volume_30d_estimated": False,
+        },
+    )
+    with _authed() as client, pytest.raises(DecodeError, match="maker_fee_bps"):
+        client.fetch_trading_fees()
+
+
 def test_fetch_account_fees_treats_null_estimated_as_true(httpx_mock) -> None:
     # An explicit null is not a claim of full coverage either — only `false` is.
     httpx_mock.add_response(

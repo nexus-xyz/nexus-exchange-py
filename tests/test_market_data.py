@@ -8,6 +8,7 @@ params the list endpoints send.
 
 from __future__ import annotations
 
+import json
 from decimal import Decimal
 
 import pytest
@@ -59,6 +60,34 @@ def test_fetch_markets_decodes_the_served_shape(httpx_mock) -> None:
     assert (m.market_id, m.base_asset, m.quote_asset) == ("BTC-USDX-PERP", "BTC", "USDX")
     assert m.tick_size == Decimal("0.5")
     assert m.max_leverage == 50
+
+
+@pytest.mark.parametrize(
+    ("taker_wire", "maker_wire"),
+    [("5", "-2"), ("2.8", "-0.4"), ("2.8", "0.4")],
+)
+def test_fetch_markets_decodes_whole_and_fractional_fee_rates(
+    httpx_mock, taker_wire: str, maker_wire: str
+) -> None:
+    # From spec 0.9.123 `taker_fee_bps` / `maker_rebate_bps` can be a tenth of a
+    # bps (ENG-21111). Market does not type them yet (the pinned spec does not
+    # declare them), so the row must still decode and keep them on `raw`.
+    row = {
+        **SERVED_MARKET,
+        "taker_fee_bps": "TAKER",
+        "maker_rebate_bps": "MAKER",
+    }
+    body = json.dumps([row]).replace('"TAKER"', taker_wire).replace('"MAKER"', maker_wire)
+    httpx_mock.add_response(
+        url="http://localhost:9090/markets",
+        content=body.encode(),
+        headers={"content-type": "application/json"},
+    )
+    with Client(Network.LOCAL) as client:
+        (m,) = client.fetch_markets()
+    assert m.market_id == "BTC-USDX-PERP"
+    assert Decimal(str(m.raw["taker_fee_bps"])) == Decimal(taker_wire)
+    assert Decimal(str(m.raw["maker_rebate_bps"])) == Decimal(maker_wire)
 
 
 def test_market_falls_back_to_the_pinned_spec_names() -> None:
