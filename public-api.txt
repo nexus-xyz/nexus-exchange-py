@@ -1,0 +1,928 @@
+nexus_exchange.ACCOUNT_CHANNELS constant: frozenset
+nexus_exchange.ACCOUNT_FUNDING_LIMIT_MAX constant: int
+nexus_exchange.AccountFees dataclass(frozen)
+nexus_exchange.AccountFees(maker_fee_bps: int, taker_fee_bps: int, tier: str, schedule: str, volume_30d: Decimal, volume_30d_estimated: bool, discounts: list[dict[str, Any]], raw: dict[str, Any]) -> None
+nexus_exchange.AccountFees.discounts field: list[dict[str, Any]]
+nexus_exchange.AccountFees.from_dict classmethod(d: dict[str, Any]) -> AccountFees
+nexus_exchange.AccountFees.maker_fee_bps field: int
+nexus_exchange.AccountFees.raw field: dict[str, Any]
+nexus_exchange.AccountFees.schedule field: str
+nexus_exchange.AccountFees.taker_fee_bps field: int
+nexus_exchange.AccountFees.tier field: str
+nexus_exchange.AccountFees.volume_30d field: Decimal
+nexus_exchange.AccountFees.volume_30d_estimated field: bool
+nexus_exchange.AccountFunding dataclass(frozen)
+nexus_exchange.AccountFunding(market_id: str | None, amount: Decimal | None, direction: str | None, funding_rate: Decimal | None, position_size: Decimal | None, timestamp: int | None, raw: dict[str, Any]) -> None
+nexus_exchange.AccountFunding.amount field: Decimal | None
+nexus_exchange.AccountFunding.direction field: str | None
+nexus_exchange.AccountFunding.from_dict classmethod(d: dict[str, Any]) -> AccountFunding
+nexus_exchange.AccountFunding.funding_rate field: Decimal | None
+nexus_exchange.AccountFunding.market_id field: str | None
+nexus_exchange.AccountFunding.position_size field: Decimal | None
+nexus_exchange.AccountFunding.raw field: dict[str, Any]
+nexus_exchange.AccountFunding.timestamp field: int | None
+nexus_exchange.AccountPortfolioSummary dataclass(frozen)
+nexus_exchange.AccountPortfolioSummary(collateral: Decimal | None, total_equity: Decimal | None, total_unrealized_pnl: Decimal | None, total_realized_pnl_24h: Decimal | None, total_volume_24h: Decimal | None, open_positions_count: int | None, open_orders_count: int | None, margin_used: Decimal | None, available_margin: Decimal | None, withdrawable: Decimal | None, early_access_allowed: bool | None, raw: dict[str, Any]) -> None
+nexus_exchange.AccountPortfolioSummary.available_margin field: Decimal | None
+nexus_exchange.AccountPortfolioSummary.collateral field: Decimal | None
+nexus_exchange.AccountPortfolioSummary.early_access_allowed field: bool | None
+nexus_exchange.AccountPortfolioSummary.from_dict classmethod(d: dict[str, Any]) -> AccountPortfolioSummary
+nexus_exchange.AccountPortfolioSummary.margin_used field: Decimal | None
+nexus_exchange.AccountPortfolioSummary.open_orders_count field: int | None
+nexus_exchange.AccountPortfolioSummary.open_positions_count field: int | None
+nexus_exchange.AccountPortfolioSummary.raw field: dict[str, Any]
+nexus_exchange.AccountPortfolioSummary.total_equity field: Decimal | None
+nexus_exchange.AccountPortfolioSummary.total_realized_pnl_24h field: Decimal | None
+nexus_exchange.AccountPortfolioSummary.total_unrealized_pnl field: Decimal | None
+nexus_exchange.AccountPortfolioSummary.total_volume_24h field: Decimal | None
+nexus_exchange.AccountPortfolioSummary.withdrawable field: Decimal | None
+nexus_exchange.AccountState dataclass(frozen)
+nexus_exchange.AccountState(summary: AccountPortfolioSummary, positions: list[Position], raw: dict[str, Any]) -> None
+nexus_exchange.AccountState.from_dict classmethod(d: dict[str, Any]) -> AccountState
+nexus_exchange.AccountState.positions field: list[Position]
+nexus_exchange.AccountState.raw field: dict[str, Any]
+nexus_exchange.AccountState.summary field: AccountPortfolioSummary
+nexus_exchange.AccountSummary dataclass(frozen)
+nexus_exchange.AccountSummary(balance: Decimal, collateral: Decimal, equity: Decimal, available_margin: Decimal, positions: list[Position], raw: dict[str, Any]) -> None
+nexus_exchange.AccountSummary.available_margin field: Decimal
+nexus_exchange.AccountSummary.balance field: Decimal
+nexus_exchange.AccountSummary.collateral field: Decimal
+nexus_exchange.AccountSummary.equity field: Decimal
+nexus_exchange.AccountSummary.from_dict classmethod(d: dict[str, Any]) -> AccountSummary
+nexus_exchange.AccountSummary.positions field: list[Position]
+nexus_exchange.AccountSummary.raw field: dict[str, Any]
+nexus_exchange.AdlClosure dataclass(frozen)
+nexus_exchange.AdlClosure(account_id: str, position_closed: Decimal, settlement_amount: Decimal, raw: dict[str, Any]) -> None
+nexus_exchange.AdlClosure.account_id field: str
+nexus_exchange.AdlClosure.from_dict classmethod(d: dict[str, Any]) -> AdlClosure
+nexus_exchange.AdlClosure.position_closed field: Decimal
+nexus_exchange.AdlClosure.raw field: dict[str, Any]
+nexus_exchange.AdlClosure.settlement_amount field: Decimal
+nexus_exchange.AdlEvent dataclass(frozen)
+nexus_exchange.AdlEvent(market_id: str, target_account: str, bankruptcy_price: Decimal, bad_debt_absorbed_by_fund: Decimal, counterparty_closures: list[AdlClosure], sequence: int, timestamp: int, raw: dict[str, Any]) -> None
+nexus_exchange.AdlEvent.bad_debt_absorbed_by_fund field: Decimal
+nexus_exchange.AdlEvent.bankruptcy_price field: Decimal
+nexus_exchange.AdlEvent.counterparty_closures field: list[AdlClosure]
+nexus_exchange.AdlEvent.from_dict classmethod(d: dict[str, Any]) -> AdlEvent
+nexus_exchange.AdlEvent.market_id field: str
+nexus_exchange.AdlEvent.raw field: dict[str, Any]
+nexus_exchange.AdlEvent.sequence field: int
+nexus_exchange.AdlEvent.target_account field: str
+nexus_exchange.AdlEvent.timestamp field: int
+nexus_exchange.AgentInfo dataclass(frozen)
+nexus_exchange.AgentInfo(address: str, expires_at: int, registered_at: int, label: str | None, raw: dict[str, Any]) -> None
+nexus_exchange.AgentInfo.address field: str
+nexus_exchange.AgentInfo.expires_at field: int
+nexus_exchange.AgentInfo.from_dict classmethod(d: dict[str, Any]) -> AgentInfo
+nexus_exchange.AgentInfo.label field: str | None
+nexus_exchange.AgentInfo.raw field: dict[str, Any]
+nexus_exchange.AgentInfo.registered_at field: int
+nexus_exchange.AgentKeyRefusedError exception(MissingCredentialsError)
+nexus_exchange.AgentKeyRefusedError(method: str, path: str, code: str) -> None
+nexus_exchange.AgentKeyRefusedError.code attribute (set in __init__)
+nexus_exchange.AgentKeyRefusedError.method attribute (set in __init__)
+nexus_exchange.AgentKeyRefusedError.path attribute (set in __init__)
+nexus_exchange.AgentKeyRefusedError.transient attribute: bool
+nexus_exchange.AgentRegistered dataclass(frozen)
+nexus_exchange.AgentRegistered(agent_address: str, expires_at: int) -> None
+nexus_exchange.AgentRegistered.agent_address field: str
+nexus_exchange.AgentRegistered.expires_at field: int
+nexus_exchange.AgentRegistered.from_dict classmethod(d: dict[str, Any]) -> AgentRegistered
+nexus_exchange.AgentRegistration dataclass(frozen)
+nexus_exchange.AgentRegistration(wallet: str, agent: str, expires_at: int, nonce: int, signature: str, label: str | None = None) -> None
+nexus_exchange.AgentRegistration.agent field: str
+nexus_exchange.AgentRegistration.expires_at field: int
+nexus_exchange.AgentRegistration.label field: str | None = None
+nexus_exchange.AgentRegistration.nonce field: int
+nexus_exchange.AgentRegistration.signature field: str
+nexus_exchange.AgentRegistration.to_dict method(self) -> dict[str, Any]
+nexus_exchange.AgentRegistration.wallet field: str
+nexus_exchange.AgentRevocation dataclass(frozen)
+nexus_exchange.AgentRevocation(account: str, agent: str, nonce: int, signature: str, chain_id: int) -> None
+nexus_exchange.AgentRevocation.account field: str
+nexus_exchange.AgentRevocation.agent field: str
+nexus_exchange.AgentRevocation.chain_id field: int
+nexus_exchange.AgentRevocation.headers method(self) -> dict[str, str]
+nexus_exchange.AgentRevocation.nonce field: int
+nexus_exchange.AgentRevocation.signature field: str
+nexus_exchange.AgentSigner class
+nexus_exchange.AgentSigner(private_key: PrivateKey, address: bytes, account: bytes | None = None) -> None
+nexus_exchange.AgentSigner.__repr__ method(self) -> str
+nexus_exchange.AgentSigner.account property: str | None
+nexus_exchange.AgentSigner.address property: str
+nexus_exchange.AgentSigner.from_hex classmethod(private_key: str, *, account: str | None = None) -> AgentSigner
+nexus_exchange.AgentSigner.headers method(self, method: str, path: str, query: str, body: bytes, timestamp_ms: int) -> dict[str, str]
+nexus_exchange.AgentSigner.next_nonce method(self, floor: int) -> int
+nexus_exchange.AgentSigner.sign_request method(self, method: str, path: str, query: str, body: bytes, timestamp_ms: int, nonce: int) -> dict[str, str]
+nexus_exchange.AgentSigner.sign_trading_action method(self, action: tuple[str, dict[str, Any]], *, domain: str, timestamp_ms: int, nonce: int, acting_account: str | None = None) -> dict[str, str]
+nexus_exchange.AmendOrder dataclass(frozen)
+nexus_exchange.AmendOrder(price: Decimal | None = None, size: Decimal | None = None) -> None
+nexus_exchange.AmendOrder.has_changes method(self) -> bool
+nexus_exchange.AmendOrder.price field: Decimal | None = None
+nexus_exchange.AmendOrder.size field: Decimal | None = None
+nexus_exchange.AmendOrder.to_payload method(self) -> dict[str, Any]
+nexus_exchange.ApiError exception(NexusExchangeError)
+nexus_exchange.ApiError(status: int, body: str, *, code: str | None = None, message: str | None = None, retry_after_ms: int | None = None) -> None
+nexus_exchange.ApiError.body attribute (set in __init__)
+nexus_exchange.ApiError.code attribute (set in __init__)
+nexus_exchange.ApiError.message attribute (set in __init__)
+nexus_exchange.ApiError.retry_after_ms attribute (set in __init__)
+nexus_exchange.ApiError.status attribute (set in __init__)
+nexus_exchange.ApiError.transient property: bool
+nexus_exchange.ApiKeyCreated dataclass(frozen)
+nexus_exchange.ApiKeyCreated(key_id: str | None, secret: str | None, raw: dict[str, Any]) -> None
+nexus_exchange.ApiKeyCreated.__repr__ method(self) -> str
+nexus_exchange.ApiKeyCreated.from_dict classmethod(d: dict[str, Any]) -> ApiKeyCreated
+nexus_exchange.ApiKeyCreated.key_id field: str | None
+nexus_exchange.ApiKeyCreated.raw field: dict[str, Any]
+nexus_exchange.ApiKeyCreated.secret field: str | None
+nexus_exchange.ApiKeyInfo dataclass(frozen)
+nexus_exchange.ApiKeyInfo(key_id: str, tier: str, raw: dict[str, Any]) -> None
+nexus_exchange.ApiKeyInfo.from_dict classmethod(d: dict[str, Any]) -> ApiKeyInfo
+nexus_exchange.ApiKeyInfo.key_id field: str
+nexus_exchange.ApiKeyInfo.raw field: dict[str, Any]
+nexus_exchange.ApiKeyInfo.tier field: str
+nexus_exchange.AsyncClient class(_AsyncTransport)
+nexus_exchange.AsyncClient(network: Network | NetworkConfig | str | None = None, *, base_url: str | None = None, api_key: str | None = None, api_secret: str | None = None, api_version: str | None = None, timeout: float = 30.0, http_client: httpx.AsyncClient | None = None, retry: RetryConfig | None = None, agent: AgentSigner | None = None, acting_account: str | None = None) -> None
+nexus_exchange.AsyncClient.__aenter__ async method(self: _Self) -> _Self
+nexus_exchange.AsyncClient.__aexit__ async method(self, *exc: object) -> None
+nexus_exchange.AsyncClient.aclose async method(self) -> None
+nexus_exchange.AsyncClient.add_margin async method(self, market_id: str, direction: str, amount: Decimal | str) -> MarginAdjustment
+nexus_exchange.AsyncClient.adjust_margin async method(self, market_id: str, direction: str, amount: Decimal | str) -> MarginAdjustment
+nexus_exchange.AsyncClient.agent property: AgentSigner | None
+nexus_exchange.AsyncClient.amend_order async method(self, order_id: str, market_id: str, amend: AmendOrder) -> OrderResponse
+nexus_exchange.AsyncClient.base_url property: str
+nexus_exchange.AsyncClient.cancel_all_orders async method(self) -> Any
+nexus_exchange.AsyncClient.cancel_order async method(self, order_id: str, market_id: str) -> Any
+nexus_exchange.AsyncClient.claim_credit async method(self, amount: Decimal | str | None = None) -> CreditResult
+nexus_exchange.AsyncClient.claim_faucet async method(self) -> FaucetResponse
+nexus_exchange.AsyncClient.create_api_key async method(self, session_token: str) -> ApiKeyCreated
+nexus_exchange.AsyncClient.create_bridge_deposit_address async method(self, chain: str) -> BridgeDepositAddress
+nexus_exchange.AsyncClient.create_deposit async method(self, amount: Decimal | str, asset: str | None = None) -> DepositResponse
+nexus_exchange.AsyncClient.create_order async method(self, order: OrderRequest) -> OrderResponse
+nexus_exchange.AsyncClient.create_orders async method(self, orders: list[OrderRequest]) -> list[BatchOrderResult]
+nexus_exchange.AsyncClient.create_ws_token async method(self) -> WsToken
+nexus_exchange.AsyncClient.delete_api_key async method(self, key_id: str) -> Any
+nexus_exchange.AsyncClient.delete_tier async method(self, address: str) -> Any
+nexus_exchange.AsyncClient.deposit async method(self, amount: Decimal | str) -> DepositResult
+nexus_exchange.AsyncClient.edit_order async method(self, order_id: str, market_id: str, amend: AmendOrder) -> OrderResponse
+nexus_exchange.AsyncClient.fetch_account_adl_history async method(self, address: str, limit: int | None = None) -> list[AdlEvent]
+nexus_exchange.AsyncClient.fetch_account_fees async method(self) -> AccountFees
+nexus_exchange.AsyncClient.fetch_account_funding async method(self, limit: int | None = None) -> list[AccountFunding]
+nexus_exchange.AsyncClient.fetch_account_state async method(self) -> AccountState
+nexus_exchange.AsyncClient.fetch_account_summary async method(self) -> AccountPortfolioSummary
+nexus_exchange.AsyncClient.fetch_adl_events async method(self, market_id: str, limit: int | None = None) -> list[AdlEvent]
+nexus_exchange.AsyncClient.fetch_adl_history async method(self, address: str, limit: int | None = None) -> list[AdlEvent]
+nexus_exchange.AsyncClient.fetch_agents async method(self) -> list[AgentInfo]
+nexus_exchange.AsyncClient.fetch_api_keys async method(self) -> list[ApiKeyInfo]
+nexus_exchange.AsyncClient.fetch_balance async method(self) -> AccountSummary
+nexus_exchange.AsyncClient.fetch_bridge_assets async method(self) -> BridgeAssetsResponse
+nexus_exchange.AsyncClient.fetch_bridge_deposit async method(self, deposit_id: str) -> BridgeDeposit
+nexus_exchange.AsyncClient.fetch_bridge_deposit_addresses async method(self) -> list[BridgeDepositAddress]
+nexus_exchange.AsyncClient.fetch_bridge_deposits async method(self, limit: int | None = None, chain: str | None = None, asset: str | None = None, status: str | None = None) -> list[BridgeDeposit]
+nexus_exchange.AsyncClient.fetch_cancel_on_disconnect async method(self) -> CancelOnDisconnectStatus
+nexus_exchange.AsyncClient.fetch_closed_positions async method(self, limit: int | None = None) -> list[ClosedPosition]
+nexus_exchange.AsyncClient.fetch_closed_positions_page async method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[ClosedPosition]
+nexus_exchange.AsyncClient.fetch_deposits async method(self, limit: int | None = None) -> list[FundsEntry]
+nexus_exchange.AsyncClient.fetch_equity_history async method(self, limit: int | None = None) -> list[EquityPoint]
+nexus_exchange.AsyncClient.fetch_equity_history_page async method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[EquityPoint]
+nexus_exchange.AsyncClient.fetch_funding_history async method(self, limit: int | None = None) -> list[AccountFunding]
+nexus_exchange.AsyncClient.fetch_funding_rate_history async method(self, market_id: str, limit: int | None = None) -> list[FundingSample]
+nexus_exchange.AsyncClient.fetch_funding_samples async method(self, market_id: str, limit: int | None = None) -> list[FundingPremiumSample]
+nexus_exchange.AsyncClient.fetch_mark_price async method(self, market_id: str) -> MarkPrice
+nexus_exchange.AsyncClient.fetch_market_adl_events async method(self, market_id: str, limit: int | None = None) -> list[AdlEvent]
+nexus_exchange.AsyncClient.fetch_market_risk_params async method(self, market_id: str) -> MarketRiskParams
+nexus_exchange.AsyncClient.fetch_market_status async method(self, market_id: str) -> MarketStatus
+nexus_exchange.AsyncClient.fetch_market_summaries async method(self) -> list[MarketSummary]
+nexus_exchange.AsyncClient.fetch_markets async method(self) -> list[Market]
+nexus_exchange.AsyncClient.fetch_markets_summary async method(self) -> list[MarketSummary]
+nexus_exchange.AsyncClient.fetch_my_trades async method(self, limit: int | None = None) -> list[Fill]
+nexus_exchange.AsyncClient.fetch_my_trades_page async method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[Fill]
+nexus_exchange.AsyncClient.fetch_ohlcv async method(self, market_id: str, timeframe: str | None = None, limit: int | None = None) -> list[Ohlcv]
+nexus_exchange.AsyncClient.fetch_open_orders async method(self) -> list[Order]
+nexus_exchange.AsyncClient.fetch_order async method(self, order_id: str, market_id: str) -> Order
+nexus_exchange.AsyncClient.fetch_order_book async method(self, market_id: str) -> OrderBook
+nexus_exchange.AsyncClient.fetch_order_history async method(self, limit: int | None = None) -> list[OrderHistoryEntry]
+nexus_exchange.AsyncClient.fetch_order_history_page async method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[OrderHistoryEntry]
+nexus_exchange.AsyncClient.fetch_orders async method(self, limit: int | None = None) -> list[OrderHistoryEntry]
+nexus_exchange.AsyncClient.fetch_orders_page async method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[OrderHistoryEntry]
+nexus_exchange.AsyncClient.fetch_portfolio_history async method(self, window: PortfolioWindow | str | None = None, limit: int | None = None) -> PortfolioHistory
+nexus_exchange.AsyncClient.fetch_positions async method(self) -> list[Position]
+nexus_exchange.AsyncClient.fetch_positions_history async method(self, limit: int | None = None) -> list[ClosedPosition]
+nexus_exchange.AsyncClient.fetch_positions_history_page async method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[ClosedPosition]
+nexus_exchange.AsyncClient.fetch_rate_limit_status async method(self) -> RateLimitStatus
+nexus_exchange.AsyncClient.fetch_service_health async method(self) -> ServiceHealth
+nexus_exchange.AsyncClient.fetch_stats async method(self) -> StatsSnapshot
+nexus_exchange.AsyncClient.fetch_stats_history async method(self) -> list[ThroughputSample]
+nexus_exchange.AsyncClient.fetch_status async method(self) -> ServiceHealth
+nexus_exchange.AsyncClient.fetch_ticker async method(self, market_id: str) -> Ticker
+nexus_exchange.AsyncClient.fetch_tickers async method(self) -> dict[str, Ticker]
+nexus_exchange.AsyncClient.fetch_tier_overrides async method(self) -> list[TierOverride]
+nexus_exchange.AsyncClient.fetch_tiers async method(self) -> list[TierOverride]
+nexus_exchange.AsyncClient.fetch_trades async method(self, market_id: str, limit: int | None = None) -> list[Trade]
+nexus_exchange.AsyncClient.fetch_trades_page async method(self, market_id: str, *, limit: int | None = None, cursor: str | None = None) -> Page[Trade]
+nexus_exchange.AsyncClient.fetch_trading_fees async method(self) -> AccountFees
+nexus_exchange.AsyncClient.fetch_withdrawals async method(self) -> list[Withdrawal]
+nexus_exchange.AsyncClient.has_credentials property: bool
+nexus_exchange.AsyncClient.iter_closed_positions method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[ClosedPosition]
+nexus_exchange.AsyncClient.iter_equity_history method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[EquityPoint]
+nexus_exchange.AsyncClient.iter_my_trades method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[Fill]
+nexus_exchange.AsyncClient.iter_order_history method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[OrderHistoryEntry]
+nexus_exchange.AsyncClient.iter_orders method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[OrderHistoryEntry]
+nexus_exchange.AsyncClient.iter_positions_history method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[ClosedPosition]
+nexus_exchange.AsyncClient.iter_trades method(self, market_id: str, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[Trade]
+nexus_exchange.AsyncClient.list_bridge_deposit_addresses async method(self) -> list[BridgeDepositAddress]
+nexus_exchange.AsyncClient.login async method(self, signer: EthSigner) -> LoginResponse
+nexus_exchange.AsyncClient.network property: NetworkConfig
+nexus_exchange.AsyncClient.preview_order async method(self, order: OrderRequest) -> PreviewResponse
+nexus_exchange.AsyncClient.register_agent async method(self, registration: AgentRegistration) -> AgentRegistered
+nexus_exchange.AsyncClient.reset_account_tier async method(self, address: str) -> Any
+nexus_exchange.AsyncClient.revoke_agent async method(self, revocation: AgentRevocation) -> Any
+nexus_exchange.AsyncClient.set_account_tier async method(self, address: str, tier: str) -> TierOverride
+nexus_exchange.AsyncClient.set_cancel_on_disconnect async method(self, enabled: bool) -> CancelOnDisconnectStatus
+nexus_exchange.AsyncClient.set_tier async method(self, address: str, tier: str) -> TierOverride
+nexus_exchange.AsyncClient.sign_in async method(self, signer: EthSigner) -> LoginResponse
+nexus_exchange.AuthError exception(NexusExchangeError)
+nexus_exchange.AuthError.transient attribute: bool
+nexus_exchange.BatchOrderResult dataclass(frozen)
+nexus_exchange.BatchOrderResult(outcome: str, order: Order | None, fills: list[Fill], error: str | None, message: str | None, raw: dict[str, Any]) -> None
+nexus_exchange.BatchOrderResult.error field: str | None
+nexus_exchange.BatchOrderResult.fills field: list[Fill]
+nexus_exchange.BatchOrderResult.from_dict classmethod(d: dict[str, Any]) -> BatchOrderResult
+nexus_exchange.BatchOrderResult.is_err property: bool
+nexus_exchange.BatchOrderResult.is_ok property: bool
+nexus_exchange.BatchOrderResult.malformed classmethod(value: Any) -> BatchOrderResult
+nexus_exchange.BatchOrderResult.message field: str | None
+nexus_exchange.BatchOrderResult.order field: Order | None
+nexus_exchange.BatchOrderResult.outcome field: str
+nexus_exchange.BatchOrderResult.raw field: dict[str, Any]
+nexus_exchange.BridgeAsset dataclass(frozen)
+nexus_exchange.BridgeAsset(symbol: str, decimals: int, min_amount: Decimal, confirmations: int, fee: Decimal | None, contract_address: str | None, raw: dict[str, Any]) -> None
+nexus_exchange.BridgeAsset.confirmations field: int
+nexus_exchange.BridgeAsset.contract_address field: str | None
+nexus_exchange.BridgeAsset.decimals field: int
+nexus_exchange.BridgeAsset.fee field: Decimal | None
+nexus_exchange.BridgeAsset.from_dict classmethod(d: dict[str, Any]) -> BridgeAsset
+nexus_exchange.BridgeAsset.min_amount field: Decimal
+nexus_exchange.BridgeAsset.raw field: dict[str, Any]
+nexus_exchange.BridgeAsset.symbol field: str
+nexus_exchange.BridgeAssetsResponse dataclass(frozen)
+nexus_exchange.BridgeAssetsResponse(chains: list[BridgeChainAssets], raw: dict[str, Any]) -> None
+nexus_exchange.BridgeAssetsResponse.chains field: list[BridgeChainAssets]
+nexus_exchange.BridgeAssetsResponse.from_dict classmethod(d: dict[str, Any]) -> BridgeAssetsResponse
+nexus_exchange.BridgeAssetsResponse.raw field: dict[str, Any]
+nexus_exchange.BridgeChainAssets dataclass(frozen)
+nexus_exchange.BridgeChainAssets(chain: str, chain_id: int | None, deposit_assets: list[BridgeAsset], withdraw_assets: list[BridgeAsset], raw: dict[str, Any]) -> None
+nexus_exchange.BridgeChainAssets.chain field: str
+nexus_exchange.BridgeChainAssets.chain_id field: int | None
+nexus_exchange.BridgeChainAssets.deposit_assets field: list[BridgeAsset]
+nexus_exchange.BridgeChainAssets.from_dict classmethod(d: dict[str, Any]) -> BridgeChainAssets
+nexus_exchange.BridgeChainAssets.raw field: dict[str, Any]
+nexus_exchange.BridgeChainAssets.withdraw_assets field: list[BridgeAsset]
+nexus_exchange.BridgeDeposit dataclass(frozen)
+nexus_exchange.BridgeDeposit(id: str, account_id: str, chain: str, asset: str, amount: Decimal, address: str, status: str, confirmations: int | None, required_confirmations: int | None, tx_hash: str | None, credited_at: int | None, created_at: int, updated_at: int | None, raw: dict[str, Any]) -> None
+nexus_exchange.BridgeDeposit.account_id field: str
+nexus_exchange.BridgeDeposit.address field: str
+nexus_exchange.BridgeDeposit.amount field: Decimal
+nexus_exchange.BridgeDeposit.asset field: str
+nexus_exchange.BridgeDeposit.chain field: str
+nexus_exchange.BridgeDeposit.confirmations field: int | None
+nexus_exchange.BridgeDeposit.created_at field: int
+nexus_exchange.BridgeDeposit.credited_at field: int | None
+nexus_exchange.BridgeDeposit.from_dict classmethod(d: dict[str, Any]) -> BridgeDeposit
+nexus_exchange.BridgeDeposit.id field: str
+nexus_exchange.BridgeDeposit.raw field: dict[str, Any]
+nexus_exchange.BridgeDeposit.required_confirmations field: int | None
+nexus_exchange.BridgeDeposit.status field: str
+nexus_exchange.BridgeDeposit.tx_hash field: str | None
+nexus_exchange.BridgeDeposit.updated_at field: int | None
+nexus_exchange.BridgeDepositAddress dataclass(frozen)
+nexus_exchange.BridgeDepositAddress(address: str, chain: str, accepts: list[str], account_id: str, created_at: int, raw: dict[str, Any]) -> None
+nexus_exchange.BridgeDepositAddress.accepts field: list[str]
+nexus_exchange.BridgeDepositAddress.account_id field: str
+nexus_exchange.BridgeDepositAddress.address field: str
+nexus_exchange.BridgeDepositAddress.chain field: str
+nexus_exchange.BridgeDepositAddress.created_at field: int
+nexus_exchange.BridgeDepositAddress.from_dict classmethod(d: dict[str, Any]) -> BridgeDepositAddress
+nexus_exchange.BridgeDepositAddress.raw field: dict[str, Any]
+nexus_exchange.CHANNELS constant: frozenset
+nexus_exchange.CLOSED_POSITIONS_LIMIT_MAX constant: int
+nexus_exchange.CancelOnDisconnectStatus dataclass(frozen)
+nexus_exchange.CancelOnDisconnectStatus(enabled: bool, active: bool, grace_secs: int | None, raw: dict[str, Any]) -> None
+nexus_exchange.CancelOnDisconnectStatus.active field: bool
+nexus_exchange.CancelOnDisconnectStatus.enabled field: bool
+nexus_exchange.CancelOnDisconnectStatus.from_dict classmethod(d: dict[str, Any]) -> CancelOnDisconnectStatus
+nexus_exchange.CancelOnDisconnectStatus.grace_secs field: int | None
+nexus_exchange.CancelOnDisconnectStatus.raw field: dict[str, Any]
+nexus_exchange.Client class(_ClientCore)
+nexus_exchange.Client(network: Network | NetworkConfig | str | None = None, *, base_url: str | None = None, api_key: str | None = None, api_secret: str | None = None, api_version: str | None = None, timeout: float = 30.0, http_client: httpx.Client | None = None, retry: RetryConfig | None = None, agent: AgentSigner | None = None, acting_account: str | None = None) -> None
+nexus_exchange.Client.__enter__ method(self) -> Client
+nexus_exchange.Client.__exit__ method(self, *exc: object) -> None
+nexus_exchange.Client.add_margin method(self, market_id: str, direction: str, amount: Decimal | str) -> MarginAdjustment
+nexus_exchange.Client.adjust_margin method(self, market_id: str, direction: str, amount: Decimal | str) -> MarginAdjustment
+nexus_exchange.Client.agent property: AgentSigner | None
+nexus_exchange.Client.amend_order method(self, order_id: str, market_id: str, amend: AmendOrder) -> OrderResponse
+nexus_exchange.Client.base_url property: str
+nexus_exchange.Client.cancel_all_orders method(self) -> Any
+nexus_exchange.Client.cancel_order method(self, order_id: str, market_id: str) -> Any
+nexus_exchange.Client.claim_credit method(self, amount: Decimal | str | None = None) -> CreditResult
+nexus_exchange.Client.claim_faucet method(self) -> FaucetResponse
+nexus_exchange.Client.close method(self) -> None
+nexus_exchange.Client.create_api_key method(self, session_token: str) -> ApiKeyCreated
+nexus_exchange.Client.create_bridge_deposit_address method(self, chain: str) -> BridgeDepositAddress
+nexus_exchange.Client.create_deposit method(self, amount: Decimal | str, asset: str | None = None) -> DepositResponse
+nexus_exchange.Client.create_order method(self, order: OrderRequest) -> OrderResponse
+nexus_exchange.Client.create_orders method(self, orders: list[OrderRequest]) -> list[BatchOrderResult]
+nexus_exchange.Client.create_ws_token method(self) -> WsToken
+nexus_exchange.Client.delete_api_key method(self, key_id: str) -> Any
+nexus_exchange.Client.delete_tier method(self, address: str) -> Any
+nexus_exchange.Client.deposit method(self, amount: Decimal | str) -> DepositResult
+nexus_exchange.Client.edit_order method(self, order_id: str, market_id: str, amend: AmendOrder) -> OrderResponse
+nexus_exchange.Client.fetch_account_adl_history method(self, address: str, limit: int | None = None) -> list[AdlEvent]
+nexus_exchange.Client.fetch_account_fees method(self) -> AccountFees
+nexus_exchange.Client.fetch_account_funding method(self, limit: int | None = None) -> list[AccountFunding]
+nexus_exchange.Client.fetch_account_state method(self) -> AccountState
+nexus_exchange.Client.fetch_account_summary method(self) -> AccountPortfolioSummary
+nexus_exchange.Client.fetch_adl_events method(self, market_id: str, limit: int | None = None) -> list[AdlEvent]
+nexus_exchange.Client.fetch_adl_history method(self, address: str, limit: int | None = None) -> list[AdlEvent]
+nexus_exchange.Client.fetch_agents method(self) -> list[AgentInfo]
+nexus_exchange.Client.fetch_api_keys method(self) -> list[ApiKeyInfo]
+nexus_exchange.Client.fetch_balance method(self) -> AccountSummary
+nexus_exchange.Client.fetch_bridge_assets method(self) -> BridgeAssetsResponse
+nexus_exchange.Client.fetch_bridge_deposit method(self, deposit_id: str) -> BridgeDeposit
+nexus_exchange.Client.fetch_bridge_deposit_addresses method(self) -> list[BridgeDepositAddress]
+nexus_exchange.Client.fetch_bridge_deposits method(self, limit: int | None = None, chain: str | None = None, asset: str | None = None, status: str | None = None) -> list[BridgeDeposit]
+nexus_exchange.Client.fetch_cancel_on_disconnect method(self) -> CancelOnDisconnectStatus
+nexus_exchange.Client.fetch_closed_positions method(self, limit: int | None = None) -> list[ClosedPosition]
+nexus_exchange.Client.fetch_closed_positions_page method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[ClosedPosition]
+nexus_exchange.Client.fetch_deposits method(self, limit: int | None = None) -> list[FundsEntry]
+nexus_exchange.Client.fetch_equity_history method(self, limit: int | None = None) -> list[EquityPoint]
+nexus_exchange.Client.fetch_equity_history_page method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[EquityPoint]
+nexus_exchange.Client.fetch_funding_history method(self, limit: int | None = None) -> list[AccountFunding]
+nexus_exchange.Client.fetch_funding_rate_history method(self, market_id: str, limit: int | None = None) -> list[FundingSample]
+nexus_exchange.Client.fetch_funding_samples method(self, market_id: str, limit: int | None = None) -> list[FundingPremiumSample]
+nexus_exchange.Client.fetch_mark_price method(self, market_id: str) -> MarkPrice
+nexus_exchange.Client.fetch_market_adl_events method(self, market_id: str, limit: int | None = None) -> list[AdlEvent]
+nexus_exchange.Client.fetch_market_risk_params method(self, market_id: str) -> MarketRiskParams
+nexus_exchange.Client.fetch_market_status method(self, market_id: str) -> MarketStatus
+nexus_exchange.Client.fetch_market_summaries method(self) -> list[MarketSummary]
+nexus_exchange.Client.fetch_markets method(self) -> list[Market]
+nexus_exchange.Client.fetch_markets_summary method(self) -> list[MarketSummary]
+nexus_exchange.Client.fetch_my_trades method(self, limit: int | None = None) -> list[Fill]
+nexus_exchange.Client.fetch_my_trades_page method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[Fill]
+nexus_exchange.Client.fetch_ohlcv method(self, market_id: str, timeframe: str | None = None, limit: int | None = None) -> list[Ohlcv]
+nexus_exchange.Client.fetch_open_orders method(self) -> list[Order]
+nexus_exchange.Client.fetch_order method(self, order_id: str, market_id: str) -> Order
+nexus_exchange.Client.fetch_order_book method(self, market_id: str) -> OrderBook
+nexus_exchange.Client.fetch_order_history method(self, limit: int | None = None) -> list[OrderHistoryEntry]
+nexus_exchange.Client.fetch_order_history_page method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[OrderHistoryEntry]
+nexus_exchange.Client.fetch_orders method(self, limit: int | None = None) -> list[OrderHistoryEntry]
+nexus_exchange.Client.fetch_orders_page method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[OrderHistoryEntry]
+nexus_exchange.Client.fetch_portfolio_history method(self, window: PortfolioWindow | str | None = None, limit: int | None = None) -> PortfolioHistory
+nexus_exchange.Client.fetch_positions method(self) -> list[Position]
+nexus_exchange.Client.fetch_positions_history method(self, limit: int | None = None) -> list[ClosedPosition]
+nexus_exchange.Client.fetch_positions_history_page method(self, *, limit: int | None = None, cursor: str | None = None) -> Page[ClosedPosition]
+nexus_exchange.Client.fetch_rate_limit_status method(self) -> RateLimitStatus
+nexus_exchange.Client.fetch_service_health method(self) -> ServiceHealth
+nexus_exchange.Client.fetch_stats method(self) -> StatsSnapshot
+nexus_exchange.Client.fetch_stats_history method(self) -> list[ThroughputSample]
+nexus_exchange.Client.fetch_status method(self) -> ServiceHealth
+nexus_exchange.Client.fetch_ticker method(self, market_id: str) -> Ticker
+nexus_exchange.Client.fetch_tickers method(self) -> dict[str, Ticker]
+nexus_exchange.Client.fetch_tier_overrides method(self) -> list[TierOverride]
+nexus_exchange.Client.fetch_tiers method(self) -> list[TierOverride]
+nexus_exchange.Client.fetch_trades method(self, market_id: str, limit: int | None = None) -> list[Trade]
+nexus_exchange.Client.fetch_trades_page method(self, market_id: str, *, limit: int | None = None, cursor: str | None = None) -> Page[Trade]
+nexus_exchange.Client.fetch_trading_fees method(self) -> AccountFees
+nexus_exchange.Client.fetch_withdrawals method(self) -> list[Withdrawal]
+nexus_exchange.Client.has_credentials property: bool
+nexus_exchange.Client.iter_closed_positions method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> Iterator[ClosedPosition]
+nexus_exchange.Client.iter_equity_history method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> Iterator[EquityPoint]
+nexus_exchange.Client.iter_my_trades method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> Iterator[Fill]
+nexus_exchange.Client.iter_order_history method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> Iterator[OrderHistoryEntry]
+nexus_exchange.Client.iter_orders method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> Iterator[OrderHistoryEntry]
+nexus_exchange.Client.iter_positions_history method(self, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> Iterator[ClosedPosition]
+nexus_exchange.Client.iter_trades method(self, market_id: str, *, limit: int | None = None, cursor: str | None = None, max_pages: int | None = None) -> Iterator[Trade]
+nexus_exchange.Client.list_bridge_deposit_addresses method(self) -> list[BridgeDepositAddress]
+nexus_exchange.Client.login method(self, signer: EthSigner) -> LoginResponse
+nexus_exchange.Client.network property: NetworkConfig
+nexus_exchange.Client.preview_order method(self, order: OrderRequest) -> PreviewResponse
+nexus_exchange.Client.register_agent method(self, registration: AgentRegistration) -> AgentRegistered
+nexus_exchange.Client.reset_account_tier method(self, address: str) -> Any
+nexus_exchange.Client.revoke_agent method(self, revocation: AgentRevocation) -> Any
+nexus_exchange.Client.set_account_tier method(self, address: str, tier: str) -> TierOverride
+nexus_exchange.Client.set_cancel_on_disconnect method(self, enabled: bool) -> CancelOnDisconnectStatus
+nexus_exchange.Client.set_tier method(self, address: str, tier: str) -> TierOverride
+nexus_exchange.Client.sign_in method(self, signer: EthSigner) -> LoginResponse
+nexus_exchange.ClosedPosition dataclass(frozen)
+nexus_exchange.ClosedPosition(market_id: str, side: str, size: Decimal | None, entry_price: Decimal | None, exit_price: Decimal | None, realized_pnl: Decimal | None, closed_at_ms: int | None, raw: dict[str, Any]) -> None
+nexus_exchange.ClosedPosition.closed_at_ms field: int | None
+nexus_exchange.ClosedPosition.entry_price field: Decimal | None
+nexus_exchange.ClosedPosition.exit_price field: Decimal | None
+nexus_exchange.ClosedPosition.from_dict classmethod(d: dict[str, Any]) -> ClosedPosition
+nexus_exchange.ClosedPosition.market_id field: str
+nexus_exchange.ClosedPosition.raw field: dict[str, Any]
+nexus_exchange.ClosedPosition.realized_pnl field: Decimal | None
+nexus_exchange.ClosedPosition.side field: str
+nexus_exchange.ClosedPosition.size field: Decimal | None
+nexus_exchange.CreditResult dataclass(frozen)
+nexus_exchange.CreditResult(amount: Decimal, credited_today: Decimal, daily_limit: Decimal, raw: dict[str, Any]) -> None
+nexus_exchange.CreditResult.amount field: Decimal
+nexus_exchange.CreditResult.credited_today field: Decimal
+nexus_exchange.CreditResult.daily_limit field: Decimal
+nexus_exchange.CreditResult.from_dict classmethod(d: dict[str, Any]) -> CreditResult
+nexus_exchange.CreditResult.raw field: dict[str, Any]
+nexus_exchange.DEFAULT_API_VERSION constant: str
+nexus_exchange.DEFAULT_USER_AGENT constant: str
+nexus_exchange.DEPOSITS_LIMIT_MAX constant: int
+nexus_exchange.DecodeError exception(NexusExchangeError, ValueError)
+nexus_exchange.DecodeError.transient attribute: bool
+nexus_exchange.DepositResponse dataclass(frozen)
+nexus_exchange.DepositResponse(balance: Decimal | None, raw: dict[str, Any]) -> None
+nexus_exchange.DepositResponse.balance field: Decimal | None
+nexus_exchange.DepositResponse.from_dict classmethod(d: dict[str, Any]) -> DepositResponse
+nexus_exchange.DepositResponse.raw field: dict[str, Any]
+nexus_exchange.DepositResult dataclass(frozen)
+nexus_exchange.DepositResult(balance: Decimal, raw: dict[str, Any]) -> None
+nexus_exchange.DepositResult.balance field: Decimal
+nexus_exchange.DepositResult.from_dict classmethod(d: dict[str, Any]) -> DepositResult
+nexus_exchange.DepositResult.raw field: dict[str, Any]
+nexus_exchange.EQUITY_HISTORY_LIMIT_MAX constant: int
+nexus_exchange.EquityPoint dataclass(frozen)
+nexus_exchange.EquityPoint(timestamp_ms: int | None, equity: Decimal | None, raw: dict[str, Any]) -> None
+nexus_exchange.EquityPoint.equity field: Decimal | None
+nexus_exchange.EquityPoint.from_dict classmethod(d: dict[str, Any]) -> EquityPoint
+nexus_exchange.EquityPoint.raw field: dict[str, Any]
+nexus_exchange.EquityPoint.timestamp_ms field: int | None
+nexus_exchange.EthSigner class
+nexus_exchange.EthSigner(private_key: PrivateKey, address: bytes) -> None
+nexus_exchange.EthSigner.__repr__ method(self) -> str
+nexus_exchange.EthSigner.address property: str
+nexus_exchange.EthSigner.checksum_address property: str
+nexus_exchange.EthSigner.from_hex classmethod(private_key: str) -> EthSigner
+nexus_exchange.EthSigner.register_agent method(self, agent: str, expires_at_ms: int, nonce: int, chain_id: int, label: str | None = None, *, network: Network | NetworkConfig | str) -> AgentRegistration
+nexus_exchange.EthSigner.revoke_agent method(self, agent: str, nonce: int, chain_id: int, *, network: Network | NetworkConfig | str) -> AgentRevocation
+nexus_exchange.EthSigner.sign_in method(self) -> LoginRequest
+nexus_exchange.FILLS_LIMIT_MAX constant: int
+nexus_exchange.FUNDING_SAMPLES_LIMIT_MAX constant: int
+nexus_exchange.FaucetResponse dataclass(frozen)
+nexus_exchange.FaucetResponse(amount: Decimal | None, available_at_ms: int | None, raw: dict[str, Any]) -> None
+nexus_exchange.FaucetResponse.amount field: Decimal | None
+nexus_exchange.FaucetResponse.available_at_ms field: int | None
+nexus_exchange.FaucetResponse.from_dict classmethod(d: dict[str, Any]) -> FaucetResponse
+nexus_exchange.FaucetResponse.raw field: dict[str, Any]
+nexus_exchange.Fill dataclass(frozen)
+nexus_exchange.Fill(id: str, order_id: str, market_id: str, side: str, price: Decimal, size: Decimal, fee: Decimal, taker_or_maker: str | None, timestamp: int, is_liquidation: bool, raw: dict[str, Any]) -> None
+nexus_exchange.Fill.fee field: Decimal
+nexus_exchange.Fill.from_dict classmethod(d: dict[str, Any]) -> Fill
+nexus_exchange.Fill.id field: str
+nexus_exchange.Fill.is_liquidation field: bool
+nexus_exchange.Fill.market_id field: str
+nexus_exchange.Fill.order_id field: str
+nexus_exchange.Fill.price field: Decimal
+nexus_exchange.Fill.raw field: dict[str, Any]
+nexus_exchange.Fill.side field: str
+nexus_exchange.Fill.size field: Decimal
+nexus_exchange.Fill.taker_or_maker field: str | None
+nexus_exchange.Fill.timestamp field: int
+nexus_exchange.FundingPremiumSample dataclass(frozen)
+nexus_exchange.FundingPremiumSample(timestamp: int, premium_index: Decimal, raw: dict[str, Any]) -> None
+nexus_exchange.FundingPremiumSample.from_dict classmethod(d: dict[str, Any]) -> FundingPremiumSample
+nexus_exchange.FundingPremiumSample.premium_index field: Decimal
+nexus_exchange.FundingPremiumSample.raw field: dict[str, Any]
+nexus_exchange.FundingPremiumSample.timestamp field: int
+nexus_exchange.FundingSample dataclass(frozen)
+nexus_exchange.FundingSample(timestamp: int, funding_rate: Decimal, premium_index: Decimal, mark_price: Decimal, oracle_price: Decimal, raw: dict[str, Any]) -> None
+nexus_exchange.FundingSample.from_dict classmethod(d: dict[str, Any]) -> FundingSample
+nexus_exchange.FundingSample.funding_rate field: Decimal
+nexus_exchange.FundingSample.mark_price field: Decimal
+nexus_exchange.FundingSample.oracle_price field: Decimal
+nexus_exchange.FundingSample.premium_index field: Decimal
+nexus_exchange.FundingSample.raw field: dict[str, Any]
+nexus_exchange.FundingSample.timestamp field: int
+nexus_exchange.Funds enum(str, enum.Enum)
+nexus_exchange.Funds.PLAY member = 'play'
+nexus_exchange.Funds.REAL member = 'real'
+nexus_exchange.Funds.UNKNOWN member = 'unknown'
+nexus_exchange.FundsEntry dataclass(frozen)
+nexus_exchange.FundsEntry(id: int | None, kind: str | None, account: str | None, amount: Decimal | None, asset: str | None, timestamp: int | None, status: str | None, tx_hash: str | None, raw: dict[str, Any]) -> None
+nexus_exchange.FundsEntry.account field: str | None
+nexus_exchange.FundsEntry.amount field: Decimal | None
+nexus_exchange.FundsEntry.asset field: str | None
+nexus_exchange.FundsEntry.from_dict classmethod(d: dict[str, Any]) -> FundsEntry
+nexus_exchange.FundsEntry.id field: int | None
+nexus_exchange.FundsEntry.kind field: str | None
+nexus_exchange.FundsEntry.raw field: dict[str, Any]
+nexus_exchange.FundsEntry.status field: str | None
+nexus_exchange.FundsEntry.timestamp field: int | None
+nexus_exchange.FundsEntry.tx_hash field: str | None
+nexus_exchange.JURISDICTION_CODES constant: frozenset
+nexus_exchange.LoginRequest dataclass(frozen)
+nexus_exchange.LoginRequest(message: str, signature: str) -> None
+nexus_exchange.LoginRequest.message field: str
+nexus_exchange.LoginRequest.signature field: str
+nexus_exchange.LoginRequest.to_dict method(self) -> dict[str, Any]
+nexus_exchange.LoginResponse dataclass(frozen)
+nexus_exchange.LoginResponse(token: str, address: str) -> None
+nexus_exchange.LoginResponse.__repr__ method(self) -> str
+nexus_exchange.LoginResponse.address field: str
+nexus_exchange.LoginResponse.from_dict classmethod(d: dict[str, Any]) -> LoginResponse
+nexus_exchange.LoginResponse.token field: str
+nexus_exchange.MarginAdjustment dataclass(frozen)
+nexus_exchange.MarginAdjustment(market_id: str, allocated_margin: Decimal, collateral: Decimal, raw: dict[str, Any]) -> None
+nexus_exchange.MarginAdjustment.allocated_margin field: Decimal
+nexus_exchange.MarginAdjustment.collateral field: Decimal
+nexus_exchange.MarginAdjustment.from_dict classmethod(d: dict[str, Any]) -> MarginAdjustment
+nexus_exchange.MarginAdjustment.market_id field: str
+nexus_exchange.MarginAdjustment.raw field: dict[str, Any]
+nexus_exchange.MarkPrice dataclass(frozen)
+nexus_exchange.MarkPrice(market_id: str, mark_price: Decimal, raw: dict[str, Any]) -> None
+nexus_exchange.MarkPrice.from_dict classmethod(d: dict[str, Any]) -> MarkPrice
+nexus_exchange.MarkPrice.mark_price field: Decimal
+nexus_exchange.MarkPrice.market_id field: str
+nexus_exchange.MarkPrice.raw field: dict[str, Any]
+nexus_exchange.Market dataclass(frozen)
+nexus_exchange.Market(market_id: str, base_asset: str, quote_asset: str, tick_size: Decimal, lot_size: Decimal, min_order_size: Decimal, max_order_size: Decimal, initial_margin_rate: Decimal, maintenance_margin_rate: Decimal, max_leverage: int, raw: dict[str, Any]) -> None
+nexus_exchange.Market.base_asset field: str
+nexus_exchange.Market.from_dict classmethod(d: dict[str, Any]) -> Market
+nexus_exchange.Market.initial_margin_rate field: Decimal
+nexus_exchange.Market.lot_size field: Decimal
+nexus_exchange.Market.maintenance_margin_rate field: Decimal
+nexus_exchange.Market.market_id field: str
+nexus_exchange.Market.max_leverage field: int
+nexus_exchange.Market.max_order_size field: Decimal
+nexus_exchange.Market.min_order_size field: Decimal
+nexus_exchange.Market.quote_asset field: str
+nexus_exchange.Market.raw field: dict[str, Any]
+nexus_exchange.Market.tick_size field: Decimal
+nexus_exchange.MarketRiskParams dataclass(frozen)
+nexus_exchange.MarketRiskParams(market_id: str | None, max_leverage: int | None, initial_margin_rate: Decimal | None, maintenance_margin_rate: Decimal | None, raw: dict[str, Any]) -> None
+nexus_exchange.MarketRiskParams.from_dict classmethod(d: dict[str, Any]) -> MarketRiskParams
+nexus_exchange.MarketRiskParams.initial_margin_rate field: Decimal | None
+nexus_exchange.MarketRiskParams.maintenance_margin_rate field: Decimal | None
+nexus_exchange.MarketRiskParams.market_id field: str | None
+nexus_exchange.MarketRiskParams.max_leverage field: int | None
+nexus_exchange.MarketRiskParams.raw field: dict[str, Any]
+nexus_exchange.MarketStatus dataclass(frozen)
+nexus_exchange.MarketStatus(market_id: str, status: str, halt_reason: str | None, halted_at: int | None, adl_event_count: int, raw: dict[str, Any]) -> None
+nexus_exchange.MarketStatus.adl_event_count field: int
+nexus_exchange.MarketStatus.from_dict classmethod(d: dict[str, Any]) -> MarketStatus
+nexus_exchange.MarketStatus.halt_reason field: str | None
+nexus_exchange.MarketStatus.halted_at field: int | None
+nexus_exchange.MarketStatus.market_id field: str
+nexus_exchange.MarketStatus.raw field: dict[str, Any]
+nexus_exchange.MarketStatus.status field: str
+nexus_exchange.MarketSummary dataclass(frozen)
+nexus_exchange.MarketSummary(market_id: str, last_trade_price: Decimal | None, volume_24h: Decimal, trade_count: int, status: str, halt_reason: str | None, halted_at: int | None, adl_event_count: int, raw: dict[str, Any]) -> None
+nexus_exchange.MarketSummary.adl_event_count field: int
+nexus_exchange.MarketSummary.from_dict classmethod(d: dict[str, Any]) -> MarketSummary
+nexus_exchange.MarketSummary.halt_reason field: str | None
+nexus_exchange.MarketSummary.halted_at field: int | None
+nexus_exchange.MarketSummary.last_trade_price field: Decimal | None
+nexus_exchange.MarketSummary.market_id field: str
+nexus_exchange.MarketSummary.raw field: dict[str, Any]
+nexus_exchange.MarketSummary.status field: str
+nexus_exchange.MarketSummary.trade_count field: int
+nexus_exchange.MarketSummary.volume_24h field: Decimal
+nexus_exchange.MissingCredentialsError exception(NexusExchangeError)
+nexus_exchange.MissingCredentialsError.transient attribute: bool
+nexus_exchange.Network enum(str, enum.Enum)
+nexus_exchange.Network.LOCAL member = 'local'
+nexus_exchange.Network.MAINNET member = 'mainnet'
+nexus_exchange.Network.TESTNET member = 'testnet'
+nexus_exchange.Network.base_url property: str | None
+nexus_exchange.Network.config property: NetworkConfig
+nexus_exchange.Network.funds property: Funds
+nexus_exchange.Network.has_faucet property: bool
+nexus_exchange.Network.label property: str
+nexus_exchange.Network.signing_domain property: SigningDomain
+nexus_exchange.Network.ws_authenticated_url property: str
+nexus_exchange.Network.ws_market_data_url property: str
+nexus_exchange.NetworkConfig dataclass(frozen)
+nexus_exchange.NetworkConfig(label: str, funds: Funds, has_faucet: bool, published_rest_base: str, ws_market_data_url: str, ws_authenticated_url: str, signing_domain: SigningDomain, base_url: str | None, deployment_domain: str | None = None) -> None
+nexus_exchange.NetworkConfig.base_url field: str | None
+nexus_exchange.NetworkConfig.custom classmethod(*, label: str, funds: Funds | str, base_url: str, has_faucet: bool = False, chain_id: int | None = None, ws_market_data_url: str | None = None, ws_authenticated_url: str | None = None, deployment_domain: str | None = None) -> NetworkConfig
+nexus_exchange.NetworkConfig.deployment_domain field: str | None = None
+nexus_exchange.NetworkConfig.funds field: Funds
+nexus_exchange.NetworkConfig.has_faucet field: bool
+nexus_exchange.NetworkConfig.label field: str
+nexus_exchange.NetworkConfig.published_rest_base field: str
+nexus_exchange.NetworkConfig.signing_domain field: SigningDomain
+nexus_exchange.NetworkConfig.ws_authenticated_url field: str
+nexus_exchange.NetworkConfig.ws_market_data_url field: str
+nexus_exchange.NexusExchangeError exception(Exception)
+nexus_exchange.NexusExchangeError.transient attribute: bool
+nexus_exchange.ORDER_HISTORY_LIMIT_MAX constant: int
+nexus_exchange.Ohlcv dataclass(frozen)
+nexus_exchange.Ohlcv(timestamp: int, open: Decimal, high: Decimal, low: Decimal, close: Decimal, volume: Decimal) -> None
+nexus_exchange.Ohlcv.close field: Decimal
+nexus_exchange.Ohlcv.from_row classmethod(row: list[Any]) -> Ohlcv
+nexus_exchange.Ohlcv.high field: Decimal
+nexus_exchange.Ohlcv.low field: Decimal
+nexus_exchange.Ohlcv.open field: Decimal
+nexus_exchange.Ohlcv.timestamp field: int
+nexus_exchange.Ohlcv.volume field: Decimal
+nexus_exchange.Order dataclass(frozen)
+nexus_exchange.Order(id: str, market_id: str, account_id: str, side: str, order_type: str, price: Decimal | None, quantity: Decimal, filled_qty: Decimal, status: str, time_in_force: str, created_at: int, updated_at: int, raw: dict[str, Any], limit_offset_bps: int | None = None) -> None
+nexus_exchange.Order.account_id field: str
+nexus_exchange.Order.created_at field: int
+nexus_exchange.Order.filled_qty field: Decimal
+nexus_exchange.Order.from_dict classmethod(d: dict[str, Any]) -> Order
+nexus_exchange.Order.id field: str
+nexus_exchange.Order.limit_offset_bps field: int | None = None
+nexus_exchange.Order.market_id field: str
+nexus_exchange.Order.order_type field: str
+nexus_exchange.Order.price field: Decimal | None
+nexus_exchange.Order.quantity field: Decimal
+nexus_exchange.Order.raw field: dict[str, Any]
+nexus_exchange.Order.side field: str
+nexus_exchange.Order.status field: str
+nexus_exchange.Order.time_in_force field: str
+nexus_exchange.Order.updated_at field: int
+nexus_exchange.OrderBook dataclass(frozen)
+nexus_exchange.OrderBook(symbol: str, bids: list[PriceLevel], asks: list[PriceLevel], timestamp: int, datetime: str, nonce: int, raw: dict[str, Any]) -> None
+nexus_exchange.OrderBook.asks field: list[PriceLevel]
+nexus_exchange.OrderBook.bids field: list[PriceLevel]
+nexus_exchange.OrderBook.datetime field: str
+nexus_exchange.OrderBook.from_dict classmethod(d: dict[str, Any]) -> OrderBook
+nexus_exchange.OrderBook.nonce field: int
+nexus_exchange.OrderBook.raw field: dict[str, Any]
+nexus_exchange.OrderBook.symbol field: str
+nexus_exchange.OrderBook.timestamp field: int
+nexus_exchange.OrderHistoryEntry dataclass(frozen)
+nexus_exchange.OrderHistoryEntry(id: str, market_id: str, side: str, order_type: str, price: Decimal | None, size: Decimal, filled_qty: Decimal, status: str, cancellation_reason: str | None, created_at_ms: int, completed_at_ms: int, raw: dict[str, Any]) -> None
+nexus_exchange.OrderHistoryEntry.cancellation_reason field: str | None
+nexus_exchange.OrderHistoryEntry.completed_at_ms field: int
+nexus_exchange.OrderHistoryEntry.created_at_ms field: int
+nexus_exchange.OrderHistoryEntry.filled_qty field: Decimal
+nexus_exchange.OrderHistoryEntry.from_dict classmethod(d: dict[str, Any]) -> OrderHistoryEntry
+nexus_exchange.OrderHistoryEntry.id field: str
+nexus_exchange.OrderHistoryEntry.market_id field: str
+nexus_exchange.OrderHistoryEntry.order_type field: str
+nexus_exchange.OrderHistoryEntry.price field: Decimal | None
+nexus_exchange.OrderHistoryEntry.raw field: dict[str, Any]
+nexus_exchange.OrderHistoryEntry.side field: str
+nexus_exchange.OrderHistoryEntry.size field: Decimal
+nexus_exchange.OrderHistoryEntry.status field: str
+nexus_exchange.OrderRequest dataclass(frozen)
+nexus_exchange.OrderRequest(market_id: str, side: str, order_type: str, quantity: Decimal, time_in_force: str, price: Decimal | None = None, reduce_only: bool | None = None, trailing_offset_bps: int | None = None, limit_offset_bps: int | None = None, trigger_price: Decimal | None = None) -> None
+nexus_exchange.OrderRequest.limit classmethod(market_id: str, side: str, price: Decimal, quantity: Decimal, time_in_force: str = 'GTC', *, reduce_only: bool | None = None) -> OrderRequest
+nexus_exchange.OrderRequest.limit_offset_bps field: int | None = None
+nexus_exchange.OrderRequest.market classmethod(market_id: str, side: str, quantity: Decimal, *, reduce_only: bool | None = None) -> OrderRequest
+nexus_exchange.OrderRequest.market_id field: str
+nexus_exchange.OrderRequest.order_type field: str
+nexus_exchange.OrderRequest.price field: Decimal | None = None
+nexus_exchange.OrderRequest.quantity field: Decimal
+nexus_exchange.OrderRequest.reduce_only field: bool | None = None
+nexus_exchange.OrderRequest.side field: str
+nexus_exchange.OrderRequest.stop_limit classmethod(market_id: str, side: str, trigger_price: Decimal, price: Decimal, quantity: Decimal, time_in_force: str = 'GTC', *, reduce_only: bool | None = None) -> OrderRequest
+nexus_exchange.OrderRequest.stop_market classmethod(market_id: str, side: str, trigger_price: Decimal, quantity: Decimal, time_in_force: str = 'GTC', *, reduce_only: bool | None = None) -> OrderRequest
+nexus_exchange.OrderRequest.take_profit_limit classmethod(market_id: str, side: str, trigger_price: Decimal, price: Decimal, quantity: Decimal, time_in_force: str = 'GTC', *, reduce_only: bool | None = None) -> OrderRequest
+nexus_exchange.OrderRequest.take_profit_market classmethod(market_id: str, side: str, trigger_price: Decimal, quantity: Decimal, time_in_force: str = 'GTC', *, reduce_only: bool | None = None) -> OrderRequest
+nexus_exchange.OrderRequest.time_in_force field: str
+nexus_exchange.OrderRequest.to_payload method(self) -> dict[str, Any]
+nexus_exchange.OrderRequest.trailing_limit classmethod(market_id: str, side: str, quantity: Decimal, trailing_offset_bps: int, limit_offset_bps: int, time_in_force: str = 'GTC', *, reduce_only: bool | None = None) -> OrderRequest
+nexus_exchange.OrderRequest.trailing_offset_bps field: int | None = None
+nexus_exchange.OrderRequest.trailing_stop classmethod(market_id: str, side: str, quantity: Decimal, trailing_offset_bps: int, time_in_force: str = 'GTC', *, reduce_only: bool | None = None) -> OrderRequest
+nexus_exchange.OrderRequest.trigger_price field: Decimal | None = None
+nexus_exchange.OrderResponse dataclass(frozen)
+nexus_exchange.OrderResponse(order: Order, fills: list[Fill], raw: dict[str, Any]) -> None
+nexus_exchange.OrderResponse.fills field: list[Fill]
+nexus_exchange.OrderResponse.from_dict classmethod(d: dict[str, Any]) -> OrderResponse
+nexus_exchange.OrderResponse.order field: Order
+nexus_exchange.OrderResponse.raw field: dict[str, Any]
+nexus_exchange.PORTFOLIO_LIMIT_MAX constant: int
+nexus_exchange.PUBLIC_CHANNELS constant: frozenset
+nexus_exchange.Page dataclass(frozen)(typing.Generic)
+nexus_exchange.Page(items: list[T], next_cursor: str | None = None) -> None
+nexus_exchange.Page.is_last property: bool
+nexus_exchange.Page.items field: list[T]
+nexus_exchange.Page.next_cursor field: str | None = None
+nexus_exchange.PaginationError exception(NexusExchangeError)
+nexus_exchange.PaginationError.transient attribute: bool
+nexus_exchange.PortfolioHistory dataclass(frozen)
+nexus_exchange.PortfolioHistory(window: str, cadence_ms: int, points: list[PortfolioPoint], raw: dict[str, Any]) -> None
+nexus_exchange.PortfolioHistory.cadence_ms field: int
+nexus_exchange.PortfolioHistory.from_dict classmethod(d: dict[str, Any]) -> PortfolioHistory
+nexus_exchange.PortfolioHistory.points field: list[PortfolioPoint]
+nexus_exchange.PortfolioHistory.raw field: dict[str, Any]
+nexus_exchange.PortfolioHistory.window field: str
+nexus_exchange.PortfolioPoint dataclass(frozen)
+nexus_exchange.PortfolioPoint(timestamp_ms: int, equity: Decimal, pnl: Decimal, volume: Decimal, raw: dict[str, Any]) -> None
+nexus_exchange.PortfolioPoint.equity field: Decimal
+nexus_exchange.PortfolioPoint.from_dict classmethod(d: dict[str, Any]) -> PortfolioPoint
+nexus_exchange.PortfolioPoint.pnl field: Decimal
+nexus_exchange.PortfolioPoint.raw field: dict[str, Any]
+nexus_exchange.PortfolioPoint.timestamp_ms field: int
+nexus_exchange.PortfolioPoint.volume field: Decimal
+nexus_exchange.PortfolioWindow enum(str, enum.Enum)
+nexus_exchange.PortfolioWindow.ALL member = 'all'
+nexus_exchange.PortfolioWindow.DAY member = 'day'
+nexus_exchange.PortfolioWindow.MONTH member = 'month'
+nexus_exchange.PortfolioWindow.WEEK member = 'week'
+nexus_exchange.Position dataclass(frozen)
+nexus_exchange.Position(market_id: str, side: str, size: Decimal, entry_price: Decimal, unrealized_pnl: Decimal, realized_pnl: Decimal, liquidation_price: Decimal | None, raw: dict[str, Any], leverage: Decimal | None = None, leverage_error: str | None = None, notional_value: Decimal | None = None, notional_value_error: str | None = None, roe: Decimal | None = None, roe_error: str | None = None, margin_used: Decimal | None = None, margin_used_error: str | None = None, max_leverage: int | None = None, max_leverage_error: str | None = None, funding_paid: Decimal | None = None) -> None
+nexus_exchange.Position.entry_price field: Decimal
+nexus_exchange.Position.from_dict classmethod(d: dict[str, Any]) -> Position
+nexus_exchange.Position.funding_paid field: Decimal | None = None
+nexus_exchange.Position.leverage field: Decimal | None = None
+nexus_exchange.Position.leverage_error field: str | None = None
+nexus_exchange.Position.liquidation_price field: Decimal | None
+nexus_exchange.Position.margin_used field: Decimal | None = None
+nexus_exchange.Position.margin_used_error field: str | None = None
+nexus_exchange.Position.market_id field: str
+nexus_exchange.Position.max_leverage field: int | None = None
+nexus_exchange.Position.max_leverage_error field: str | None = None
+nexus_exchange.Position.notional_value field: Decimal | None = None
+nexus_exchange.Position.notional_value_error field: str | None = None
+nexus_exchange.Position.raw field: dict[str, Any]
+nexus_exchange.Position.realized_pnl field: Decimal
+nexus_exchange.Position.roe field: Decimal | None = None
+nexus_exchange.Position.roe_error field: str | None = None
+nexus_exchange.Position.side field: str
+nexus_exchange.Position.size field: Decimal
+nexus_exchange.Position.unrealized_pnl field: Decimal
+nexus_exchange.PreviewResponse dataclass(frozen)
+nexus_exchange.PreviewResponse(accepted: bool | None, reject_reason: str | None, required_initial_margin: Decimal | None, projected_post_trade_equity: Decimal | None, projected_post_trade_liquidation_price: Decimal | None, projected_post_trade_leverage: Decimal | None, expected_fill_vwap: Decimal | None, projected_fees: Decimal | None, raw: dict[str, Any]) -> None
+nexus_exchange.PreviewResponse.accepted field: bool | None
+nexus_exchange.PreviewResponse.expected_fill_vwap field: Decimal | None
+nexus_exchange.PreviewResponse.from_dict classmethod(d: dict[str, Any]) -> PreviewResponse
+nexus_exchange.PreviewResponse.projected_fees field: Decimal | None
+nexus_exchange.PreviewResponse.projected_post_trade_equity field: Decimal | None
+nexus_exchange.PreviewResponse.projected_post_trade_leverage field: Decimal | None
+nexus_exchange.PreviewResponse.projected_post_trade_liquidation_price field: Decimal | None
+nexus_exchange.PreviewResponse.raw field: dict[str, Any]
+nexus_exchange.PreviewResponse.reject_reason field: str | None
+nexus_exchange.PreviewResponse.required_initial_margin field: Decimal | None
+nexus_exchange.PriceLevel dataclass(frozen)
+nexus_exchange.PriceLevel(price: Decimal, amount: Decimal) -> None
+nexus_exchange.PriceLevel.amount field: Decimal
+nexus_exchange.PriceLevel.from_pair classmethod(pair: list[Any]) -> PriceLevel
+nexus_exchange.PriceLevel.price field: Decimal
+nexus_exchange.RateLimitStatus dataclass(frozen)
+nexus_exchange.RateLimitStatus(tier: str, limit: int | None, remaining: int | None, reset_at_ms: int | None, raw: dict[str, Any]) -> None
+nexus_exchange.RateLimitStatus.from_dict classmethod(d: dict[str, Any]) -> RateLimitStatus
+nexus_exchange.RateLimitStatus.limit field: int | None
+nexus_exchange.RateLimitStatus.raw field: dict[str, Any]
+nexus_exchange.RateLimitStatus.remaining field: int | None
+nexus_exchange.RateLimitStatus.reset_at_ms field: int | None
+nexus_exchange.RateLimitStatus.tier field: str
+nexus_exchange.RestrictedJurisdictionError exception(ApiError)
+nexus_exchange.RestrictedJurisdictionError(status: int, body: str, *, code: str | None = None, message: str | None = None, block_reason: str | None = None) -> None
+nexus_exchange.RestrictedJurisdictionError.block_reason attribute (set in __init__)
+nexus_exchange.RestrictedJurisdictionError.body attribute (set in __init__)
+nexus_exchange.RestrictedJurisdictionError.code attribute (set in __init__)
+nexus_exchange.RestrictedJurisdictionError.message attribute (set in __init__)
+nexus_exchange.RestrictedJurisdictionError.retry_after_ms attribute (set in __init__)
+nexus_exchange.RestrictedJurisdictionError.status attribute (set in __init__)
+nexus_exchange.RestrictedJurisdictionError.transient property: bool
+nexus_exchange.RetryConfig dataclass(frozen)
+nexus_exchange.RetryConfig(max_retries: int = 3, min_delay: float = 0.1, max_delay: float = 5.0, factor: float = 2.0, jitter: bool = True) -> None
+nexus_exchange.RetryConfig.factor field: float = 2.0
+nexus_exchange.RetryConfig.jitter field: bool = True
+nexus_exchange.RetryConfig.max_delay field: float = 5.0
+nexus_exchange.RetryConfig.max_retries field: int = 3
+nexus_exchange.RetryConfig.min_delay field: float = 0.1
+nexus_exchange.SIGN_IN_MESSAGE constant: str
+nexus_exchange.ServiceHealth dataclass(frozen)
+nexus_exchange.ServiceHealth(status: str | None, timestamp_ms: int | None, services: dict[str, Any], raw: dict[str, Any]) -> None
+nexus_exchange.ServiceHealth.from_dict classmethod(d: dict[str, Any]) -> ServiceHealth
+nexus_exchange.ServiceHealth.raw field: dict[str, Any]
+nexus_exchange.ServiceHealth.services field: dict[str, Any]
+nexus_exchange.ServiceHealth.status field: str | None
+nexus_exchange.ServiceHealth.timestamp_ms field: int | None
+nexus_exchange.SigningDomain dataclass(frozen)
+nexus_exchange.SigningDomain(name: str = 'Nexus Exchange', version: str = '1', chain_id: int | None = None, salt: bytes | None = None) -> None
+nexus_exchange.SigningDomain.chain_id field: int | None = None
+nexus_exchange.SigningDomain.name field: str = 'Nexus Exchange'
+nexus_exchange.SigningDomain.salt field: bytes | None = None
+nexus_exchange.SigningDomain.version field: str = '1'
+nexus_exchange.StatsSnapshot dataclass(frozen)
+nexus_exchange.StatsSnapshot(events_received: int | None, fills_total: int | None, liquidations_total: int | None, gap_count: int | None, connected: bool | None, last_event_ms: int | None, uptime_seconds: int | None, events_per_sec: Decimal | None, health: str | None, highest_sequence_seen: int | None, unique_traders_24h: int | None, unique_traders_7d: int | None, unique_traders_30d: int | None, raw: dict[str, Any]) -> None
+nexus_exchange.StatsSnapshot.connected field: bool | None
+nexus_exchange.StatsSnapshot.events_per_sec field: Decimal | None
+nexus_exchange.StatsSnapshot.events_received field: int | None
+nexus_exchange.StatsSnapshot.fills_total field: int | None
+nexus_exchange.StatsSnapshot.from_dict classmethod(d: dict[str, Any]) -> StatsSnapshot
+nexus_exchange.StatsSnapshot.gap_count field: int | None
+nexus_exchange.StatsSnapshot.health field: str | None
+nexus_exchange.StatsSnapshot.highest_sequence_seen field: int | None
+nexus_exchange.StatsSnapshot.last_event_ms field: int | None
+nexus_exchange.StatsSnapshot.liquidations_total field: int | None
+nexus_exchange.StatsSnapshot.raw field: dict[str, Any]
+nexus_exchange.StatsSnapshot.unique_traders_24h field: int | None
+nexus_exchange.StatsSnapshot.unique_traders_30d field: int | None
+nexus_exchange.StatsSnapshot.unique_traders_7d field: int | None
+nexus_exchange.StatsSnapshot.uptime_seconds field: int | None
+nexus_exchange.TRADES_LIMIT_MAX constant: int
+nexus_exchange.ThroughputSample dataclass(frozen)
+nexus_exchange.ThroughputSample(timestamp: int | None, fills: int | None, raw: dict[str, Any]) -> None
+nexus_exchange.ThroughputSample.fills field: int | None
+nexus_exchange.ThroughputSample.from_dict classmethod(d: dict[str, Any]) -> ThroughputSample
+nexus_exchange.ThroughputSample.raw field: dict[str, Any]
+nexus_exchange.ThroughputSample.timestamp field: int | None
+nexus_exchange.Ticker dataclass(frozen)
+nexus_exchange.Ticker(symbol: str, timestamp: int | None, datetime: str | None, high: Decimal | None, low: Decimal | None, bid: Decimal | None, bid_volume: Decimal | None, ask: Decimal | None, ask_volume: Decimal | None, open: Decimal | None, close: Decimal | None, last: Decimal | None, change: Decimal | None, percentage: Decimal | None, base_volume: Decimal | None, quote_volume: Decimal | None, mark_price: Decimal | None, index_price: Decimal | None, info: dict[str, Any]) -> None
+nexus_exchange.Ticker.ask field: Decimal | None
+nexus_exchange.Ticker.ask_volume field: Decimal | None
+nexus_exchange.Ticker.base_volume field: Decimal | None
+nexus_exchange.Ticker.bid field: Decimal | None
+nexus_exchange.Ticker.bid_volume field: Decimal | None
+nexus_exchange.Ticker.change field: Decimal | None
+nexus_exchange.Ticker.close field: Decimal | None
+nexus_exchange.Ticker.datetime field: str | None
+nexus_exchange.Ticker.from_dict classmethod(d: dict[str, Any]) -> Ticker
+nexus_exchange.Ticker.high field: Decimal | None
+nexus_exchange.Ticker.index_price field: Decimal | None
+nexus_exchange.Ticker.info field: dict[str, Any]
+nexus_exchange.Ticker.last field: Decimal | None
+nexus_exchange.Ticker.low field: Decimal | None
+nexus_exchange.Ticker.mark_price field: Decimal | None
+nexus_exchange.Ticker.market_id property: str
+nexus_exchange.Ticker.open field: Decimal | None
+nexus_exchange.Ticker.percentage field: Decimal | None
+nexus_exchange.Ticker.quote_volume field: Decimal | None
+nexus_exchange.Ticker.symbol field: str
+nexus_exchange.Ticker.timestamp field: int | None
+nexus_exchange.TierOverride dataclass(frozen)
+nexus_exchange.TierOverride(address: str, tier: str, raw: dict[str, Any]) -> None
+nexus_exchange.TierOverride.address field: str
+nexus_exchange.TierOverride.from_dict classmethod(d: dict[str, Any]) -> TierOverride
+nexus_exchange.TierOverride.raw field: dict[str, Any]
+nexus_exchange.TierOverride.tier field: str
+nexus_exchange.Trade dataclass(frozen)
+nexus_exchange.Trade(id: str, symbol: str, price: Decimal, amount: Decimal, cost: Decimal, side: str, timestamp: int, datetime: str, taker_or_maker: str | None, is_liquidation: bool, info: dict[str, Any]) -> None
+nexus_exchange.Trade.amount field: Decimal
+nexus_exchange.Trade.cost field: Decimal
+nexus_exchange.Trade.datetime field: str
+nexus_exchange.Trade.from_dict classmethod(d: dict[str, Any]) -> Trade
+nexus_exchange.Trade.id field: str
+nexus_exchange.Trade.info field: dict[str, Any]
+nexus_exchange.Trade.is_liquidation field: bool
+nexus_exchange.Trade.price field: Decimal
+nexus_exchange.Trade.side field: str
+nexus_exchange.Trade.symbol field: str
+nexus_exchange.Trade.taker_or_maker field: str | None
+nexus_exchange.Trade.timestamp field: int
+nexus_exchange.TransportError exception(NexusExchangeError)
+nexus_exchange.TransportError.transient attribute: bool
+nexus_exchange.Withdrawal dataclass(frozen)
+nexus_exchange.Withdrawal(id: str, amount: Decimal, timestamp: int, status: str, raw: dict[str, Any]) -> None
+nexus_exchange.Withdrawal.amount field: Decimal
+nexus_exchange.Withdrawal.from_dict classmethod(d: dict[str, Any]) -> Withdrawal
+nexus_exchange.Withdrawal.id field: str
+nexus_exchange.Withdrawal.raw field: dict[str, Any]
+nexus_exchange.Withdrawal.status field: str
+nexus_exchange.Withdrawal.timestamp field: int
+nexus_exchange.WsClient class
+nexus_exchange.WsClient(url: str, *, path: str = '/ws', token_provider: TokenProvider | None = None, connect: Connect | None = None, max_queue: int = 1024, base_reconnect_delay: float = 0.25, max_reconnect_delay: float = 10.0) -> None
+nexus_exchange.WsClient.__aenter__ async method(self) -> WsClient
+nexus_exchange.WsClient.__aexit__ async method(self, *exc: object) -> None
+nexus_exchange.WsClient.aclose async method(self) -> None
+nexus_exchange.WsClient.close method(self) -> None
+nexus_exchange.WsClient.status method(self) -> str
+nexus_exchange.WsClient.subscribe method(self, channel: str, *, market: str | None = None, interval: str | None = None, since: int | None = None) -> WsSubscription
+nexus_exchange.WsError exception(NexusExchangeError)
+nexus_exchange.WsError.transient attribute: bool
+nexus_exchange.WsEvent dataclass
+nexus_exchange.WsEvent(channel: str, market: str | None, seq: int, data: Any, interval: str | None = None, out_of_sync: bool = False) -> None
+nexus_exchange.WsEvent.channel field: str
+nexus_exchange.WsEvent.data field: Any
+nexus_exchange.WsEvent.interval field: str | None = None
+nexus_exchange.WsEvent.market field: str | None
+nexus_exchange.WsEvent.out_of_sync field: bool = False
+nexus_exchange.WsEvent.seq field: int
+nexus_exchange.WsHealth type alias = typing.Literal['live', 'resyncing', 'closed']
+nexus_exchange.WsSubscription class
+nexus_exchange.WsSubscription(client: WsClient, sub: _Sub) -> None
+nexus_exchange.WsSubscription.__aiter__ method(self) -> AsyncIterator[WsEvent]
+nexus_exchange.WsSubscription.events property: AsyncIterator[WsEvent]
+nexus_exchange.WsSubscription.health property: WsHealth
+nexus_exchange.WsSubscription.unsubscribe method(self) -> None
+nexus_exchange.WsToken dataclass(frozen)
+nexus_exchange.WsToken(token: str, raw: dict[str, Any]) -> None
+nexus_exchange.WsToken.from_dict classmethod(d: dict[str, Any]) -> WsToken
+nexus_exchange.WsToken.raw field: dict[str, Any]
+nexus_exchange.WsToken.token field: str
+nexus_exchange.__version__ constant: str
+nexus_exchange.aiter_items function(fetch_page: Callable[[str | None], Awaitable[Page[T]]], *, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[T]
+nexus_exchange.aiter_pages function(fetch_page: Callable[[str | None], Awaitable[Page[T]]], *, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[Page[T]]
+nexus_exchange.ccxt_adapter.NexusExchange class
+nexus_exchange.ccxt_adapter.NexusExchange(*, network: Network | NetworkConfig | str | None = None, base_url: str | None = None, client: Client | None = None) -> None
+nexus_exchange.ccxt_adapter.NexusExchange.__enter__ method(self) -> NexusExchange
+nexus_exchange.ccxt_adapter.NexusExchange.__exit__ method(self, *exc: object) -> None
+nexus_exchange.ccxt_adapter.NexusExchange.close method(self) -> None
+nexus_exchange.ccxt_adapter.NexusExchange.describe method(self) -> dict[str, Any]
+nexus_exchange.ccxt_adapter.NexusExchange.fetch_markets method(self, params: dict[str, Any] | None = None) -> list[dict[str, Any]]
+nexus_exchange.ccxt_adapter.NexusExchange.fetch_ohlcv method(self, symbol: str, timeframe: str = '1m', since: int | None = None, limit: int | None = None, params: dict[str, Any] | None = None) -> list[list[float]]
+nexus_exchange.ccxt_adapter.NexusExchange.fetch_order_book method(self, symbol: str, limit: int | None = None, params: dict[str, Any] | None = None) -> dict[str, Any]
+nexus_exchange.ccxt_adapter.NexusExchange.fetch_ticker method(self, symbol: str, params: dict[str, Any] | None = None) -> dict[str, Any]
+nexus_exchange.ccxt_adapter.NexusExchange.fetch_tickers method(self, symbols: list[str] | None = None, params: dict[str, Any] | None = None) -> dict[str, dict[str, Any]]
+nexus_exchange.ccxt_adapter.NexusExchange.fetch_trades method(self, symbol: str, since: int | None = None, limit: int | None = None, params: dict[str, Any] | None = None) -> list[dict[str, Any]]
+nexus_exchange.ccxt_adapter.NexusExchange.load_markets method(self, reload: bool = False) -> dict[str, dict[str, Any]]
+nexus_exchange.ccxt_adapter.NexusExchange.markets attribute: dict[str, dict[str, Any]] (set in __init__)
+nexus_exchange.ccxt_adapter.NexusExchange.symbols attribute: list[str] (set in __init__)
+nexus_exchange.iter_items function(fetch_page: Callable[[str | None], Page[T]], *, cursor: str | None = None, max_pages: int | None = None) -> Iterator[T]
+nexus_exchange.iter_pages function(fetch_page: Callable[[str | None], Page[T]], *, cursor: str | None = None, max_pages: int | None = None) -> Iterator[Page[T]]
+nexus_exchange.round_price function(market: Market, price: Decimal, side: str) -> Decimal
+nexus_exchange.round_size function(market: Market, size: Decimal) -> Decimal

@@ -51,6 +51,16 @@ packages = ["src/nexus_exchange"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
+# Copied byte for byte from nexus-exchange-rs and identical in every SDK repo (ENG-18798;
+# scripts/release_gate/VENDORED.md). Reformatting them here would fork them, and the gate's
+# self-test checks the classifier's sha256, so ruff leaves exactly these files alone.
+# force-exclude: also skip them when a path is passed explicitly (an editor, `ruff format <file>`).
+force-exclude = true
+extend-exclude = [
+  "scripts/release_gate/classify_spec_change.py",
+  "scripts/release_gate/release_verdict.py",
+  "scripts/release_gate/test_release_verdict.py",
+]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]
