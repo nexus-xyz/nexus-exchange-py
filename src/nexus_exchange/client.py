@@ -34,6 +34,7 @@ from .auth import (
     AgentSigner,
     EthSigner,
     LoginResponse,
+    trading_action,
 )
 from .errors import (
     JURISDICTION_CODES,
@@ -516,6 +517,7 @@ class _ClientCore:
         api_version: str | None = None,
         retry: RetryConfig | None = None,
         agent: AgentSigner | None = None,
+        acting_account: str | None = None,
     ) -> None:
         if agent is not None:
             if not isinstance(agent, AgentSigner):
@@ -523,14 +525,27 @@ class _ClientCore:
                     f"agent must be an AgentSigner (got {type(agent).__name__}); "
                     f"build one with AgentSigner.from_hex(...)"
                 )
-            if api_key is not None or api_secret is not None:
+            if (api_key is None) != (api_secret is None):
                 raise ValueError(
-                    "pass either api_key/api_secret (HMAC) or agent, not both: a request "
-                    "carries one credential, and the two schemes share the x-timestamp "
-                    "and x-signature headers. Use a separate Client for each."
+                    "pass api_key and api_secret together, or neither: with an agent "
+                    "key, HMAC authenticates the request and the agent signs only the "
+                    "trading action (D26)"
                 )
         config = self._resolve_config(network, base_url)
         self._network = config
+        # Typed trading actions need an agent and a deployment to name (D27).
+        self._trading_domain = config.deployment_domain if agent is not None else None
+        if self._trading_domain is not None and agent is not None and agent.account is None:
+            raise ValueError(
+                f"{config.label} signs trading actions, which name the agent's account: "
+                f"build the agent with AgentSigner.from_hex(key, account=<its wallet>)"
+            )
+        if acting_account is not None and self._trading_domain is None:
+            raise ValueError(
+                "acting_account needs an agent key and a network with a deployment_domain: "
+                "only a signed trading action can name another account"
+            )
+        self._acting_account = acting_account
         # A caller-supplied base_url overrides the config default.
         self._base_url = self._resolve_base(config, base_url, config.base_url, "base_url")
         self._api_key = api_key
@@ -693,14 +708,35 @@ class _ClientCore:
 
         Called once per attempt, so every retry gets a fresh timestamp — and,
         for an agent key, a fresh nonce.
+
+        On the eight order-path routes, when the network names a deployment, the
+        agent signs the route's trading struct into the ``x-action-*`` headers.
+        An agent-only client sends them with ``x-agent`` in place of the
+        canonical string; an HMAC client sends them beside its HMAC headers
+        (D26, D30).
         """
-        if self._agent is not None:
-            return self._agent.headers(method, path, query, body, self._now_ms())
+        now = self._now_ms()
+        action = None
+        typed: dict[str, str] = {}
+        if self._trading_domain is not None and self._agent is not None:
+            action = trading_action(method, path, query, body)
+            if action is not None:
+                typed = self._agent.sign_trading_action(
+                    action,
+                    domain=self._trading_domain,
+                    timestamp_ms=now,
+                    nonce=self._agent.next_nonce(now),
+                    acting_account=self._acting_account,
+                )
         if not self._api_key or not self._api_secret:
-            raise MissingCredentialsError(
-                "signed request requires api_key and api_secret, or an agent key"
-            )
-        ts = str(self._now_ms())
+            if self._agent is None:
+                raise MissingCredentialsError(
+                    "signed request requires api_key and api_secret, or an agent key"
+                )
+            if action is not None:
+                return {"x-agent": self._agent.address, **typed}
+            return self._agent.headers(method, path, query, body, now)
+        ts = str(now)
         body_hash = hashlib.sha256(body).hexdigest()
         # Canonical string the indexer verifies (auth.rs::verify_hmac):
         #   <ts>\n<METHOD>\n<path>\n<query>\n<sha256hex(body)>
@@ -708,7 +744,7 @@ class _ClientCore:
         signature = hmac.new(
             bytes.fromhex(self._api_secret), canonical.encode(), hashlib.sha256
         ).hexdigest()
-        return {"x-api-key": self._api_key, "x-timestamp": ts, "x-signature": signature}
+        return {"x-api-key": self._api_key, "x-timestamp": ts, "x-signature": signature, **typed}
 
     def _backoff_delay(self, attempt: int) -> float:
         """Exponential backoff (seconds) before retry ``attempt`` (0-indexed).
@@ -763,7 +799,7 @@ class _ClientCore:
             raise ValueError("a request cannot be both HMAC-signed and bearer-authenticated")
         # Agent keys are trade-only. Refuse what the server would 403 before
         # signing, so a refused call never consumes a nonce.
-        if signed and self._agent is not None:
+        if signed and self._agent is not None and not self._api_key:
             refusal = _agent_refusal(method, full_path)
             if refusal is not None:
                 raise AgentKeyRefusedError(method.upper(), full_path, refusal)
@@ -942,14 +978,22 @@ class Client(_ClientCore):
 
     **Agent keys** (``agent=``). Every ``signed`` request is then sent with the
     ``agentAuth`` headers (``x-agent`` / ``x-timestamp`` / ``x-nonce`` /
-    ``x-signature``) instead of HMAC. Combining ``agent`` with ``api_key`` or
-    ``api_secret`` raises :class:`ValueError`: the two schemes share the
-    ``x-timestamp`` and ``x-signature`` header names, and the server tries the
-    agent first and falls back to HMAC, so a request carrying both would
-    present two identities and leave the server to pick. Pick one per client;
-    use two clients to hold both. The session bearer token is unaffected —
+    ``x-signature``) instead of HMAC. The session bearer token is unaffected —
     :meth:`create_api_key` sends only ``Authorization: Bearer`` whichever
     request credential the client holds.
+
+    **Signed trading actions** (spec "Signed trading actions", D26 to D30). Once
+    the engine enforces them, the eight order-path routes refuse an order that
+    carries no EIP-712 action signed by the account or an agent key active for
+    it, HMAC included. On a network with a
+    :attr:`~nexus_exchange.NetworkConfig.deployment_domain` the agent signs that
+    action into ``x-action-signature`` / ``x-action-timestamp`` /
+    ``x-action-nonce``: an agent-only client sends them with ``x-agent`` in place
+    of the canonical string, and a client given ``api_key``/``api_secret`` *and*
+    ``agent`` authenticates with HMAC and sends them beside it. Either way the
+    agent needs ``account=`` (see :class:`~nexus_exchange.AgentSigner`).
+    ``acting_account`` trades a subaccount: it is signed as the struct's account
+    and sent as ``x-acting-account`` on those eight routes only.
 
     Agent keys are trade-only: an agent client refuses withdrawals and
     :meth:`fetch_agents` locally with
@@ -976,6 +1020,7 @@ class Client(_ClientCore):
         http_client: httpx.Client | None = None,
         retry: RetryConfig | None = None,
         agent: AgentSigner | None = None,
+        acting_account: str | None = None,
     ) -> None:
         super().__init__(
             network,
@@ -985,6 +1030,7 @@ class Client(_ClientCore):
             api_version=api_version,
             retry=retry,
             agent=agent,
+            acting_account=acting_account,
         )
         self._owns_http = http_client is None
         self._http = http_client or httpx.Client(timeout=timeout)

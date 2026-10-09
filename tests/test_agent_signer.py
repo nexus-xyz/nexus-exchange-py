@@ -227,17 +227,21 @@ def test_each_retry_attempt_gets_a_fresh_timestamp_and_nonce(httpx_mock) -> None
 # -- credential precedence ------------------------------------------------
 
 
-@pytest.mark.parametrize(
-    "hmac",
-    [
-        {"api_key": "nx_test", "api_secret": _HMAC_SECRET},
-        {"api_key": "nx_test"},
-        {"api_secret": _HMAC_SECRET},
-    ],
-)
-def test_agent_and_any_hmac_field_together_is_refused(hmac: dict[str, str]) -> None:
-    with pytest.raises(ValueError, match="not both"):
+@pytest.mark.parametrize("hmac", [{"api_key": "nx_test"}, {"api_secret": _HMAC_SECRET}])
+def test_agent_with_half_an_hmac_key_is_refused(hmac: dict[str, str]) -> None:
+    with pytest.raises(ValueError, match="together"):
         Client(Network.LOCAL, agent=AgentSigner.from_hex(_KEY), **hmac)
+
+
+def test_agent_and_hmac_together_authenticate_with_hmac(httpx_mock) -> None:
+    # D26: HMAC authenticates; the agent only signs trading actions.
+    httpx_mock.add_response(url="http://localhost:9090/orders", json=[])
+    agent = AgentSigner.from_hex(_KEY)
+    with Client(Network.LOCAL, agent=agent, api_key="nx_test", api_secret=_HMAC_SECRET) as c:
+        c.fetch_open_orders()
+    (req,) = httpx_mock.get_requests()
+    assert req.headers["x-api-key"] == "nx_test"
+    assert "x-agent" not in req.headers
 
 
 def test_agent_must_be_an_agent_signer() -> None:
