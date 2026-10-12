@@ -836,8 +836,14 @@ class AccountFees:
     than reporting a fabricated ``0`` bps, which would read as "trading is
     free".
 
+    Rates are :class:`~decimal.Decimal` basis points, to 0.1 bps: the server
+    sends a whole rate as an integer (``5``, ``-2``) and a fractional one with
+    one decimal place (``2.8``, ``-0.4``, from spec 0.9.123). Both decode to
+    the exact value sent (see :mod:`nexus_exchange._parse`).
+
     :attr:`maker_fee_bps` may be **negative** — that is a rebate *paid to* the
-    maker (``-2`` is a 0.02% rebate), and the sign is preserved as sent.
+    maker (``-2`` is a 0.02% rebate). A **positive** maker rate is a fee the
+    maker pays. The sign is preserved as sent.
 
     :attr:`tier` (currently always ``"base"``) and :attr:`schedule` (currently
     always ``"standard"``) are open strings — typed ``str`` rather than an enum
@@ -866,8 +872,8 @@ class AccountFees:
     non-array ``discounts`` decodes to ``[]`` for the same reason.
     """
 
-    maker_fee_bps: int
-    taker_fee_bps: int
+    maker_fee_bps: Decimal
+    taker_fee_bps: Decimal
     tier: str
     schedule: str
     volume_30d: Decimal
@@ -884,8 +890,8 @@ class AccountFees:
         # lenient about.
         raw_discounts = d.get("discounts")
         return cls(
-            maker_fee_bps=to_int(d.get("maker_fee_bps"), "maker_fee_bps"),
-            taker_fee_bps=to_int(d.get("taker_fee_bps"), "taker_fee_bps"),
+            maker_fee_bps=to_decimal(d.get("maker_fee_bps"), "maker_fee_bps"),
+            taker_fee_bps=to_decimal(d.get("taker_fee_bps"), "taker_fee_bps"),
             tier=to_str(d.get("tier"), "tier"),
             schedule=to_str(d.get("schedule"), "schedule"),
             volume_30d=to_decimal(d.get("volume_30d"), "volume_30d"),

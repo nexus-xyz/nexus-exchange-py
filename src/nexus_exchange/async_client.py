@@ -493,9 +493,11 @@ class AsyncClient(_AsyncTransport):
         Requires credentials; the account is taken from the signing credentials,
         not a parameter. Returns the forward-looking *schedule* rate (maker /
         taker bps, fee tier, rolling 30-day volume, active discounts), not a
-        realized per-fill average. ``maker_fee_bps`` may be negative — a rebate
-        paid to the maker. See :class:`AccountFees` for the ``schedule``
-        scoping caveat and the ``volume_30d_estimated`` flag.
+        realized per-fill average. The rates are ``Decimal`` and may be
+        fractional (``2.8``). ``maker_fee_bps`` may be negative — a rebate paid
+        to the maker — or positive, a fee the maker pays. See
+        :class:`AccountFees` for the ``schedule`` scoping caveat and the
+        ``volume_30d_estimated`` flag.
         """
         data = await self._request("GET", "/account/fees", signed=True)
         return AccountFees.from_dict(data if isinstance(data, dict) else {})

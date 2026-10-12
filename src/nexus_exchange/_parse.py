@@ -86,12 +86,13 @@ def to_int(value: Any, field: str | None = None) -> int:
     :class:`~nexus_exchange.DecodeError` when ``value`` is ``None`` (missing or
     sent ``null``) rather than defaulting. Used for spec-``required`` structural
     integers where a fabricated ``0`` would be nonsense downstream (a zero
-    downsample cadence, a zero timestamp, a zero fee rate). Use :func:`opt_int`
-    for genuinely optional fields.
+    downsample cadence, a zero timestamp). Use :func:`opt_int` for genuinely
+    optional fields.
 
     A non-integral value raises rather than truncating: ``int(2.9)`` silently
-    yielding a ``2`` bps fee rate is the same class of fabrication as a
-    defaulted zero.
+    yielding a ``2`` ms cadence is the same class of fabrication as a defaulted
+    zero. Fee rates are fractional (``2.8`` bps), so they decode with
+    :func:`to_decimal`, not here.
     """
     if value is None:
         raise DecodeError(f"{_describe(field, 'integer')} is missing or null")
