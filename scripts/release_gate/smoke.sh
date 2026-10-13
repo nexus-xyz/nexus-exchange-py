@@ -8,7 +8,7 @@
 #                                               (PRs that are not a release)
 #
 # The probes, in both modes, before any testnet read: the just-installed smoke is run three times
-# with NEXUS_SMOKE_BASE_URL pointed away from testnet, each under a 60s timeout. At
+# with NEXUS_SMOKE_BASE_URL pointed away from testnet, each under a 180s timeout. At
 # http://127.0.0.1:1, where nothing listens, it must exit 2 (unreachable); at
 # scripts/release_gate/stub_server.py answering every request with an empty list, 1 (failed); at
 # the same stub answering 503 to everything, 2 again, so an outage never reads as failed or
@@ -74,23 +74,35 @@ summary() {
 # The outcome probes. The smoke runs directly, not through the `case` below, because exit 1 and 2
 # are what these expect, and the annotations that case prints for them would read as a failure.
 # Its stdout and stderr both go to a file, so nothing it prints becomes an annotation; each probe
-# logs one plain line instead. A probe that runs past 60s is a failure of its own.
+# logs one plain line instead. A probe that runs past 180s is a failure of its own: long enough
+# for the SDK's own retries with backoff to finish first.
 outcomes_failed() {
   echo "::error title=prepublish-smoke (outcomes)::$1"
   summary "❌ OUTCOMES WRONG" "$1"
   exit 1
 }
+# `timeout` is GNU coreutils: a Mac has none, or `gtimeout` from Homebrew. Without either the
+# probes still run, with no time limit, and say so once.
+limit=()
+if command -v timeout > /dev/null; then
+  limit=(timeout 180)
+elif command -v gtimeout > /dev/null; then
+  limit=(gtimeout 180)
+else
+  echo "note: neither timeout nor gtimeout is installed, so the outcome probes run without a time limit"
+fi
 probe() {
   local name="$1" url="$2" want="$3" first got
   set +e
-  NEXUS_SMOKE_BASE_URL="$url" timeout 60 "$work/venv/bin/python" -I "$root/scripts/release_gate/smoke.py" \
-    > "$work/probe.log" 2>&1
+  # ${limit[@]+...}: an empty array under `set -u` is an error in bash 3.2, the Mac's.
+  NEXUS_SMOKE_BASE_URL="$url" ${limit[@]+"${limit[@]}"} \
+    "$work/venv/bin/python" -I "$root/scripts/release_gate/smoke.py" > "$work/probe.log" 2>&1
   got=$?
   set -e
   first="$(head -n 1 "$work/probe.log")"
   echo "outcome probe, ${name}: exit ${got} (want ${want}): ${first}"
-  if [ "$got" -eq 124 ]; then
-    outcomes_failed "Pointed at ${name} (${url}), the smoke did not finish within 60s."
+  if [ "${#limit[@]}" -gt 0 ] && [ "$got" -eq 124 ]; then
+    outcomes_failed "Pointed at ${name} (${url}), the smoke did not finish within 180s."
   fi
   if [ "$got" -ne "$want" ]; then
     outcomes_failed "Pointed at ${name} (${url}), the smoke exited ${got}, not ${want}, so its exit codes cannot be trusted to keep a pass, a failure and an unreachable testnet apart. ${first}"
