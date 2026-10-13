@@ -1,5 +1,5 @@
-nexus_exchange.ACCOUNT_CHANNELS constant: frozenset
-nexus_exchange.ACCOUNT_FUNDING_LIMIT_MAX constant: int
+nexus_exchange.ACCOUNT_CHANNELS constant: frozenset = frozenset({'balances', 'fills', 'liquidations', 'orders', 'positions'})
+nexus_exchange.ACCOUNT_FUNDING_LIMIT_MAX constant: int = 1000
 nexus_exchange.AccountFees dataclass(frozen)
 nexus_exchange.AccountFees(maker_fee_bps: Decimal, taker_fee_bps: Decimal, tier: str, schedule: str, volume_30d: Decimal, volume_30d_estimated: bool, discounts: list[dict[str, Any]], raw: dict[str, Any]) -> None
 nexus_exchange.AccountFees.discounts field: list[dict[str, Any]]
@@ -82,7 +82,7 @@ nexus_exchange.AgentKeyRefusedError(method: str, path: str, code: str) -> None
 nexus_exchange.AgentKeyRefusedError.code attribute (set in __init__)
 nexus_exchange.AgentKeyRefusedError.method attribute (set in __init__)
 nexus_exchange.AgentKeyRefusedError.path attribute (set in __init__)
-nexus_exchange.AgentKeyRefusedError.transient attribute: bool
+nexus_exchange.AgentKeyRefusedError.transient attribute: bool = False
 nexus_exchange.AgentRegistered dataclass(frozen)
 nexus_exchange.AgentRegistered(agent_address: str, expires_at: int) -> None
 nexus_exchange.AgentRegistered.agent_address field: str
@@ -243,7 +243,7 @@ nexus_exchange.AsyncClient.set_cancel_on_disconnect async method(self, enabled: 
 nexus_exchange.AsyncClient.set_tier async method(self, address: str, tier: str) -> TierOverride
 nexus_exchange.AsyncClient.sign_in async method(self, signer: EthSigner) -> LoginResponse
 nexus_exchange.AuthError exception(NexusExchangeError)
-nexus_exchange.AuthError.transient attribute: bool
+nexus_exchange.AuthError.transient attribute: bool = False
 nexus_exchange.BatchOrderResult dataclass(frozen)
 nexus_exchange.BatchOrderResult(outcome: str, order: Order | None, fills: list[Fill], error: str | None, message: str | None, raw: dict[str, Any]) -> None
 nexus_exchange.BatchOrderResult.error field: str | None
@@ -305,8 +305,8 @@ nexus_exchange.BridgeDepositAddress.chain field: str
 nexus_exchange.BridgeDepositAddress.created_at field: int
 nexus_exchange.BridgeDepositAddress.from_dict classmethod(d: dict[str, Any]) -> BridgeDepositAddress
 nexus_exchange.BridgeDepositAddress.raw field: dict[str, Any]
-nexus_exchange.CHANNELS constant: frozenset
-nexus_exchange.CLOSED_POSITIONS_LIMIT_MAX constant: int
+nexus_exchange.CHANNELS constant: frozenset = frozenset({'balances', 'book', 'candles', 'fills', 'liquidations', 'orders', 'positions', 'trades'})
+nexus_exchange.CLOSED_POSITIONS_LIMIT_MAX constant: int = 200
 nexus_exchange.CancelOnDisconnectStatus dataclass(frozen)
 nexus_exchange.CancelOnDisconnectStatus(enabled: bool, active: bool, grace_secs: int | None, raw: dict[str, Any]) -> None
 nexus_exchange.CancelOnDisconnectStatus.active field: bool
@@ -434,9 +434,9 @@ nexus_exchange.CreditResult.from_dict classmethod(d: dict[str, Any]) -> CreditRe
 nexus_exchange.CreditResult.raw field: dict[str, Any]
 nexus_exchange.DEFAULT_API_VERSION constant: str
 nexus_exchange.DEFAULT_USER_AGENT constant: str
-nexus_exchange.DEPOSITS_LIMIT_MAX constant: int
+nexus_exchange.DEPOSITS_LIMIT_MAX constant: int = 100
 nexus_exchange.DecodeError exception(NexusExchangeError, ValueError)
-nexus_exchange.DecodeError.transient attribute: bool
+nexus_exchange.DecodeError.transient attribute: bool = False
 nexus_exchange.DepositResponse dataclass(frozen)
 nexus_exchange.DepositResponse(balance: Decimal | None, raw: dict[str, Any]) -> None
 nexus_exchange.DepositResponse.balance field: Decimal | None
@@ -447,7 +447,7 @@ nexus_exchange.DepositResult(balance: Decimal, raw: dict[str, Any]) -> None
 nexus_exchange.DepositResult.balance field: Decimal
 nexus_exchange.DepositResult.from_dict classmethod(d: dict[str, Any]) -> DepositResult
 nexus_exchange.DepositResult.raw field: dict[str, Any]
-nexus_exchange.EQUITY_HISTORY_LIMIT_MAX constant: int
+nexus_exchange.EQUITY_HISTORY_LIMIT_MAX constant: int = 720
 nexus_exchange.EquityPoint dataclass(frozen)
 nexus_exchange.EquityPoint(timestamp_ms: int | None, equity: Decimal | None, raw: dict[str, Any]) -> None
 nexus_exchange.EquityPoint.equity field: Decimal | None
@@ -463,8 +463,8 @@ nexus_exchange.EthSigner.from_hex classmethod(private_key: str) -> EthSigner
 nexus_exchange.EthSigner.register_agent method(self, agent: str, expires_at_ms: int, nonce: int, chain_id: int, label: str | None = None, *, network: Network | NetworkConfig | str) -> AgentRegistration
 nexus_exchange.EthSigner.revoke_agent method(self, agent: str, nonce: int, chain_id: int, *, network: Network | NetworkConfig | str) -> AgentRevocation
 nexus_exchange.EthSigner.sign_in method(self) -> LoginRequest
-nexus_exchange.FILLS_LIMIT_MAX constant: int
-nexus_exchange.FUNDING_SAMPLES_LIMIT_MAX constant: int
+nexus_exchange.FILLS_LIMIT_MAX constant: int = 1000
+nexus_exchange.FUNDING_SAMPLES_LIMIT_MAX constant: int = 480
 nexus_exchange.FaucetResponse dataclass(frozen)
 nexus_exchange.FaucetResponse(amount: Decimal | None, available_at_ms: int | None, raw: dict[str, Any]) -> None
 nexus_exchange.FaucetResponse.amount field: Decimal | None
@@ -516,7 +516,7 @@ nexus_exchange.FundsEntry.raw field: dict[str, Any]
 nexus_exchange.FundsEntry.status field: str | None
 nexus_exchange.FundsEntry.timestamp field: int | None
 nexus_exchange.FundsEntry.tx_hash field: str | None
-nexus_exchange.JURISDICTION_CODES constant: frozenset
+nexus_exchange.JURISDICTION_CODES constant: frozenset = frozenset({'GEO_UNRESOLVED', 'RESTRICTED_JURISDICTION', 'US_RESTRICTED'})
 nexus_exchange.LoginRequest dataclass(frozen)
 nexus_exchange.LoginRequest(message: str, signature: str) -> None
 nexus_exchange.LoginRequest.message field: str
@@ -585,7 +585,7 @@ nexus_exchange.MarketSummary.status field: str
 nexus_exchange.MarketSummary.trade_count field: int
 nexus_exchange.MarketSummary.volume_24h field: Decimal
 nexus_exchange.MissingCredentialsError exception(NexusExchangeError)
-nexus_exchange.MissingCredentialsError.transient attribute: bool
+nexus_exchange.MissingCredentialsError.transient attribute: bool = False
 nexus_exchange.Network enum(str, enum.Enum)
 nexus_exchange.Network.LOCAL member = 'local'
 nexus_exchange.Network.MAINNET member = 'mainnet'
@@ -611,8 +611,8 @@ nexus_exchange.NetworkConfig.signing_domain field: SigningDomain
 nexus_exchange.NetworkConfig.ws_authenticated_url field: str
 nexus_exchange.NetworkConfig.ws_market_data_url field: str
 nexus_exchange.NexusExchangeError exception(Exception)
-nexus_exchange.NexusExchangeError.transient attribute: bool
-nexus_exchange.ORDER_HISTORY_LIMIT_MAX constant: int
+nexus_exchange.NexusExchangeError.transient attribute: bool = False
+nexus_exchange.ORDER_HISTORY_LIMIT_MAX constant: int = 500
 nexus_exchange.Ohlcv dataclass(frozen)
 nexus_exchange.Ohlcv(timestamp: int, open: Decimal, high: Decimal, low: Decimal, close: Decimal, volume: Decimal) -> None
 nexus_exchange.Ohlcv.close field: Decimal
@@ -691,15 +691,15 @@ nexus_exchange.OrderResponse.fills field: list[Fill]
 nexus_exchange.OrderResponse.from_dict classmethod(d: dict[str, Any]) -> OrderResponse
 nexus_exchange.OrderResponse.order field: Order
 nexus_exchange.OrderResponse.raw field: dict[str, Any]
-nexus_exchange.PORTFOLIO_LIMIT_MAX constant: int
-nexus_exchange.PUBLIC_CHANNELS constant: frozenset
+nexus_exchange.PORTFOLIO_LIMIT_MAX constant: int = 366
+nexus_exchange.PUBLIC_CHANNELS constant: frozenset = frozenset({'book', 'candles', 'trades'})
 nexus_exchange.Page dataclass(frozen)(typing.Generic)
 nexus_exchange.Page(items: list[T], next_cursor: str | None = None) -> None
 nexus_exchange.Page.is_last property: bool
 nexus_exchange.Page.items field: list[T]
 nexus_exchange.Page.next_cursor field: str | None = None
 nexus_exchange.PaginationError exception(NexusExchangeError)
-nexus_exchange.PaginationError.transient attribute: bool
+nexus_exchange.PaginationError.transient attribute: bool = False
 nexus_exchange.PortfolioHistory dataclass(frozen)
 nexus_exchange.PortfolioHistory(window: str, cadence_ms: int, points: list[PortfolioPoint], raw: dict[str, Any]) -> None
 nexus_exchange.PortfolioHistory.cadence_ms field: int
@@ -783,7 +783,7 @@ nexus_exchange.RetryConfig.jitter field: bool = True
 nexus_exchange.RetryConfig.max_delay field: float = 5.0
 nexus_exchange.RetryConfig.max_retries field: int = 3
 nexus_exchange.RetryConfig.min_delay field: float = 0.1
-nexus_exchange.SIGN_IN_MESSAGE constant: str
+nexus_exchange.SIGN_IN_MESSAGE constant: str = 'Sign in to Nexus Exchange'
 nexus_exchange.ServiceHealth dataclass(frozen)
 nexus_exchange.ServiceHealth(status: str | None, timestamp_ms: int | None, services: dict[str, Any], raw: dict[str, Any]) -> None
 nexus_exchange.ServiceHealth.from_dict classmethod(d: dict[str, Any]) -> ServiceHealth
@@ -814,7 +814,7 @@ nexus_exchange.StatsSnapshot.unique_traders_24h field: int | None
 nexus_exchange.StatsSnapshot.unique_traders_30d field: int | None
 nexus_exchange.StatsSnapshot.unique_traders_7d field: int | None
 nexus_exchange.StatsSnapshot.uptime_seconds field: int | None
-nexus_exchange.TRADES_LIMIT_MAX constant: int
+nexus_exchange.TRADES_LIMIT_MAX constant: int = 1000
 nexus_exchange.ThroughputSample dataclass(frozen)
 nexus_exchange.ThroughputSample(timestamp: int | None, fills: int | None, raw: dict[str, Any]) -> None
 nexus_exchange.ThroughputSample.fills field: int | None
@@ -865,7 +865,7 @@ nexus_exchange.Trade.symbol field: str
 nexus_exchange.Trade.taker_or_maker field: str | None
 nexus_exchange.Trade.timestamp field: int
 nexus_exchange.TransportError exception(NexusExchangeError)
-nexus_exchange.TransportError.transient attribute: bool
+nexus_exchange.TransportError.transient attribute: bool = True
 nexus_exchange.Withdrawal dataclass(frozen)
 nexus_exchange.Withdrawal(id: str, amount: Decimal, timestamp: int, status: str, raw: dict[str, Any]) -> None
 nexus_exchange.Withdrawal.amount field: Decimal
@@ -883,7 +883,7 @@ nexus_exchange.WsClient.close method(self) -> None
 nexus_exchange.WsClient.status method(self) -> str
 nexus_exchange.WsClient.subscribe method(self, channel: str, *, market: str | None = None, interval: str | None = None, since: int | None = None) -> WsSubscription
 nexus_exchange.WsError exception(NexusExchangeError)
-nexus_exchange.WsError.transient attribute: bool
+nexus_exchange.WsError.transient attribute: bool = False
 nexus_exchange.WsEvent dataclass
 nexus_exchange.WsEvent(channel: str, market: str | None, seq: int, data: Any, interval: str | None = None, out_of_sync: bool = False) -> None
 nexus_exchange.WsEvent.channel field: str

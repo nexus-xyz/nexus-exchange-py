@@ -6,9 +6,9 @@
 #   scripts/release_gate/smoke.sh               build, install, read
 #   scripts/release_gate/smoke.sh --build-only  build, install and import, no testnet (PRs that are not a release)
 #
-# Exit codes, kept apart on purpose: 0 passed, 1 failed, 2 testnet unreachable. The workflow fails
-# on 1 and on 2, under different names. Unreachable is not a pass, and it is not the SDK's fault:
-# re-run the job once testnet answers.
+# Exit codes, kept apart on purpose: 0 passed, 1 failed, 2 testnet unreachable (or refused this
+# runner's location). The workflow fails on 1 and on 2, under different names. Unreachable is not a
+# pass, and it is not the SDK's fault: re-run the job once testnet answers.
 #
 # PYTHON (default python3) builds and hosts the venv, and needs `build` installed.
 set -euo pipefail
@@ -70,7 +70,7 @@ case "$code" in
     summary "✅ passed" "$line"
     ;;
   2)
-    echo "::error title=prepublish-smoke (testnet unreachable)::NOT a pass: the testnet read got no usable answer, so nothing about this release was verified. Re-run this job once testnet answers. ${line}"
+    echo "::error title=prepublish-smoke (testnet unreachable)::NOT a pass: the testnet read got no usable answer, so nothing about this release was verified. Re-run this job once testnet answers; if it refused this runner's location, re-running from the same place will not help. ${line}"
     summary "⚠️ TESTNET UNREACHABLE: not a pass" "$line"
     ;;
   *)

@@ -15,7 +15,9 @@ pass and is not the SDK's fault either:
 
   0  passed       the read decoded at least one market, each with a market_id
   1  failed       the SDK got an answer and could not use it (decode, 4xx, empty list, no ids)
-  2  unreachable  no usable answer from testnet: network, timeout, 5xx, 408, 429
+  2  unreachable  no usable answer from testnet: network, timeout, 5xx, 408, 429, or a refusal
+                  of this runner's location (RestrictedJurisdictionError, HTTP 451), which says
+                  where the job ran, not what the SDK does
 
 No keys, no writes, no orders. ``NEXUS_SMOKE_BASE_URL`` points it elsewhere, for testing the
 outcomes themselves. Stdlib and the installed package only.
@@ -53,6 +55,8 @@ def main() -> NoReturn:
         client = sdk.Client(network)
     except ValueError as exc:
         finish(1, f"NEXUS_SMOKE_BASE_URL is not usable: {exc}")
+    except Exception as exc:  # the SDK cannot even build a client: nothing was read
+        finish(1, f"cannot construct the client: {type(exc).__name__}: {exc}")
     target = client.base_url
     what = f"nexus-exchange {sdk.__version__}: fetch_markets_summary against {target}"
 
@@ -62,6 +66,9 @@ def main() -> NoReturn:
     except sdk.TransportError as exc:
         finish(2, f"{target} gave no usable answer: transport error: {exc}")
     except sdk.ApiError as exc:
+        # 451 is Unavailable For Legal Reasons: the same refusal, by status.
+        if isinstance(exc, sdk.RestrictedJurisdictionError) or exc.status == 451:
+            finish(2, f"{target} refused this runner's location, so the SDK was not tested: {exc}")
         # The statuses the SDK itself marks transient: the server, not the request.
         if exc.status >= 500 or exc.status in (408, 429):
             finish(2, f"{target} gave no usable answer: {exc}")

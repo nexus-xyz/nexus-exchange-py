@@ -51,9 +51,13 @@ packages = ["src/nexus_exchange"]
 [tool.ruff]
 line-length = 100
 target-version = "py310"
-# Copied byte for byte from nexus-exchange-rs and identical in every SDK repo (ENG-18798;
-# scripts/release_gate/VENDORED.md). Reformatting them here would fork them, and the gate's
-# self-test checks the classifier's sha256, so ruff leaves exactly these files alone.
+# Release-gate files that must not take this repo's formatting (ENG-18798), for two reasons:
+# * classify_spec_change.py (with oasdiff-severity-levels.txt, which ruff does not read) is
+#   vendored from the monorepo and pinned by sha256: release_verdict.py checks it at load and the
+#   self-test checks it too (scripts/release_gate/VENDORED.md).
+# * release_verdict.py and test_release_verdict.py are kept byte-identical across the six SDK
+#   repos, so reformatting them to these settings would fork them. stub_server.py is kept the
+#   same way, and is not listed because ruff passes it as it is.
 # force-exclude: also skip them when a path is passed explicitly (an editor, `ruff format <file>`).
 force-exclude = true
 extend-exclude = [

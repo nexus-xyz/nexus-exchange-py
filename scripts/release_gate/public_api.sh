@@ -10,10 +10,11 @@
 # removed or changed item then shows up as a `-` line in the diff a reviewer reads, instead of
 # first surfacing in a user's `pip install --upgrade`.
 #
-# The listing is scripts/release_gate/public_surface.py, run inside that venv. It renders
-# signatures with `inspect`, whose output moves between Python minor versions, so the snapshot is
-# generated with one pinned version: 3.12, the one pre-publish.yml installs. public_surface.py
-# refuses any other. PYTHON (default python3) must be that version, with `build` installed:
+# The listing is scripts/release_gate/public_surface.py, run inside that venv once its tests
+# (test_public_surface.py) pass on PYTHON. It renders signatures with `inspect`, whose output
+# moves between Python minor versions, so the snapshot is generated with one pinned version: 3.12,
+# the one pre-publish.yml installs. public_surface.py refuses any other. PYTHON (default python3)
+# must be that version, with `build` installed:
 #
 #   uv venv --seed -p 3.12 /tmp/gate && uv pip install --python /tmp/gate/bin/python build
 #   PYTHON=/tmp/gate/bin/python scripts/release_gate/public_api.sh --write
@@ -34,6 +35,14 @@ cd "$root"
 
 work="$(mktemp -d)"
 trap 'rm -rf "$work"' EXIT
+
+# The lister's own tests first, on the Python the venv is made from: a broken guard fails as a
+# broken gate, not as a snapshot diff. Stdlib only, no network, nothing installed.
+if ! "$PYTHON" -I scripts/release_gate/test_public_surface.py > "$work/tests.log" 2>&1; then
+  cat "$work/tests.log"
+  echo "::error title=prepublish-surface::scripts/release_gate/test_public_surface.py failed: the lister itself is broken, so nothing was listed."
+  exit 1
+fi
 
 # What a publish would upload: release.yml runs `python -m build`, which builds the sdist and then
 # the wheel from the unpacked sdist, so a file the sdist leaves out is missing here too. Into a

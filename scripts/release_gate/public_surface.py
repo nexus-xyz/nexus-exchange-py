@@ -16,10 +16,16 @@ line per item, ``<path> <kind><detail>``:
   methods, properties, class attributes, and the attributes its ``__init__`` assigns on
   ``self``. Members a package base class defines are listed on the subclass too, so a change to
   ``ApiError`` also shows on ``RestrictedJurisdictionError``;
-* a constant's type, not its value: ``__version__`` and ``DEFAULT_USER_AGENT`` change on every
-  release, so listing values would fail every release PR.
+* a constant's type and value, and a class attribute's: dropping a member from ``CHANNELS``
+  or lowering ``FILLS_LIMIT_MAX`` moves a line. The values in ``VALUE_NOT_LISTED`` change on
+  every release, so they are listed by type only; listing them would fail every release PR.
 
-So a reshaped type fails the check, not only a dropped name.
+So a reshaped type fails the check, not only a dropped name. A listed module that does not
+import, or has no ``__all__``, and a name in ``__all__`` the module does not define, each give one
+line saying so instead of a traceback.
+
+Values render the same on every run: string hashing is randomised per process, so set members
+and dict keys are sorted before rendering, and a memory address is dropped from a repr.
 
 Rendering depends on the Python minor version (how ``inspect`` formats a signature, which
 dunders a class carries), so the snapshot is generated with one pinned version, the one
@@ -32,6 +38,7 @@ import ast
 import dataclasses
 import enum
 import functools
+import hashlib
 import importlib
 import inspect
 import re
@@ -51,6 +58,17 @@ SNAPSHOT_PYTHON = (3, 12)
 
 # A default whose repr carries a memory address (a sentinel `object()`) differs on every run.
 ADDRESS = re.compile(r" at 0x[0-9a-fA-F]+")
+
+# Constants listed by type, not value, and why: each changes on every release, or on a PR that
+# does not regenerate public-api.txt, so listing the value would fail those PRs every time.
+VALUE_NOT_LISTED = {
+    "__version__": "release-please bumps it on every release PR",
+    "DEFAULT_USER_AGENT": "carries __version__",
+    "DEFAULT_API_VERSION": "the spec tag: spec-autobump.yml bumps it and leaves public-api.txt",
+}
+# A value rendered longer than this is listed by the sha256 of its rendering: any change still
+# moves the line, and the line stays readable.
+LONGEST_VALUE = 200
 
 # Hand-written dunders are listed (`__enter__` is why `with Client()` works), except these:
 # `__init__` is the constructor line instead, and the rest are hooks the class machinery calls,
@@ -73,20 +91,52 @@ def annotation(value: Any) -> str:
     return value if isinstance(value, str) else inspect.formatannotation(value)
 
 
-def default(value: Any) -> str:
+def rendered(value: Any) -> str:
+    """`repr(value)`, the same on every run: set members and dict keys sorted, no addresses."""
+    if isinstance(value, (set, frozenset)):
+        items = ", ".join(sorted(rendered(item) for item in value))
+        if type(value) is set:
+            return f"{{{items}}}" if items else "set()"
+        return f"{type(value).__name__}({{{items}}})" if items else f"{type(value).__name__}()"
+    if type(value) is dict:
+        pairs = sorted((rendered(k), rendered(v)) for k, v in value.items())
+        return "{" + ", ".join(f"{k}: {v}" for k, v in pairs) + "}"
+    if type(value) is list:
+        return "[" + ", ".join(rendered(item) for item in value) + "]"
+    if type(value) is tuple:
+        items = [rendered(item) for item in value]
+        return "(" + ", ".join(items) + ("," if len(items) == 1 else "") + ")"
     return ADDRESS.sub("", repr(value))
 
 
-def signature(obj: Any) -> str | None:
-    """`(params) -> return`, or None for what has no signature (an exception with no `__init__`)."""
+def listed_value(name: str, value: Any) -> str:
+    """` = <value>` for a constant or class attribute, or "" for one in VALUE_NOT_LISTED."""
+    if name in VALUE_NOT_LISTED:
+        return ""
+    text = rendered(value)
+    if len(text) > LONGEST_VALUE:
+        digest = hashlib.sha256(text.encode()).hexdigest()
+        text = f"<{len(text)} chars, sha256 {digest}>"
+    return f" = {text}"
+
+
+def inspect_signature(obj: Any) -> inspect.Signature | None:
+    """`inspect.signature`, or None for what has none (an exception with no `__init__`)."""
     try:
-        sig = inspect.signature(obj)
+        return inspect.signature(obj)
     except (TypeError, ValueError):
+        return None
+
+
+def signature(obj: Any) -> str | None:
+    """`(params) -> return`, or None for what has no signature."""
+    sig = inspect_signature(obj)
+    if sig is None:
         return None
     params = [
         p.replace(
             annotation=p.empty if p.annotation is p.empty else _Text(annotation(p.annotation)),
-            default=p.empty if p.default is p.empty else _Text(default(p.default)),
+            default=p.empty if p.default is p.empty else _Text(rendered(p.default)),
         )
         for p in sig.parameters.values()
     ]
@@ -153,7 +203,8 @@ def member(path: str, cls: type, owner: type, name: str, raw: Any) -> str | None
         kind = type(raw).__name__
         if isinstance(raw, property) and raw.fset is not None:
             kind += "(settable)"
-        ret = inspect.signature(getter).return_annotation
+        sig = inspect_signature(getter)
+        ret = inspect.Signature.empty if sig is None else sig.return_annotation
         return f"{path}.{name} {kind}: {'?' if ret is inspect.Signature.empty else annotation(ret)}"
     if inspect.isfunction(raw):
         if name.startswith("__") and not from_source(raw):
@@ -168,7 +219,7 @@ def member(path: str, cls: type, owner: type, name: str, raw: Any) -> str | None
         return f"{path}.{name} nested class"
     notes = owner.__dict__.get("__annotations__", {})
     kind = annotation(notes[name]) if name in notes else type(raw).__name__
-    return f"{path}.{name} attribute: {kind}"
+    return f"{path}.{name} attribute: {kind}{listed_value(name, raw)}"
 
 
 def class_lines(path: str, cls: type) -> Iterator[str]:
@@ -195,7 +246,7 @@ def class_lines(path: str, cls: type) -> Iterator[str]:
             seen.add(field.name)
             value = ""
             if field.default is not dataclasses.MISSING:
-                value = f" = {default(field.default)}"
+                value = f" = {rendered(field.default)}"
             elif field.default_factory is not dataclasses.MISSING:
                 value = " = <factory>"
             yield f"{path}.{field.name} field: {annotation(field.type)}{value}"
@@ -229,9 +280,17 @@ def surface(modules: list[Any]) -> list[str]:
     lines: list[str] = []
     for module in modules:
         prefix = module.__name__
-        for name in module.__all__:
-            value = getattr(module, name)
+        names = getattr(module, "__all__", None)
+        if names is None:
+            # Nothing in it can be listed, which would read as every item removed: say why.
+            lines.append(f"{prefix} module has NO __all__, so none of its names are listed")
+            continue
+        for name in names:
             path = f"{prefix}.{name}"
+            if not hasattr(module, name):
+                lines.append(f"{path} MISSING: in __all__ but not defined")
+                continue
+            value = getattr(module, name)
             if isinstance(value, type):
                 lines.extend(class_lines(path, value))
             elif inspect.isfunction(value):
@@ -239,10 +298,10 @@ def surface(modules: list[Any]) -> list[str]:
                 lines.append(f"{path} {kind}{signature(value)}")
             elif typing.get_origin(value) is not None:
                 # `WsHealth = Literal[...]`: the alias's members are the API, not its typing class.
-                lines.append(f"{path} type alias = {default(value)}")
+                lines.append(f"{path} type alias = {rendered(value)}")
             else:
-                lines.append(f"{path} constant: {type(value).__name__}")
-        if len(set(module.__all__)) != len(module.__all__):
+                lines.append(f"{path} constant: {type(value).__name__}{listed_value(name, value)}")
+        if len(set(names)) != len(names):
             lines.append(f"{prefix}.__all__ has duplicate names")
     return sorted(lines)
 
