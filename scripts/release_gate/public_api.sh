@@ -86,8 +86,9 @@ if diff -u --label "$SNAPSHOT (committed)" --label "$SNAPSHOT (built $wheel)" \
   exit 0
 fi
 
-removed="$(grep -c '^-[^-]' "$work/diff.txt" || true)"
-added="$(grep -c '^+[^+]' "$work/diff.txt" || true)"
+# Past diff's two header lines (`---` and `+++`), every `-` line is gone or changed, every `+` new.
+removed="$(tail -n +3 "$work/diff.txt" | grep -c '^-' || true)"
+added="$(tail -n +3 "$work/diff.txt" | grep -c '^+' || true)"
 cat "$work/diff.txt"
 echo "::error title=prepublish-surface::The built wheel's public API differs from $SNAPSHOT: ${removed} item(s) gone or changed, ${added} new. If that is deliberate, run scripts/release_gate/public_api.sh --write and commit $SNAPSHOT in this PR, so the change is in the diff a reviewer reads. A removal or change is breaking."
 if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
