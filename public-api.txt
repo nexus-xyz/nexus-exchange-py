@@ -1,13 +1,13 @@
 nexus_exchange.ACCOUNT_CHANNELS constant: frozenset
 nexus_exchange.ACCOUNT_FUNDING_LIMIT_MAX constant: int
 nexus_exchange.AccountFees dataclass(frozen)
-nexus_exchange.AccountFees(maker_fee_bps: int, taker_fee_bps: int, tier: str, schedule: str, volume_30d: Decimal, volume_30d_estimated: bool, discounts: list[dict[str, Any]], raw: dict[str, Any]) -> None
+nexus_exchange.AccountFees(maker_fee_bps: Decimal, taker_fee_bps: Decimal, tier: str, schedule: str, volume_30d: Decimal, volume_30d_estimated: bool, discounts: list[dict[str, Any]], raw: dict[str, Any]) -> None
 nexus_exchange.AccountFees.discounts field: list[dict[str, Any]]
 nexus_exchange.AccountFees.from_dict classmethod(d: dict[str, Any]) -> AccountFees
-nexus_exchange.AccountFees.maker_fee_bps field: int
+nexus_exchange.AccountFees.maker_fee_bps field: Decimal
 nexus_exchange.AccountFees.raw field: dict[str, Any]
 nexus_exchange.AccountFees.schedule field: str
-nexus_exchange.AccountFees.taker_fee_bps field: int
+nexus_exchange.AccountFees.taker_fee_bps field: Decimal
 nexus_exchange.AccountFees.tier field: str
 nexus_exchange.AccountFees.volume_30d field: Decimal
 nexus_exchange.AccountFees.volume_30d_estimated field: bool
