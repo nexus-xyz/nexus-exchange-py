@@ -47,12 +47,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
       # The listing is rendered by this Python's `inspect`, so public-api.txt is generated with
       # the same minor version, and public_surface.py refuses any other. Bump both together.
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
       # The builder release.yml uses.
@@ -64,11 +64,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
           persist-credentials: false
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: "3.12"
       - run: pip install build
@@ -76,12 +76,19 @@ jobs:
         id: mode
         env:
           HEAD_REF: ${{ github.head_ref }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
         run: |
           set -euo pipefail
+          # HEAD is the PR's merge commit (actions/checkout's default on pull_request), and its first
+          # parent is the base it was merged onto, so this lists the PR's own changes. Diffing from the
+          # event's base.sha also listed whatever landed on the base since, which flipped unrelated PRs
+          # into the testnet read.
+          if ! git rev-parse --verify --quiet 'HEAD^2' > /dev/null; then
+            echo "::error title=prepublish-smoke::HEAD is not a merge commit, so the PR's own changes can't be listed"
+            exit 1
+          fi
           # Into a file, not a pipe: under pipefail a failed `git diff`, or one cut short by
           # `grep -q` (SIGPIPE), would read as "not a gate change" and skip the read quietly.
-          git diff --name-only "$BASE_SHA" HEAD > "$RUNNER_TEMP/changed.txt"
+          git diff --name-only 'HEAD^1' HEAD > "$RUNNER_TEMP/changed.txt"
           if [[ "$HEAD_REF" == release-please--* ]]; then
             echo "mode=release" >> "$GITHUB_OUTPUT"
           elif grep -qE '^(\.github/workflows/pre-publish\.yml|scripts/release_gate/)' "$RUNNER_TEMP/changed.txt"; then
@@ -103,7 +110,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           # The release tags: the spec pin of the published version is read at `v<version>`.
           fetch-depth: 0
@@ -121,6 +128,10 @@ jobs:
       # longer matches the one recorded in release_verdict.py. A change to the monorepo's copy is
       # not seen from here: VENDORED.md says how to refresh.
       - name: Self-test the gate
+        env:
+          # The end-to-end tests fail instead of skipping if oasdiff is missing, so this step can't
+          # go green without running the classifier.
+          RELEASE_GATE_REQUIRE_OASDIFF: "1"
         run: python3 scripts/release_gate/test_release_verdict.py
       # The runner's own python3 (3.12 on ubuntu-latest), which has the tomllib that reading
       # pyproject.toml needs.
