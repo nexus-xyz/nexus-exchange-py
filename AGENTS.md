@@ -19,6 +19,15 @@ The Python SDK for the Nexus Exchange API.
 
 - `ruff check`, `ruff format --check`, `mypy src`, and `pytest` all pass — CI
   enforces these.
+- If you changed the public API (`__all__` of `nexus_exchange` or
+  `nexus_exchange.ccxt_adapter`, or a signature, field or member of anything in
+  them), regenerate `public-api.txt` with
+  `scripts/release_gate/public_api.sh --write` and commit it in the same PR. It
+  needs a Python 3.12 with `build` installed (`PYTHON=...`, see the script's
+  header). `prepublish-surface` fails on any difference, so a removal shows up in
+  the diff a reviewer reads (ENG-18798).
+  A `-` line is a breaking change: give the PR a `!` title, because the next
+  release's `prepublish-verdict` fails a patch bump for it.
 
 ## API contract
 

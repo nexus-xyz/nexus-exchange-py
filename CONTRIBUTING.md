@@ -215,8 +215,8 @@ The version is **computed, not hand-set** (ENG-7536). Two workflows, two stages:
    approved. `release-please.yml` approves it itself (ENG-13320); if it warns
    that it could not — the built-in token may not be allowed to — click
    **Approve and run workflows** on the PR, or approve the run from
-   **Actions**. That is the only manual step, and the checks go green on their
-   own afterwards.
+   **Actions**. CI's checks then go green on their own. The pre-publish checks
+   below run in a workflow of their own and wait for that click either way.
 2. **Merging that PR is the release.** release-please tags the merge commit and
    cuts a *draft* GitHub release, then dispatches `release.yml`, which guards
    the tag against `pyproject.toml`, guards the version against the pre-1.0
@@ -226,6 +226,33 @@ The version is **computed, not hand-set** (ENG-7536). Two workflows, two stages:
    never exists.
 
 So: don't edit `version` in `pyproject.toml`, and don't push tags by hand.
+
+**Before merging, the pre-publish checks have to be green on the release PR**
+(`.github/workflows/pre-publish.yml`, ENG-18798). `release-please.yml` approves
+only CI's run, so these wait for **Approve and run workflows** on the PR. That
+click is kept manual on purpose.
+
+- `prepublish-surface`: the public API of the built wheel equals `public-api.txt`.
+- `prepublish-smoke`: the built wheel, installed into a clean venv, lists markets
+  on the public testnet. *Testnet unreachable* fails under its own name. It is not
+  a pass, so re-run the job once testnet answers.
+- `prepublish-verdict`: the proposed version fits the spec change since the last
+  version on PyPI, graded by the monorepo's classifier
+  (`scripts/release_gate/VENDORED.md`). Below 1.0 a breaking change needs a minor
+  bump. *Could not classify* fails and needs a person.
+  And the public API change since then: a line of `public-api.txt` at the
+  published version's tag that this branch no longer has is a removed or
+  reshaped export, and needs the same bump. Releases before ENG-18798 carry no
+  `public-api.txt`, so that part starts with the first release after it.
+- `spec-drift` and `drift`, as on every PR.
+
+`release.yml` refuses a release that a bot asks for unless the tag sits on the
+merge commit of a merged release PR. That guard lives in `release.yml` itself, and
+a tag push runs the copy at the tagged commit, so a bot could still tag an older
+commit without it. What closes that is a repo setting, asked for in ENG-19615:
+the `pypi` environment accepts only runs on `main`, where release-please
+dispatches the release. Once it is on, a pushed tag no longer reaches PyPI,
+whoever pushed it; publish it with **Actions → Release → Run workflow**.
 
 **Enriching the notes.** release-please generates one bullet per commit, which is
 thinner than the prose this changelog has carried. To do better, edit
