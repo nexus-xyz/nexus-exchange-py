@@ -15,6 +15,7 @@ import importlib.util
 import io
 import sys
 import sysconfig
+import tempfile
 import types
 import unittest
 from pathlib import Path
@@ -92,6 +93,20 @@ class Guards(unittest.TestCase):
         self.assertIn(f"{PACKAGE}.LIMIT constant: int = 5", lines)
         missing = [line for line in lines if line.startswith(f"{PACKAGE}.gone module MISSING: ")]
         self.assertEqual(len(missing), 1, out)
+
+    def test_a_listed_module_that_raises_on_import_is_one_missing_line(self):
+        fake = module(PACKAGE, "__all__ = []")
+        with tempfile.TemporaryDirectory() as tmp:
+            # A real file, so the import runs it: a module that fails on load, not a missing one.
+            Path(tmp, "fakepkg_boom.py").write_text("raise RuntimeError('bad config')\n")
+            with (
+                lister("fakepkg_boom"),
+                mock.patch.dict(sys.modules, {PACKAGE: fake}),
+                mock.patch.object(sys, "path", [tmp, *sys.path]),
+            ):
+                code, out, _ = run_main()
+        self.assertEqual(code, 0)
+        self.assertEqual(out, "fakepkg_boom module MISSING: RuntimeError: bad config\n")
 
     def test_a_module_without_all_is_one_line_not_a_traceback(self):
         fake = module(PACKAGE, "LIMIT = 5")

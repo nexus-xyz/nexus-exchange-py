@@ -327,13 +327,14 @@ def main() -> int:
         )
         return 2
     # A listed module that no longer imports is a removal like any other: its lines drop out of
-    # the diff and one MISSING line says why, instead of the run dying on a traceback.
+    # the diff and one MISSING line says why, instead of the run dying on a traceback. Whatever
+    # its import raises, not only ImportError: a module that fails on load is as gone to a user.
     modules, missing = [module], []
     for name in MODULES[1:]:
         try:
             modules.append(importlib.import_module(name))
-        except ImportError as err:
-            missing.append(f"{name} module MISSING: {err}")
+        except Exception as err:
+            missing.append(f"{name} module MISSING: {type(err).__name__}: {err}")
     lines = sorted(surface(modules) + missing)
     sys.stdout.write("".join(line + "\n" for line in lines))
     return 0
