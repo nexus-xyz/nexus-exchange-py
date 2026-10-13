@@ -7,9 +7,10 @@ name: Pre-publish
 #
 #   prepublish-surface  the built wheel's public API equals the committed public-api.txt
 #   prepublish-smoke    the built wheel, installed into a clean venv, reads the public testnet.
-#                       First, on every PR, its exit codes are proved: it must exit 2 against a
-#                       closed local port and 1 against an empty local stub (smoke.sh), so an
-#                       unreachable testnet or an empty answer can never read as a pass
+#                       First, on every PR, its exits 2 and 1 are exercised (smoke.sh): 2 against
+#                       a closed local port and a local stub answering 503, 1 against a stub
+#                       answering an empty list, so an outage or an empty answer never reads as
+#                       a pass. Exit 0 comes only from the real read below
 #   prepublish-verdict  the version the release PR proposes fits the spec change since the last
 #                       publish, graded by the monorepo's classifier (scripts/release_gate/VENDORED.md)
 #
@@ -19,8 +20,8 @@ name: Pre-publish
 # RUNS ON EVERY PR, with no `paths:` filter, for spec-drift's reason: a required check that is
 # skipped reports nothing, and the PR waits on it forever. What changes on a release PR (head
 # branch `release-please--*`), or on a PR that edits this gate:
-#   * smoke makes the testnet read. Elsewhere it builds, installs, imports and proves its exit
-#     codes only, and says so.
+#   * smoke makes the testnet read, the only run that can exit 0. Elsewhere it builds, installs,
+#     imports and exercises exits 2 and 1 only, and says so.
 #   * verdict is enforced on a release PR. Elsewhere it reports what the next release will need.
 # The surface check is enforced on every PR, because the PR that changes the API is where the
 # snapshot has to move.
