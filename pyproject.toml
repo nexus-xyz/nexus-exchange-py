@@ -55,14 +55,15 @@ target-version = "py310"
 # * classify_spec_change.py (with oasdiff-severity-levels.txt, which ruff does not read) is
 #   vendored from the monorepo and pinned by sha256: release_verdict.py checks it at load and the
 #   self-test checks it too (scripts/release_gate/VENDORED.md).
-# * release_verdict.py and test_release_verdict.py are kept byte-identical across the six SDK
-#   repos, so reformatting them to these settings would fork them. stub_server.py is kept the
-#   same way, and is not listed because ruff passes it as it is.
+# * release_verdict.py, test_release_verdict.py and stub_server.py are kept byte-identical across
+#   the six SDK repos, so reformatting them to these settings would fork them. Excluded whether or
+#   not ruff would flag them today, so a ruff upgrade cannot ask for an edit here alone.
 # force-exclude: also skip them when a path is passed explicitly (an editor, `ruff format <file>`).
 force-exclude = true
 extend-exclude = [
   "scripts/release_gate/classify_spec_change.py",
   "scripts/release_gate/release_verdict.py",
+  "scripts/release_gate/stub_server.py",
   "scripts/release_gate/test_release_verdict.py",
 ]
 
