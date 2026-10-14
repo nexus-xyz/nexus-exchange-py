@@ -362,7 +362,8 @@ with Client() as client:
 
     # EIP-712 → POST /agents/register. expires_at_ms / nonce / chain_id are
     # caller-supplied; expiry must fall in [now + 1d, now + 90d]. The nonce is
-    # the Unix time in ms when you sign: it must be within
+    # the Unix time in ms when you sign: it must be above the last one served
+    # for this agent key, and once freshness is enforced (ENG-21517), within
     # [now - 5 min, now + 60 s] of the server clock.
     now_ms = int(time.time() * 1000)
     registration = signer.register_agent(
