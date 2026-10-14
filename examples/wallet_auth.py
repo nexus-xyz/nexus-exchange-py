@@ -38,7 +38,8 @@ def main() -> None:
         print("session token (secret):", session.token)
 
         # EIP-712 → POST /agents/register. Expiry must be in [now+1d, now+90d];
-        # 30 days here. A monotonic millisecond timestamp is a safe nonce.
+        # 30 days here. The nonce is the signing time in Unix ms: the server
+        # refuses one older than 5 minutes or more than 60 s ahead.
         now_ms = int(time.time() * 1000)
         registration = signer.register_agent(
             agent=AGENT_ADDRESS,
