@@ -7,7 +7,8 @@ wallet-authorized endpoints:
 - :meth:`EthSigner.sign_in` — EIP-191 ``personal_sign`` over a fixed message,
   the body for ``POST /auth/login``.
 - :meth:`EthSigner.register_agent` — EIP-712 typed-data over
-  ``RegisterAgent(address agent, uint64 expiresAt, uint64 nonce)``, the body for
+  ``RegisterAgent(address agent, uint64 expiresAt, uint64 nonce)``, or with
+  ``uint32 termsVersion`` appended when a terms version is passed, the body for
   ``POST /agents/register``.
 - :meth:`EthSigner.revoke_agent` — EIP-712 typed-data over
   ``RevokeAgentKey(address account, address agent, uint64 nonce)``, the
@@ -116,17 +117,21 @@ class AgentRegistration:
     #: enforced (ENG-21517), it also refuses one older than 5 minutes or more
     #: than 60 s ahead of its clock.
     nonce: int
-    #: EIP-712 signature over ``RegisterAgent{agent, expiresAt, nonce}``,
-    #: ``0x``-prefixed (65 bytes).
+    #: EIP-712 signature over ``RegisterAgent{agent, expiresAt, nonce}``, or
+    #: over ``RegisterAgent{agent, expiresAt, nonce, termsVersion}`` when
+    #: ``terms_version`` is set, ``0x``-prefixed (65 bytes).
     signature: str
     #: Optional human-readable label.
     label: str | None = None
+    #: The terms-of-use version the wallet accepted, signed inside
+    #: ``RegisterAgent``. ``None`` is the three-field message.
+    terms_version: int | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Serialize to the JSON body the endpoint expects.
 
-        ``label`` is omitted entirely when ``None`` (matching the Rust SDK's
-        ``skip_serializing_if``).
+        ``label`` and ``terms_version`` are omitted entirely when ``None``
+        (matching the Rust SDK's ``skip_serializing_if``).
         """
         body: dict[str, Any] = {
             "wallet": self.wallet,
@@ -137,6 +142,8 @@ class AgentRegistration:
         }
         if self.label is not None:
             body["label"] = self.label
+        if self.terms_version is not None:
+            body["terms_version"] = self.terms_version
         return body
 
 
@@ -332,14 +339,29 @@ def _typed_data_digest(chain_id: int, salt: bytes, hash_struct: bytes) -> bytes:
 
 
 def _register_agent_digest(
-    agent: bytes, expires_at: int, nonce: int, chain_id: int, salt: bytes
+    agent: bytes,
+    expires_at: int,
+    nonce: int,
+    chain_id: int,
+    salt: bytes,
+    terms_version: int | None = None,
 ) -> bytes:
     """EIP-712 digest for ``RegisterAgent{agent, expiresAt, nonce}``.
 
-    Matches the server's ``agent_store::eip712::register_agent_digest``.
+    With ``terms_version``, ``uint32 termsVersion`` is appended to the struct.
+    Matches the server's ``register_agent::digest`` and ``digest_with_terms``.
     """
-    struct_type_hash = keccak(text="RegisterAgent(address agent,uint64 expiresAt,uint64 nonce)")
-    hash_struct = keccak(struct_type_hash + _address_word(agent) + _u64(expires_at) + _u64(nonce))
+    fields = _address_word(agent) + _u64(expires_at) + _u64(nonce)
+    if terms_version is None:
+        type_string = "RegisterAgent(address agent,uint64 expiresAt,uint64 nonce)"
+    else:
+        if isinstance(terms_version, bool) or not 0 <= terms_version < 1 << 32:
+            raise AuthError("terms_version must be an integer in uint32 range")
+        type_string = (
+            "RegisterAgent(address agent,uint64 expiresAt,uint64 nonce,uint32 termsVersion)"
+        )
+        fields += terms_version.to_bytes(32, "big")
+    hash_struct = keccak(keccak(text=type_string) + fields)
     return _typed_data_digest(chain_id, salt, hash_struct)
 
 
@@ -432,6 +454,7 @@ class EthSigner:
         label: str | None = None,
         *,
         network: Network | NetworkConfig | str,
+        terms_version: int | None = None,
     ) -> AgentRegistration:
         """Sign an agent-key registration with EIP-712.
 
@@ -464,11 +487,21 @@ class EthSigner:
         only on the network it was signed for. The salt comes from
         :attr:`SigningDomain.salt <nexus_exchange.SigningDomain.salt>`; a custom
         target has none and is refused.
+
+        ``terms_version`` is the terms-of-use version the user accepted. When
+        set, it is signed into the message as ``uint32 termsVersion`` and sent as
+        ``terms_version``. Once the exchange requires a terms version, a
+        registration without the current one is refused with 403
+        ``TermsVersionNotCurrent``. Until the exchange verifies this shape on
+        ``POST /agents/register`` (ENG-20416) it answers 401
+        ``signer_mismatch``, so leave it unset until then.
         """
         _require_chain_id(chain_id)
         salt = _register_salt(network)
         agent_addr = _parse_address(agent)
-        digest = _register_agent_digest(agent_addr, expires_at_ms, nonce, chain_id, salt)
+        digest = _register_agent_digest(
+            agent_addr, expires_at_ms, nonce, chain_id, salt, terms_version
+        )
         # ``unsafe_sign_hash`` signs a 32-byte prehash directly. It is "unsafe"
         # in the general sense that a raw digest hides what is being signed —
         # but here the digest is a domain-separated EIP-712 hash we computed
@@ -482,6 +515,7 @@ class EthSigner:
             nonce=nonce,
             signature=_to_0x(signed.signature),
             label=label,
+            terms_version=terms_version,
         )
 
     def revoke_agent(
