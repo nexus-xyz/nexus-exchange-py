@@ -134,6 +134,67 @@ def test_register_agent_digest_matches_known_answer() -> None:
     assert "0x" + digest.hex() == REGISTER_DIGEST
 
 
+# The four-field shape, pinned against the server's
+# `register_agent::tests::the_digest_with_terms_for_each_network_matches_its_pinned_vector`.
+@pytest.mark.parametrize(
+    ("network", "expected"),
+    [
+        (Network.MAINNET, "422802a8fc760529083693ce0a8cc3b06b2492b25723b0a4b88a26a28ec86a85"),
+        (Network.TESTNET, "92cd47c15ae7986416f4508923012810d6e12a22d8d8e7d734aa75d07025ad7d"),
+        (Network.LOCAL, "43c47ae217cff37b5e7b8aa5c0b82ede02d73953a3ea749270213296e1825dd9"),
+    ],
+)
+def test_register_agent_digest_with_terms_matches_known_answer(
+    network: Network, expected: str
+) -> None:
+    digest = _register_agent_digest(
+        _parse_address(KAT_AGENT),
+        KAT_EXPIRES_MS,
+        KAT_NONCE,
+        KAT_CHAIN_ID,
+        network.signing_domain.salt,  # type: ignore[arg-type]
+        terms_version=1,
+    )
+    assert digest.hex() == expected
+
+
+def test_register_agent_with_terms_signs_and_sends_the_version() -> None:
+    req = signer().register_agent(
+        KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID, network=KAT_NETWORK, terms_version=1
+    )
+    digest = _register_agent_digest(
+        _parse_address(KAT_AGENT),
+        KAT_EXPIRES_MS,
+        KAT_NONCE,
+        KAT_CHAIN_ID,
+        KAT_NETWORK.signing_domain.salt,  # type: ignore[arg-type]
+        terms_version=1,
+    )
+    raw = bytes.fromhex(req.signature[2:])
+    sig = keys.Signature(
+        vrs=(raw[64] - 27, int.from_bytes(raw[0:32], "big"), int.from_bytes(raw[32:64], "big"))
+    )
+    pub = sig.recover_public_key_from_msg_hash(digest)
+    assert "0x" + pub.to_canonical_address().hex() == TEST_ADDR
+    assert req.to_dict()["terms_version"] == 1
+    assert (
+        "terms_version"
+        not in signer()
+        .register_agent(KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID, network=KAT_NETWORK)
+        .to_dict()
+    )
+    for bad in (-1, 1 << 32, True):
+        with pytest.raises(AuthError):
+            signer().register_agent(
+                KAT_AGENT,
+                KAT_EXPIRES_MS,
+                KAT_NONCE,
+                KAT_CHAIN_ID,
+                network=KAT_NETWORK,
+                terms_version=bad,
+            )
+
+
 def test_register_agent_signature_matches_known_answer() -> None:
     req = signer().register_agent(
         KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID, network=KAT_NETWORK
