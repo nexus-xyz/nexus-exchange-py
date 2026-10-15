@@ -89,12 +89,13 @@ nexus_exchange.AgentRegistered.agent_address field: str
 nexus_exchange.AgentRegistered.expires_at field: int
 nexus_exchange.AgentRegistered.from_dict classmethod(d: dict[str, Any]) -> AgentRegistered
 nexus_exchange.AgentRegistration dataclass(frozen)
-nexus_exchange.AgentRegistration(wallet: str, agent: str, expires_at: int, nonce: int, signature: str, label: str | None = None) -> None
+nexus_exchange.AgentRegistration(wallet: str, agent: str, expires_at: int, nonce: int, signature: str, label: str | None = None, terms_version: int | None = None) -> None
 nexus_exchange.AgentRegistration.agent field: str
 nexus_exchange.AgentRegistration.expires_at field: int
 nexus_exchange.AgentRegistration.label field: str | None = None
 nexus_exchange.AgentRegistration.nonce field: int
 nexus_exchange.AgentRegistration.signature field: str
+nexus_exchange.AgentRegistration.terms_version field: int | None = None
 nexus_exchange.AgentRegistration.to_dict method(self) -> dict[str, Any]
 nexus_exchange.AgentRegistration.wallet field: str
 nexus_exchange.AgentRevocation dataclass(frozen)
@@ -460,7 +461,7 @@ nexus_exchange.EthSigner.__repr__ method(self) -> str
 nexus_exchange.EthSigner.address property: str
 nexus_exchange.EthSigner.checksum_address property: str
 nexus_exchange.EthSigner.from_hex classmethod(private_key: str) -> EthSigner
-nexus_exchange.EthSigner.register_agent method(self, agent: str, expires_at_ms: int, nonce: int, chain_id: int, label: str | None = None, *, network: Network | NetworkConfig | str) -> AgentRegistration
+nexus_exchange.EthSigner.register_agent method(self, agent: str, expires_at_ms: int, nonce: int, chain_id: int, label: str | None = None, *, network: Network | NetworkConfig | str, terms_version: int | None = None) -> AgentRegistration
 nexus_exchange.EthSigner.revoke_agent method(self, agent: str, nonce: int, chain_id: int, *, network: Network | NetworkConfig | str) -> AgentRevocation
 nexus_exchange.EthSigner.sign_in method(self) -> LoginRequest
 nexus_exchange.FILLS_LIMIT_MAX constant: int = 1000
