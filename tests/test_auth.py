@@ -177,9 +177,12 @@ def test_register_agent_with_terms_signs_and_sends_the_version() -> None:
     pub = sig.recover_public_key_from_msg_hash(digest)
     assert "0x" + pub.to_canonical_address().hex() == TEST_ADDR
     assert req.to_dict()["terms_version"] == 1
-    assert "terms_version" not in signer().register_agent(
-        KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID, network=KAT_NETWORK
-    ).to_dict()
+    assert (
+        "terms_version"
+        not in signer()
+        .register_agent(KAT_AGENT, KAT_EXPIRES_MS, KAT_NONCE, KAT_CHAIN_ID, network=KAT_NETWORK)
+        .to_dict()
+    )
     for bad in (-1, 1 << 32, True):
         with pytest.raises(AuthError):
             signer().register_agent(
