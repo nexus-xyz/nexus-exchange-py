@@ -7,14 +7,16 @@
 #   scripts/release_gate/smoke.sh --build-only  build, install, import, probe exits 2 and 1, no testnet
 #                                               (PRs that are not a release)
 #
-# The probes, in both modes, before any testnet read: the just-installed smoke is run three times
+# The probes, in both modes, before any testnet read: the just-installed smoke is run five times
 # with NEXUS_SMOKE_BASE_URL pointed away from testnet, each under a 180s timeout. At
 # http://127.0.0.1:1, where nothing listens, it must exit 2 (unreachable); at
 # scripts/release_gate/stub_server.py answering every request with an empty list, 1 (failed); at
 # the same stub answering 503 to everything, 2 again, so an outage never reads as failed or
-# passed. Any other code, or a timeout, fails this script with a `prepublish-smoke (outcomes)`
-# annotation. So exits 2 and 1 are exercised on every PR. Exit 0 is exercised only by the real
-# read, which runs on a release PR or a change to this gate.
+# passed; answering 451, 2 again, so a refusal of the runner's location never reads as failed;
+# answering 404, 1, so a plain 4xx is not mistaken for either of those. Any other code, or a
+# timeout, fails this script with a `prepublish-smoke (outcomes)` annotation. So exits 2 and 1
+# are exercised on every PR. Exit 0 is exercised only by the real read, which runs on a release
+# PR or a change to this gate.
 #
 # Exit codes, kept apart on purpose: 0 passed, 1 failed, 2 testnet unreachable (or refused this
 # runner's location). The workflow fails on 1 and on 2, under different names. Unreachable is not a
@@ -113,14 +115,16 @@ start_stub() {
   : > "$work/stub.port"
   "$PYTHON" -I "$root/scripts/release_gate/stub_server.py" "$@" > "$work/stub.port" 2> "$work/stub.log" &
   stub_pid=$!
+  # Wait for the first line to end (a newline in the file), or for the stub to die: a non-empty
+  # file can still hold half the port (ENG-21487).
   for _ in $(seq 50); do
-    if [ -s "$work/stub.port" ]; then
+    if [ "$(wc -l < "$work/stub.port")" -ge 1 ] || ! kill -0 "$stub_pid" 2> /dev/null; then
       break
     fi
     sleep 0.1
   done
   port="$(head -n 1 "$work/stub.port")"
-  if [ -z "$port" ]; then
+  if ! [[ "$port" =~ ^[0-9]+$ ]]; then
     cat "$work/stub.log"
     outcomes_failed "stub_server.py $* printed no port within 5s, so its outcome was not probed."
   fi
@@ -137,11 +141,17 @@ stop_stub
 start_stub 503
 probe "a stub that answers 503 to everything" "http://127.0.0.1:${port}" 2
 stop_stub
-echo "outcome probes passed: a closed port and a 503 exit 2 (unreachable), an empty answer exits 1 (failed)"
+start_stub 451
+probe "a stub that answers 451 to everything" "http://127.0.0.1:${port}" 2
+stop_stub
+start_stub 404
+probe "a stub that answers 404 to everything" "http://127.0.0.1:${port}" 1
+stop_stub
+echo "outcome probes passed: a closed port, a 503 and a 451 exit 2 (unreachable), an empty answer and a 404 exit 1 (failed)"
 
 if [ "$mode" = "build" ]; then
   echo "::notice title=prepublish-smoke (read not attempted)::Not a release PR: the wheel built, installed into a clean venv and imported, its exits 2 and 1 were exercised, and no testnet read was made. The read runs on the release PR."
-  summary "build only" "Not a release PR: \`${wheel}\` built, installed into a clean venv and imported, and its exit codes were proved against a closed port and a 503 stub (2) and an empty stub (1). No testnet read was attempted, so this is not a smoke pass."
+  summary "build only" "Not a release PR: \`${wheel}\` built, installed into a clean venv and imported, and its exit codes were proved against a closed port, a 503 stub and a 451 stub (2), and an empty stub and a 404 stub (1). No testnet read was attempted, so this is not a smoke pass."
   exit 0
 fi
 

@@ -908,6 +908,62 @@ nexus_exchange.WsToken.token field: str
 nexus_exchange.__version__ constant: str
 nexus_exchange.aiter_items function(fetch_page: Callable[[str | None], Awaitable[Page[T]]], *, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[T]
 nexus_exchange.aiter_pages function(fetch_page: Callable[[str | None], Awaitable[Page[T]]], *, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[Page[T]]
+nexus_exchange.auth.AgentRegistered dataclass(frozen)
+nexus_exchange.auth.AgentRegistered(agent_address: str, expires_at: int) -> None
+nexus_exchange.auth.AgentRegistered.agent_address field: str
+nexus_exchange.auth.AgentRegistered.expires_at field: int
+nexus_exchange.auth.AgentRegistered.from_dict classmethod(d: dict[str, Any]) -> AgentRegistered
+nexus_exchange.auth.AgentRegistration dataclass(frozen)
+nexus_exchange.auth.AgentRegistration(wallet: str, agent: str, expires_at: int, nonce: int, signature: str, label: str | None = None, terms_version: int | None = None) -> None
+nexus_exchange.auth.AgentRegistration.agent field: str
+nexus_exchange.auth.AgentRegistration.expires_at field: int
+nexus_exchange.auth.AgentRegistration.label field: str | None = None
+nexus_exchange.auth.AgentRegistration.nonce field: int
+nexus_exchange.auth.AgentRegistration.signature field: str
+nexus_exchange.auth.AgentRegistration.terms_version field: int | None = None
+nexus_exchange.auth.AgentRegistration.to_dict method(self) -> dict[str, Any]
+nexus_exchange.auth.AgentRegistration.wallet field: str
+nexus_exchange.auth.AgentRevocation dataclass(frozen)
+nexus_exchange.auth.AgentRevocation(account: str, agent: str, nonce: int, signature: str, chain_id: int) -> None
+nexus_exchange.auth.AgentRevocation.account field: str
+nexus_exchange.auth.AgentRevocation.agent field: str
+nexus_exchange.auth.AgentRevocation.chain_id field: int
+nexus_exchange.auth.AgentRevocation.headers method(self) -> dict[str, str]
+nexus_exchange.auth.AgentRevocation.nonce field: int
+nexus_exchange.auth.AgentRevocation.signature field: str
+nexus_exchange.auth.AgentSigner class
+nexus_exchange.auth.AgentSigner(private_key: PrivateKey, address: bytes, account: bytes | None = None) -> None
+nexus_exchange.auth.AgentSigner.__repr__ method(self) -> str
+nexus_exchange.auth.AgentSigner.account property: str | None
+nexus_exchange.auth.AgentSigner.address property: str
+nexus_exchange.auth.AgentSigner.from_hex classmethod(private_key: str, *, account: str | None = None) -> AgentSigner
+nexus_exchange.auth.AgentSigner.headers method(self, method: str, path: str, query: str, body: bytes, timestamp_ms: int) -> dict[str, str]
+nexus_exchange.auth.AgentSigner.next_nonce method(self, floor: int) -> int
+nexus_exchange.auth.AgentSigner.sign_request method(self, method: str, path: str, query: str, body: bytes, timestamp_ms: int, nonce: int) -> dict[str, str]
+nexus_exchange.auth.AgentSigner.sign_trading_action method(self, action: tuple[str, dict[str, Any]], *, domain: str, timestamp_ms: int, nonce: int, acting_account: str | None = None) -> dict[str, str]
+nexus_exchange.auth.EthSigner class
+nexus_exchange.auth.EthSigner(private_key: PrivateKey, address: bytes) -> None
+nexus_exchange.auth.EthSigner.__repr__ method(self) -> str
+nexus_exchange.auth.EthSigner.address property: str
+nexus_exchange.auth.EthSigner.checksum_address property: str
+nexus_exchange.auth.EthSigner.from_hex classmethod(private_key: str) -> EthSigner
+nexus_exchange.auth.EthSigner.register_agent method(self, agent: str, expires_at_ms: int, nonce: int, chain_id: int, label: str | None = None, *, network: Network | NetworkConfig | str, terms_version: int | None = None) -> AgentRegistration
+nexus_exchange.auth.EthSigner.revoke_agent method(self, agent: str, nonce: int, chain_id: int, *, network: Network | NetworkConfig | str) -> AgentRevocation
+nexus_exchange.auth.EthSigner.sign_in method(self) -> LoginRequest
+nexus_exchange.auth.LoginRequest dataclass(frozen)
+nexus_exchange.auth.LoginRequest(message: str, signature: str) -> None
+nexus_exchange.auth.LoginRequest.message field: str
+nexus_exchange.auth.LoginRequest.signature field: str
+nexus_exchange.auth.LoginRequest.to_dict method(self) -> dict[str, Any]
+nexus_exchange.auth.LoginResponse dataclass(frozen)
+nexus_exchange.auth.LoginResponse(token: str, address: str) -> None
+nexus_exchange.auth.LoginResponse.__repr__ method(self) -> str
+nexus_exchange.auth.LoginResponse.address field: str
+nexus_exchange.auth.LoginResponse.from_dict classmethod(d: dict[str, Any]) -> LoginResponse
+nexus_exchange.auth.LoginResponse.token field: str
+nexus_exchange.auth.SIGN_IN_MESSAGE constant: str = 'Sign in to Nexus Exchange'
+nexus_exchange.auth.agent_canonical_string function(method: str, path: str, query: str, body: bytes, timestamp_ms: int, nonce: int) -> str
+nexus_exchange.auth.trading_action function(method: str, path: str, query: str, body: bytes) -> tuple[str, dict[str, Any]] | None
 nexus_exchange.ccxt_adapter.NexusExchange class
 nexus_exchange.ccxt_adapter.NexusExchange(*, network: Network | NetworkConfig | str | None = None, base_url: str | None = None, client: Client | None = None) -> None
 nexus_exchange.ccxt_adapter.NexusExchange.__enter__ method(self) -> NexusExchange
@@ -925,5 +981,15 @@ nexus_exchange.ccxt_adapter.NexusExchange.markets attribute: dict[str, dict[str,
 nexus_exchange.ccxt_adapter.NexusExchange.symbols attribute: list[str] (set in __init__)
 nexus_exchange.iter_items function(fetch_page: Callable[[str | None], Page[T]], *, cursor: str | None = None, max_pages: int | None = None) -> Iterator[T]
 nexus_exchange.iter_pages function(fetch_page: Callable[[str | None], Page[T]], *, cursor: str | None = None, max_pages: int | None = None) -> Iterator[Page[T]]
+nexus_exchange.pagination.NEXT_CURSOR_HEADER constant: str = 'x-next-cursor'
+nexus_exchange.pagination.Page dataclass(frozen)(typing.Generic)
+nexus_exchange.pagination.Page(items: list[T], next_cursor: str | None = None) -> None
+nexus_exchange.pagination.Page.is_last property: bool
+nexus_exchange.pagination.Page.items field: list[T]
+nexus_exchange.pagination.Page.next_cursor field: str | None = None
+nexus_exchange.pagination.aiter_items function(fetch_page: Callable[[str | None], Awaitable[Page[T]]], *, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[T]
+nexus_exchange.pagination.aiter_pages function(fetch_page: Callable[[str | None], Awaitable[Page[T]]], *, cursor: str | None = None, max_pages: int | None = None) -> AsyncIterator[Page[T]]
+nexus_exchange.pagination.iter_items function(fetch_page: Callable[[str | None], Page[T]], *, cursor: str | None = None, max_pages: int | None = None) -> Iterator[T]
+nexus_exchange.pagination.iter_pages function(fetch_page: Callable[[str | None], Page[T]], *, cursor: str | None = None, max_pages: int | None = None) -> Iterator[Page[T]]
 nexus_exchange.round_price function(market: Market, price: Decimal, side: str) -> Decimal
 nexus_exchange.round_size function(market: Market, size: Decimal) -> Decimal
