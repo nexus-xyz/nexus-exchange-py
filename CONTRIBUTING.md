@@ -210,7 +210,7 @@ The version is **computed, not hand-set** (ENG-7536). Two workflows, two stages:
    new `CHANGELOG.md` section. Nothing ships while it sits open. It needs a
    review and green checks like any other PR. release-please opens it as the
    `nexus-release-bot2` App (ENG-22238), which needs the repo secrets
-   `RELEASE_BOT_APP_ID` and `RELEASE_BOT_PRIVATE_KEY`. Its CI and pre-publish
+   `RELEASE_BOT_CLIENT_ID` and `RELEASE_BOT_PRIVATE_KEY`. Its CI and pre-publish
    runs should then start on their own. The first App release PR may still
    park in *action_required*, since the App has no merged commit here yet; if
    so, click **Approve and run workflows** once. Without both secrets the job
