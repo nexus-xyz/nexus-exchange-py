@@ -2,14 +2,16 @@
 """Tests for public_surface.py's guards and rendering (ENG-18798). Stdlib only.
 
 No network and no installed SDK: every module listed here is built in the test, and main() is
-pointed at those through sys.modules. public_api.sh runs this file with the interpreter it lists
-the surface with, before it lists it, so a broken lister fails as a broken lister.
+pointed at those through sys.modules. The one exception, ``Coverage``, reads the package's source
+under src/ as text, without importing it. public_api.sh runs this file with the interpreter it
+lists the surface with, before it lists it, so a broken lister fails as a broken lister.
 
 Run: python3 scripts/release_gate/test_public_surface.py
 """
 
 from __future__ import annotations
 
+import ast
 import contextlib
 import importlib.util
 import io
@@ -213,6 +215,93 @@ class Bases(unittest.TestCase):
             lines = S.surface([module(PACKAGE, source)])
         self.assertIn(f"{PACKAGE}.Client class(_Core)", lines)
         self.assertIn(f"{PACKAGE}.Client.ping method(self) -> None", lines)
+
+
+def public_modules(package_dir: Path, package: str) -> set[str]:
+    """Every module under `package_dir` whose dotted path has no `_`-prefixed part, the package
+    and its subpackages included. From the files, not by import: the SDK's dependencies are not
+    installed where this runs."""
+    found: set[str] = set()
+    for path in package_dir.rglob("*.py"):
+        parts = list(path.relative_to(package_dir).with_suffix("").parts)
+        if parts[-1] == "__init__":
+            parts.pop()
+        if not any(part.startswith("_") for part in parts):
+            found.add(".".join([package, *parts]))
+    return found
+
+
+def public_names(path: Path) -> set[str]:
+    """The module's `__all__`, or without one, every public name it defines at top level."""
+    tree = ast.parse(path.read_text())
+    defined: set[str] = set()
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            targets = node.targets
+        elif isinstance(node, ast.AnnAssign):
+            targets = [node.target]
+        elif isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            defined.add(node.name)
+            continue
+        else:
+            continue
+        for target in targets:
+            if isinstance(target, ast.Name):
+                if target.id == "__all__":
+                    return set(ast.literal_eval(node.value))
+                defined.add(target.id)
+    return {name for name in defined if not name.startswith("_")}
+
+
+class Coverage(unittest.TestCase):
+    """MODULES and COVERED_BY_PACKAGE against the real package's source (ENG-21487)."""
+
+    PACKAGE_DIR = HERE.parents[1] / "src" / S.PACKAGE
+
+    def source(self, module_name: str) -> Path:
+        parts = module_name.split(".")[1:]
+        file = self.PACKAGE_DIR.joinpath(*parts)
+        return file / "__init__.py" if file.is_dir() else file.with_suffix(".py")
+
+    def test_the_walk_skips_private_modules_and_finds_subpackages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            for rel in ("__init__.py", "a.py", "_b.py", "sub/__init__.py", "sub/c.py", "_p/d.py"):
+                Path(tmp, rel).parent.mkdir(parents=True, exist_ok=True)
+                Path(tmp, rel).write_text("")
+            self.assertEqual(
+                public_modules(Path(tmp), PACKAGE),
+                {PACKAGE, f"{PACKAGE}.a", f"{PACKAGE}.sub", f"{PACKAGE}.sub.c"},
+            )
+
+    def test_every_public_module_is_listed_or_covered_by_the_package(self):
+        found = public_modules(self.PACKAGE_DIR, S.PACKAGE)
+        unaccounted = sorted(found - set(S.MODULES) - set(S.COVERED_BY_PACKAGE))
+        self.assertEqual(
+            unaccounted,
+            [],
+            "public modules in neither MODULES nor COVERED_BY_PACKAGE (public_surface.py): "
+            "removing them would pass the surface check",
+        )
+
+    def test_modules_and_covered_by_package_name_only_modules_that_exist(self):
+        found = public_modules(self.PACKAGE_DIR, S.PACKAGE)
+        self.assertEqual(sorted(set(S.MODULES) - found), [], "MODULES names a missing module")
+        self.assertEqual(
+            sorted(set(S.COVERED_BY_PACKAGE) - found),
+            [],
+            "COVERED_BY_PACKAGE names a missing module",
+        )
+        self.assertEqual(sorted(set(S.MODULES) & set(S.COVERED_BY_PACKAGE)), [])
+
+    def test_a_module_covered_by_the_package_has_no_name_the_package_does_not_re_export(self):
+        exported = public_names(self.source(S.PACKAGE))
+        for name in S.COVERED_BY_PACKAGE:
+            with self.subTest(module=name):
+                self.assertEqual(
+                    sorted(public_names(self.source(name)) - exported),
+                    [],
+                    f"not in {S.PACKAGE}.__all__, so not listed: move {name} to MODULES",
+                )
 
 
 if __name__ == "__main__":

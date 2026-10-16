@@ -6,9 +6,12 @@ into a clean venv, and runs this file there with ``python -I``. It refuses to ru
 but that install, so the listing is what a ``pip install nexus-exchange`` user gets, not the source
 tree.
 
-The surface is the ``__all__`` of each module in ``MODULES``: the package itself, and
-``nexus_exchange.ccxt_adapter``, which the README tells users to import from directly. One sorted
-line per item, ``<path> <kind><detail>``:
+The surface is the ``__all__`` of each module in ``MODULES``: the package itself,
+``nexus_exchange.ccxt_adapter``, which the README tells users to import from directly, and the
+two modules whose ``__all__`` holds names the package does not re-export (``auth`` and
+``pagination``). Every other public module is in ``COVERED_BY_PACKAGE``, and
+``test_public_surface.py`` checks that the two between them name every one. One sorted line per
+item, ``<path> <kind><detail>``:
 
 * every name with its kind (class, dataclass, enum, exception, function, type alias,
   constant);
@@ -53,7 +56,27 @@ from typing import Any
 PACKAGE = "nexus_exchange"
 # Every module a user is told to import from. A public module missing here is invisible to the
 # check: deleting it would pass (ENG-18798 review).
-MODULES = (PACKAGE, f"{PACKAGE}.ccxt_adapter")
+MODULES = (
+    PACKAGE,
+    f"{PACKAGE}.auth",
+    f"{PACKAGE}.ccxt_adapter",
+    f"{PACKAGE}.pagination",
+)
+# The other public modules, not listed: every public name each defines is re-exported by the
+# package, so the package's own lines already carry it, and listing the module too would list it
+# twice. test_public_surface.py walks the package (ENG-21487) and fails on a public module in
+# neither tuple, on an entry in either that no longer exists (a user's `from nexus_exchange.client
+# import Client` would break), and on a module here with a public name the package does not
+# re-export: that one belongs in MODULES.
+COVERED_BY_PACKAGE = (
+    f"{PACKAGE}.async_client",
+    f"{PACKAGE}.client",
+    f"{PACKAGE}.errors",
+    f"{PACKAGE}.markets",
+    f"{PACKAGE}.networks",
+    f"{PACKAGE}.types",
+    f"{PACKAGE}.ws",
+)
 SNAPSHOT_PYTHON = (3, 12)
 
 # A default whose repr carries a memory address (a sentinel `object()`) differs on every run.
