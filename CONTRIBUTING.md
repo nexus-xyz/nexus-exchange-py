@@ -208,15 +208,14 @@ The version is **computed, not hand-set** (ENG-7536). Two workflows, two stages:
    (`pyproject.toml`, `.release-please-manifest.json`, and the
    `_resolve_version` fallback literal in `src/nexus_exchange/client.py`) plus a
    new `CHANGELOG.md` section. Nothing ships while it sits open. It needs a
-   review and green checks like any other PR — with one wrinkle: this repo
-   requires approval before a first-time contributor's workflows run, and
-   `github-actions[bot]` counts as one on every release PR, so its CI run parks
-   in *action_required* and the PR reports no checks at all until that run is
-   approved. `release-please.yml` approves it itself (ENG-13320); if it warns
-   that it could not — the built-in token may not be allowed to — click
-   **Approve and run workflows** on the PR, or approve the run from
-   **Actions**. CI's checks then go green on their own. The pre-publish checks
-   below run in a workflow of their own and wait for that click either way.
+   review and green checks like any other PR. release-please opens it as the
+   `nexus-release-bot2` App (ENG-22238), so its CI and pre-publish runs start
+   on their own. Without the `RELEASE_BOT_*` secrets it falls back to the
+   built-in token, which the org no longer lets open PRs; and on PRs that token
+   did open, `github-actions[bot]` tripped the first-time-contributor approval
+   policy, so runs parked in *action_required*. `release-please.yml` still
+   approves CI's run in that case (ENG-13320); the pre-publish run waits for
+   **Approve and run workflows** on the PR.
 2. **Merging that PR is the release.** release-please tags the merge commit and
    cuts a *draft* GitHub release, then dispatches `release.yml`, which guards
    the tag against `pyproject.toml`, guards the version against the pre-1.0
@@ -228,9 +227,8 @@ The version is **computed, not hand-set** (ENG-7536). Two workflows, two stages:
 So: don't edit `version` in `pyproject.toml`, and don't push tags by hand.
 
 **Before merging, the pre-publish checks have to be green on the release PR**
-(`.github/workflows/pre-publish.yml`, ENG-18798). `release-please.yml` approves
-only CI's run, so these wait for **Approve and run workflows** on the PR. That
-click is kept manual on purpose.
+(`.github/workflows/pre-publish.yml`, ENG-18798). On the App's release PR they
+start on their own; see step 1 for the fallback case.
 
 - `prepublish-surface`: the public API of the built wheel equals `public-api.txt`.
 - `prepublish-smoke`: the built wheel, installed into a clean venv, lists markets

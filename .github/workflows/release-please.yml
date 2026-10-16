@@ -61,14 +61,33 @@ jobs:
       contents: write # release commit, tag, draft release
       pull-requests: write # open/update the release PR
       actions: write # approve the release PR's CI run, dispatch release.yml
+    env:
+      HAS_RELEASE_BOT: ${{ secrets.RELEASE_BOT_APP_ID != '' }}
     steps:
+      # Since 10-07 the org no longer lets GITHUB_TOKEN open PRs ("GitHub Actions
+      # is not permitted to create or approve pull requests"). An App token is not
+      # subject to that setting, and its PRs run CI without being held for
+      # approval. Same App as -go, -cli and -mcp (nexus-release-bot2, ENG-22238).
+      # Falls back to GITHUB_TOKEN until the repo has the App secrets.
+      #
+      # Only the two release-please invocations use it. The tag creation and the
+      # release.yml dispatch stay on GITHUB_TOKEN on purpose: a tag pushed by the
+      # App WOULD start release.yml (it triggers on tag pushes), and the dispatch
+      # would then start it a second time.
+      - uses: actions/create-github-app-token@v3
+        id: app-token
+        if: env.HAS_RELEASE_BOT == 'true'
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+
       # Cuts the release ONLY — never opens a PR. The two are deliberately split
       # across two invocations; see the PR step near the end of this job for why
       # combining them opens a phantom release PR every single release.
       - uses: googleapis/release-please-action@v5
         id: release
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           skip-github-pull-request: true
@@ -128,7 +147,7 @@ jobs:
         id: release_pr
         if: ${{ steps.release.outputs.release_created != 'true' }}
         with:
-          token: ${{ secrets.GITHUB_TOKEN }}
+          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           skip-github-release: true
