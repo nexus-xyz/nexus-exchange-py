@@ -64,28 +64,6 @@ jobs:
     env:
       HAS_RELEASE_BOT: ${{ secrets.RELEASE_BOT_APP_ID != '' && secrets.RELEASE_BOT_PRIVATE_KEY != '' }}
     steps:
-      # Since 10-07 the org no longer lets GITHUB_TOKEN open PRs ("GitHub Actions
-      # is not permitted to create or approve pull requests"). An App token is not
-      # subject to that setting, and its PRs normally run CI without being held
-      # for approval. Same App as -go, -cli and -mcp (nexus-release-bot2, ENG-22238).
-      # Falls back to GITHUB_TOKEN until the repo has both RELEASE_BOT_APP_ID and
-      # RELEASE_BOT_PRIVATE_KEY.
-      #
-      # Only the release-PR invocation (`release_pr`, below) uses it: opening a PR
-      # is the one thing GITHUB_TOKEN is no longer allowed to do. Everything that
-      # touches the release and its tag stays on GITHUB_TOKEN on purpose. A tag
-      # pushed by the App WOULD start release.yml (it triggers on tag pushes), and
-      # the dispatch below would then start it a second time.
-      - uses: actions/create-github-app-token@v3
-        id: app-token
-        if: env.HAS_RELEASE_BOT == 'true'
-        with:
-          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
-          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
-          # No wider than this job's own grant for the release PR.
-          permission-contents: write
-          permission-pull-requests: write
-
       # Cuts the release ONLY — never opens a PR. The two are deliberately split
       # across two invocations; see the PR step near the end of this job for why
       # combining them opens a phantom release PR every single release.
@@ -130,6 +108,33 @@ jobs:
             --ref "$GITHUB_REF_NAME" \
             -f "tag=${TAG}"
           echo "Dispatched release.yml for ${TAG}."
+
+      # The App token for the release-PR invocation below, and nothing else.
+      # Since 10-07 the org no longer lets GITHUB_TOKEN open PRs ("GitHub Actions
+      # is not permitted to create or approve pull requests"). An App token is not
+      # subject to that setting, and its PRs normally run CI without being held
+      # for approval. Same App as -go, -cli and -mcp (nexus-release-bot2, ENG-22238).
+      # Falls back to GITHUB_TOKEN until the repo has both RELEASE_BOT_APP_ID and
+      # RELEASE_BOT_PRIVATE_KEY.
+      #
+      # Opening a PR is the one thing GITHUB_TOKEN is no longer allowed to do.
+      # Everything that touches the release and its tag (above) stays on
+      # GITHUB_TOKEN on purpose: a tag pushed by the App WOULD start release.yml
+      # (it triggers on tag pushes), and the dispatch would then start it a
+      # second time. Minted here rather than first in the job so that a failing
+      # token step (rotated key, App uninstalled) can't stop a release from
+      # being cut and tagged; only the release PR waits on it.
+      - uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: app-token
+        if: env.HAS_RELEASE_BOT == 'true' && steps.release.outputs.release_created != 'true'
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          # Ask for only what the release PR needs. Without these the token gets
+          # every permission the App's installation has; the job's own
+          # `permissions:` block does not cap an App token.
+          permission-contents: write
+          permission-pull-requests: write
 
       # Manages the standing release PR ONLY — never cuts a release.
       #
