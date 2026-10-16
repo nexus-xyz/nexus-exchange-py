@@ -26,10 +26,12 @@ name: Pre-publish
 # The surface check is enforced on every PR, because the PR that changes the API is where the
 # snapshot has to move.
 #
-# The release PR's runs of this workflow start on their own: release-please opens the PR as the
-# nexus-release-bot2 App (ENG-22238), whose PRs this repo's approval policy does not hold. Under
-# the GITHUB_TOKEN fallback they park in `action_required`, and release-please.yml approves only
-# ci.yml's run (ENG-13320), so this one would wait for "Approve and run workflows" on the PR.
+# The release PR's runs of this workflow should start on their own: release-please opens the PR
+# as the nexus-release-bot2 App (ENG-22238). Whenever a run is held instead (the App's first
+# release PR here may be, before it has a merged commit), release-please.yml approves ci.yml's run
+# and no other (ENG-13320), so this one waits for "Approve and run workflows" on the PR. That
+# click is kept manual on purpose: approving a run grants a runner, so the automation approves the
+# one workflow it has to and no more.
 
 on:
   pull_request:

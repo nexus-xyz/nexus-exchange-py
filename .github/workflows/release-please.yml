@@ -62,24 +62,29 @@ jobs:
       pull-requests: write # open/update the release PR
       actions: write # approve the release PR's CI run, dispatch release.yml
     env:
-      HAS_RELEASE_BOT: ${{ secrets.RELEASE_BOT_APP_ID != '' }}
+      HAS_RELEASE_BOT: ${{ secrets.RELEASE_BOT_APP_ID != '' && secrets.RELEASE_BOT_PRIVATE_KEY != '' }}
     steps:
       # Since 10-07 the org no longer lets GITHUB_TOKEN open PRs ("GitHub Actions
       # is not permitted to create or approve pull requests"). An App token is not
-      # subject to that setting, and its PRs run CI without being held for
-      # approval. Same App as -go, -cli and -mcp (nexus-release-bot2, ENG-22238).
-      # Falls back to GITHUB_TOKEN until the repo has the App secrets.
+      # subject to that setting, and its PRs normally run CI without being held
+      # for approval. Same App as -go, -cli and -mcp (nexus-release-bot2, ENG-22238).
+      # Falls back to GITHUB_TOKEN until the repo has both RELEASE_BOT_APP_ID and
+      # RELEASE_BOT_PRIVATE_KEY.
       #
-      # Only the two release-please invocations use it. The tag creation and the
-      # release.yml dispatch stay on GITHUB_TOKEN on purpose: a tag pushed by the
-      # App WOULD start release.yml (it triggers on tag pushes), and the dispatch
-      # would then start it a second time.
+      # Only the release-PR invocation (`release_pr`, below) uses it: opening a PR
+      # is the one thing GITHUB_TOKEN is no longer allowed to do. Everything that
+      # touches the release and its tag stays on GITHUB_TOKEN on purpose. A tag
+      # pushed by the App WOULD start release.yml (it triggers on tag pushes), and
+      # the dispatch below would then start it a second time.
       - uses: actions/create-github-app-token@v3
         id: app-token
         if: env.HAS_RELEASE_BOT == 'true'
         with:
           app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
           private-key: ${{ secrets.RELEASE_BOT_PRIVATE_KEY }}
+          # No wider than this job's own grant for the release PR.
+          permission-contents: write
+          permission-pull-requests: write
 
       # Cuts the release ONLY — never opens a PR. The two are deliberately split
       # across two invocations; see the PR step near the end of this job for why
@@ -87,7 +92,7 @@ jobs:
       - uses: googleapis/release-please-action@v5
         id: release
         with:
-          token: ${{ steps.app-token.outputs.token || secrets.GITHUB_TOKEN }}
+          token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
           skip-github-pull-request: true
