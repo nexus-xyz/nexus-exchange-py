@@ -8,9 +8,10 @@ name: Pre-publish
 #   prepublish-surface  the built wheel's public API equals the committed public-api.txt
 #   prepublish-smoke    the built wheel, installed into a clean venv, reads the public testnet.
 #                       First, on every PR, its exits 2 and 1 are exercised (smoke.sh): 2 against
-#                       a closed local port and a local stub answering 503, 1 against a stub
-#                       answering an empty list, so an outage or an empty answer never reads as
-#                       a pass. Exit 0 comes only from the real read below
+#                       a closed local port and local stubs answering 503 and 451, 1 against stubs
+#                       answering an empty list and 404, so an outage, a refused location or an
+#                       empty answer never reads as a pass. Exit 0 comes only from the real read
+#                       below
 #   prepublish-verdict  the version the release PR proposes fits the spec change since the last
 #                       publish, graded by the monorepo's classifier (scripts/release_gate/VENDORED.md)
 #
@@ -89,8 +90,10 @@ jobs:
           # parent is the base it was merged onto, so this lists the PR's own changes. Diffing from the
           # event's base.sha also listed whatever landed on the base since, which flipped unrelated PRs
           # into the testnet read.
+          # Failing here is deliberate (ENG-21487): a PR with conflicts can't merge anyway, and
+          # guessing its changes from base.sha is what this step replaced.
           if ! git rev-parse --verify --quiet 'HEAD^2' > /dev/null; then
-            echo "::error title=prepublish-smoke::HEAD is not a merge commit, or the checkout is shallow (this job needs fetch-depth: 0), so the PR's own changes can't be listed"
+            echo "::error title=prepublish-smoke::HEAD is not a merge commit, so the PR's own changes can't be listed. Either the PR has merge conflicts with its base (GitHub makes no merge commit for it: resolve them and the checks run again), or the checkout is shallow (this job needs fetch-depth: 0)"
             exit 1
           fi
           # Into a file, not a pipe: under pipefail a failed `git diff`, or one cut short by
@@ -122,6 +125,11 @@ jobs:
           # The release tags: the spec pin of the published version is read at `v<version>`.
           fetch-depth: 0
           persist-credentials: false
+      # Pinned rather than the runner's own python3: release_verdict.py reads pyproject.toml with
+      # `tomllib`, which needs 3.11 or later, and an image update must not take that away.
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
       - name: Install oasdiff ${{ env.OASDIFF_VERSION }}
         run: |
           set -euo pipefail
@@ -140,8 +148,6 @@ jobs:
           # go green without running the classifier.
           RELEASE_GATE_REQUIRE_OASDIFF: "1"
         run: python3 scripts/release_gate/test_release_verdict.py
-      # The runner's own python3 (3.12 on ubuntu-latest), which has the tomllib that reading
-      # pyproject.toml needs.
       - name: Version proposed vs the spec change since the last publish
         env:
           HEAD_REF: ${{ github.head_ref }}
