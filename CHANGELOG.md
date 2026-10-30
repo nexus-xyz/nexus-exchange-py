@@ -15,6 +15,28 @@ future release below it. To improve the wording of a release, edit
 below `0.4.0` predate this and follow
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.9.0](https://github.com/nexus-xyz/nexus-exchange-py/compare/v0.8.0...v0.9.0) (2026-10-30)
+
+
+### ⚠ BREAKING CHANGES
+
+* **types:** AccountFees.maker_fee_bps and AccountFees.taker_fee_bps are now decimal.Decimal, not int, and can be fractional (2.8). Arithmetic with int still works. Code that mixes them with float, checks isinstance(x, int), or formats them with an integer format spec such as f"{x:d}" must change: use Decimal arithmetic, or float(x) for display only.
+
+### Features
+
+* **auth:** sign RegisterAgent with the accepted terms version (ENG-21315) ([#117](https://github.com/nexus-xyz/nexus-exchange-py/issues/117)) ([58f621c](https://github.com/nexus-xyz/nexus-exchange-py/commit/58f621c4b4cfdbc0c342f1663e779b0126187103))
+
+
+### Bug Fixes
+
+* **types:** decode fractional fee rates (ENG-21111) ([#114](https://github.com/nexus-xyz/nexus-exchange-py/issues/114)) ([6c61fda](https://github.com/nexus-xyz/nexus-exchange-py/commit/6c61fda8e970f5fd1f48acf4f1b801bc1439853b))
+
+
+### Documentation
+
+* **auth:** the agent register nonce is the signing time (ENG-21898) ([#115](https://github.com/nexus-xyz/nexus-exchange-py/issues/115)) ([f57cb0c](https://github.com/nexus-xyz/nexus-exchange-py/commit/f57cb0cd0809405203fdcc584888d5a587e8d57c))
+* mark the repository archived (ENG-22796) ([#123](https://github.com/nexus-xyz/nexus-exchange-py/issues/123)) ([316cccf](https://github.com/nexus-xyz/nexus-exchange-py/commit/316cccf73ed115a3cf4bfd083b06202fcff6b390))
+
 ## [0.8.0](https://github.com/nexus-xyz/nexus-exchange-py/compare/v0.7.0...v0.8.0) (2026-10-09)
 
 
